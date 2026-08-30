@@ -260,3 +260,28 @@ Stage Summary:
 - Role baru PRODUCTION dengan akses tepat (Dashboard/Brief/Produksi/Petunjuk; tidak bisa keuangan/inbox/kanal).
 - Catatan tooling: klik koordinat agent-browser sering meleset pada Radix (tab/select/nav) — workaround sekuens pointerdown/up/click via eval; bukan bug aplikasi.
 - Saran lanjutan: form upload multiple file, preview file gambar di portal, approval estimasi oleh manajer sebelum penawaran, export PDF quotation/invoice.
+
+---
+Task ID: 13 (main orchestrator)
+Agent: main (orchestrator)
+Task: UX Produksi — deliverable dibuat dari DETAIL PROYEK (per milestone), bukan modul file terpisah
+
+Work Log:
+- Keluhan user: anak produksi kesulitan karena harus membuka tab "File & Google Drive" lalu memilih proyek dari dropdown. Harusnya: masuk ke detail proyek → di sana buat deliverable berdasarkan milestone.
+- production-view.tsx di-refactor besar:
+  - Komponen baru `ProjectDetailView` (drill-down): tombol "Detail Proyek" pada tiap kartu daftar → panel detail (header kembali + kode/status/brand, progress proyek + N/M milestone, meta budget/perusahaan/deadline/invoice, BriefBox, lalu bagian inti "Milestone & Deliverable").
+  - Bagian "Milestone & Deliverable": tiap milestone = grup berisi baris toggle status (checkbox siklus, badge status MS_LABEL, bobot %), badge "N file", dan tombol "+" (aria-label per milestone) untuk tambah file/tautan TERKAIT milestone itu; deliverable milik milestone ditampilkan di bawah barisnya; grup "Tanpa milestone" (border-dashed) menampung deliverable tanpa/gagal cocok milestone; tombol "Tambah File / Tautan" di header card.
+  - Dialog Kirim File/Link kini punya mode project-locked: dibuka dari detail → proyek dikunci (tampil statis "PRJ-XXXX · nama", select disembunyikan), judul dialog "Kirim File / Link — PRJ-XXXX", milestone terisi otomatis bila dibuka dari tombol "+" milestone; dari tab file global tombol jadi "Kirim ke Proyek Lain" (select proyek tetap ada).
+  - Komponen `DeliverableRow` dipakai bersama (overview & detail); responsif: mobile konten atas + aksi (Buka Tautan/Unduh/Hapus) di baris bawah, desktop baris tunggal; nama break-words.
+  - Tab "File & Google Drive" tetap jadi overview semua file; header grup proyek dapat tombol "Detail" → pindah ke tab Proyek + buka detail proyek tsb (navigasi silang).
+  - Kartu proyek di daftar: badge "N file" per milestone + footer "N file/tautan produksi" + tombol "Detail Proyek"; judul milestone sm:truncate (wrap di mobile).
+  - Mutasi refresh ganda: submit/hapus deliverable → Promise.all([fetchDeliverables(), load()]) agar detail (payload projects) & overview file sinkron.
+- E2E browser (produksi@udp.co.id): daftar → Detail Proyek PRJ-0002 ✓; tombol "+" milestone "Review & Revisi" → dialog proyek terkunci + milestone terisi ✓; kirim tautan "Mockup Final Booth Revisi 2" → langsung tampil di bawah milestone tsb ("baru saja") ✓; toggle milestone IN_PROGRESS→DONE→PENDING→IN_PROGRESS dipulihkan ✓; tombol Kembali ✓; tab file → tombol Detail grup → detail ✓; login klien@kopikita.id → Portal tampil "Mockup Final Booth Revisi 2" + tombol Buka ✓.
+- Mobile 390px: tanpa overflow horizontal; screenshot sebelum/sesudah fix DeliverableRow (aksi pindah ke bawah di mobile); milestone wrap rapi.
+- tsc 0 error; eslint file bersih; console browser bersih; dev.log tanpa error.
+- Catatan tooling: klik Radix (tab/nav) butuh sekuens mousedown+mouseup+click + focus via eval — bukan bug aplikasi.
+
+Stage Summary:
+- Alur kerja produksi kini berpusat di DETAIL PROYEK: pilih proyek → lihat brief + milestone → toggle status milestone → tambah file/link per milestone (proyek terkunci, milestone terisi otomatis) → file langsung terlihat di overview & Portal Klien. Tab file tinggal overview lintas proyek dengan jalan pintas "Detail".
+- File berubah: src/components/views/production-view.tsx (satu-satunya; kontrak API/tipe tidak diubah).
+- Saran lanjutan: multi-file upload, preview thumbnail gambar di detail, komentar klien per deliverable di portal.

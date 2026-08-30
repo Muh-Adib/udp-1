@@ -1,0 +1,1095 @@
+     1→"use client";
+     2→
+     3→import { useCallback, useEffect, useState } from "react";
+     4→import {
+     5→  AlertTriangle,
+     6→  Building2,
+     7→  CalendarDays,
+     8→  CheckCircle2,
+     9→  Circle,
+    10→  CircleDashed,
+    11→  ClipboardList,
+    12→  Download,
+    13→  ExternalLink,
+    14→  Factory,
+    15→  FileText,
+    16→  FolderOpen,
+    17→  Gauge,
+    18→  Info,
+    19→  Link2,
+    20→  ListChecks,
+    21→  Loader2,
+    22→  Plus,
+    23→  RefreshCw,
+    24→  ReceiptText,
+    25→  Trash2,
+    26→  Wallet,
+    27→} from "lucide-react";
+    28→import { toast } from "sonner";
+    29→import { Badge } from "@/components/ui/badge";
+    30→import { Button } from "@/components/ui/button";
+    31→import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+    32→import {
+    33→  Dialog,
+    34→  DialogContent,
+    35→  DialogDescription,
+    36→  DialogFooter,
+    37→  DialogHeader,
+    38→  DialogTitle,
+    39→} from "@/components/ui/dialog";
+    40→import { Input } from "@/components/ui/input";
+    41→import { Label } from "@/components/ui/label";
+    42→import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+    43→import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+    44→import { Textarea } from "@/components/ui/textarea";
+    45→import { api } from "@/lib/api-client";
+    46→import {
+    47→  BRAND_LABEL,
+    48→  PROJECT_STATUS_BADGE,
+    49→  PROJECT_STATUS_LABEL,
+    50→  type DeliverableDTO,
+    51→  type MilestoneDTO,
+    52→  type OverviewStats,
+    53→  type ProductionStats,
+    54→  type ProjectDTO,
+    55→  type ProjectStatus,
+    56→  type SessionUser,
+    57→} from "@/lib/crm-types";
+    58→import { cn } from "@/lib/utils";
+    59→
+    60→type MilestoneStatus = MilestoneDTO["status"];
+    61→
+    62→type DeliverableWithProject = DeliverableDTO & { projectCode: string; projectName: string };
+    63→
+    64→interface DeliverableGroup {
+    65→  projectId: string;
+    66→  code: string;
+    67→  name: string;
+    68→  status: ProjectStatus | null;
+    69→  items: DeliverableWithProject[];
+    70→}
+    71→
+    72→const PROJECT_STATUSES = Object.keys(PROJECT_STATUS_LABEL) as ProjectStatus[];
+    73→
+    74→const MS_LABEL: Record<MilestoneStatus, string> = {
+    75→  PENDING: "Menunggu",
+    76→  IN_PROGRESS: "Dikerjakan",
+    77→  DONE: "Selesai",
+    78→};
+    79→
+    80→/** Siklus klik checkbox milestone: PENDING → IN_PROGRESS → DONE → PENDING */
+    81→const NEXT_MS: Record<MilestoneStatus, MilestoneStatus> = {
+    82→  PENDING: "IN_PROGRESS",
+    83→  IN_PROGRESS: "DONE",
+    84→  DONE: "PENDING",
+    85→};
+    86→
+    87→const MS_ICON: Record<MilestoneStatus, typeof Circle> = {
+    88→  PENDING: Circle,
+    89→  IN_PROGRESS: CircleDashed,
+    90→  DONE: CheckCircle2,
+    91→};
+    92→
+    93→const MS_ICON_CLASS: Record<MilestoneStatus, string> = {
+    94→  PENDING: "text-slate-300",
+    95→  IN_PROGRESS: "text-amber-500",
+    96→  DONE: "text-emerald-600",
+    97→};
+    98→
+    99→const STATUS_BAR_CLASS: Record<ProjectStatus, string> = {
+   100→  PLANNED: "bg-stone-400",
+   101→  BRIEFED: "bg-amber-500",
+   102→  IN_PROGRESS: "bg-teal-500",
+   103→  REVIEW: "bg-violet-500",
+   104→  DONE: "bg-emerald-500",
+   105→};
+   106→
+   107→const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+   108→
+   109→const rpFmt = new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 });
+   110→const dateFmt = new Intl.DateTimeFormat("id-ID", { day: "numeric", month: "short", year: "numeric" });
+   111→
+   112→function fmtRp(n: number): string {
+   113→  return rpFmt.format(n);
+   114→}
+   115→
+   116→function fmtDate(iso?: string | null): string {
+   117→  return iso ? dateFmt.format(new Date(iso)) : "—";
+   118→}
+   119→
+   120→function formatBytes(bytes: number): string {
+   121→  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+   122→  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+   123→  return `${bytes} B`;
+   124→}
+   125→
+   126→/** Tanggal relatif id-ID (butuh `now` dari state agar purity-safe saat render). */
+   127→function timeAgoId(iso: string, now: number): string {
+   128→  if (!now) return fmtDate(iso);
+   129→  const diff = now - new Date(iso).getTime();
+   130→  if (diff < 60_000) return "baru saja";
+   131→  const m = Math.floor(diff / 60_000);
+   132→  if (m < 60) return `${m} menit lalu`;
+   133→  const h = Math.floor(m / 60);
+   134→  if (h < 24) return `${h} jam lalu`;
+   135→  const d = Math.floor(h / 24);
+   136→  if (d < 30) return `${d} hari lalu`;
+   137→  return fmtDate(iso);
+   138→}
+   139→
+   140→function groupDeliverables(list: DeliverableWithProject[], projects: ProjectDTO[]): DeliverableGroup[] {
+   141→  const projById = new Map(projects.map((p) => [p.id, p]));
+   142→  const groups: DeliverableGroup[] = [];
+   143→  for (const d of list) {
+   144→    let g = groups.find((x) => x.projectId === d.projectId);
+   145→    if (!g) {
+   146→      const proj = projById.get(d.projectId);
+   147→      g = {
+   148→        projectId: d.projectId,
+   149→        code: d.projectCode,
+   150→        name: d.projectName,
+   151→        status: proj?.status ?? null,
+   152→        items: [],
+   153→      };
+   154→      groups.push(g);
+   155→    }
+   156→    g.items.push(d);
+   157→  }
+   158→  return groups;
+   159→}
+   160→
+   161→function SkeletonBlock({ className }: { className?: string }) {
+   162→  return <div className={cn("animate-pulse rounded-xl bg-slate-200/70", className)} />;
+   163→}
+   164→
+   165→function ProductionSkeleton() {
+   166→  return (
+   167→    <div className="space-y-6">
+   168→      <div className="space-y-2">
+   169→        <SkeletonBlock className="h-7 w-56" />
+   170→        <SkeletonBlock className="h-4 w-80" />
+   171→      </div>
+   172→      <SkeletonBlock className="h-10 w-full sm:w-72" />
+   173→      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+   174→        {Array.from({ length: 4 }).map((_, i) => (
+   175→          <SkeletonBlock key={i} className="h-28" />
+   176→        ))}
+   177→      </div>
+   178→      <SkeletonBlock className="h-72" />
+   179→      <div className="grid gap-4 lg:grid-cols-2">
+   180→        <SkeletonBlock className="h-56" />
+   181→        <SkeletonBlock className="h-56" />
+   182→      </div>
+   183→    </div>
+   184→  );
+   185→}
+   186→
+   187→/** Box info brief proyek — slate, objective line-clamp + expand sederhana. */
+   188→function BriefBox({ brief }: { brief: NonNullable<ProjectDTO["brief"]> }) {
+   189→  const [open, setOpen] = useState(false);
+   190→  return (
+   191→    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+   192→      <div className="flex items-start gap-2">
+   193→        <ClipboardList className="mt-0.5 size-4 shrink-0 text-slate-500" aria-hidden />
+   194→        <div className="min-w-0 flex-1">
+   195→          <p className="text-xs font-semibold text-slate-800">
+   196→            Brief {brief.code}: {brief.title}
+   197→          </p>
+   198→          <p className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
+   199→            <CalendarDays className="size-3 shrink-0" aria-hidden />
+   200→            Deadline: {fmtDate(brief.deadline)}
+   201→          </p>
+   202→          {brief.objective && (
+   203→            <>
+   204→              <p className={cn("mt-1 text-xs leading-relaxed text-slate-600", !open && "line-clamp-2")}>
+   205→                {brief.objective}
+   206→              </p>
+   207→              <button
+   208→                type="button"
+   209→                onClick={() => setOpen((o) => !o)}
+   210→                aria-expanded={open}
+   211→                className="mt-0.5 cursor-pointer text-[11px] font-medium text-teal-700 hover:text-teal-800 hover:underline"
+   212→              >
+   213→                {open ? "Sembunyikan" : "Selengkapnya"}
+   214→              </button>
+   215→            </>
+   216→          )}
+   217→        </div>
+   218→      </div>
+   219→    </div>
+   220→  );
+   221→}
+   222→
+   223→export default function ProductionView({ user }: { user: SessionUser }) {
+   224→  const [stats, setStats] = useState<ProductionStats | null>(null);
+   225→  const [projects, setProjects] = useState<ProjectDTO[] | null>(null);
+   226→  const [overview, setOverview] = useState<OverviewStats | null>(null);
+   227→  const [failed, setFailed] = useState(false);
+   228→  const [loading, setLoading] = useState(true);
+   229→  const [busyKey, setBusyKey] = useState<string | null>(null);
+   230→
+   231→  // ---- role gating ----
+   232→  const canToggleMilestone = ["OWNER", "MANAGER", "MARKETER", "PRODUCTION"].includes(user.role);
+   233→  const canChangeStatus = ["OWNER", "MANAGER", "MARKETER"].includes(user.role);
+   234→  const canSendDeliverable = ["OWNER", "MANAGER", "MARKETER", "PRODUCTION"].includes(user.role);
+   235→  // Chart gabungan hanya utk role yang diizinkan API /api/reports/overview
+   236→  const canSeeOverview = ["OWNER", "MANAGER", "FINANCE"].includes(user.role);
+   237→
+   238→  // ---- tab ----
+   239→  const [tab, setTab] = useState("proyek");
+   240→
+   241→  // ---- deliverables (lazy load saat tab pertama dibuka, cache di state) ----
+   242→  const [deliverables, setDeliverables] = useState<DeliverableWithProject[] | null>(null);
+   243→  const [delLoading, setDelLoading] = useState(false);
+   244→  const [delFailed, setDelFailed] = useState(false);
+   245→  const [busyDelKey, setBusyDelKey] = useState<string | null>(null);
+   246→
+   247→  // ---- dialog kirim file / link ----
+   248→  const [dlgOpen, setDlgOpen] = useState(false);
+   249→  const [mode, setMode] = useState<"LINK" | "FILE">("LINK");
+   250→  const [fProjectId, setFProjectId] = useState("");
+   251→  const [fName, setFName] = useState("");
+   252→  const [fUrl, setFUrl] = useState("");
+   253→  const [fMilestone, setFMilestone] = useState("none");
+   254→  const [fNote, setFNote] = useState("");
+   255→  const [fFile, setFFile] = useState<File | null>(null);
+   256→  const [urlErr, setUrlErr] = useState<string | null>(null);
+   257→  const [submitting, setSubmitting] = useState(false);
+   258→
+   259→  // Waktu "sekarang" dihitung di efek (react-hooks/purity: Date.now tidak boleh dipanggil saat render)
+   260→  const [nowMs, setNowMs] = useState(0);
+   261→  useEffect(() => {
+   262→    setNowMs(Date.now());
+   263→  }, [projects, deliverables]);
+   264→
+   265→  const load = useCallback(async () => {
+   266→    setLoading(true);
+   267→    try {
+   268→      const [s, pj, ov] = await Promise.all([
+   269→        api.productionStats(),
+   270→        api.projects(),
+   271→        canSeeOverview ? api.overviewStats().catch(() => null) : Promise.resolve(null),
+   272→      ]);
+   273→      setStats(s.stats);
+   274→      setProjects(pj.projects);
+   275→      setOverview(ov ? ov.stats : null);
+   276→      setFailed(false);
+   277→    } catch (e) {
+   278→      toast.error((e as Error).message || "Gagal memuat data produksi");
+   279→      setFailed(true);
+   280→    } finally {
+   281→      setLoading(false);
+   282→    }
+   283→  }, [canSeeOverview]);
+   284→
+   285→  const fetchDeliverables = useCallback(async () => {
+   286→    setDelLoading(true);
+   287→    setDelFailed(false);
+   288→    try {
+   289→      const r = await api.deliverables();
+   290→      setDeliverables(r.deliverables as DeliverableWithProject[]);
+   291→    } catch (e) {
+   292→      toast.error((e as Error).message || "Gagal memuat file produksi");
+   293→      setDelFailed(true);
+   294→    } finally {
+   295→      setDelLoading(false);
+   296→    }
+   297→  }, []);
+   298→
+   299→  useEffect(() => {
+   300→    void load();
+   301→  }, [load]);
+   302→
+   303→  // Lazy-load tab File & Google Drive saat pertama kali dibuka
+   304→  useEffect(() => {
+   305→    if (tab === "files" && deliverables === null && !delLoading && !delFailed) {
+   306→      void fetchDeliverables();
+   307→    }
+   308→  }, [tab, deliverables, delLoading, delFailed, fetchDeliverables]);
+   309→
+   310→  function reloadAll() {
+   311→    void load();
+   312→    if (deliverables !== null) void fetchDeliverables();
+   313→  }
+   314→
+   315→  async function cycleMilestone(project: ProjectDTO, ms: MilestoneDTO) {
+   316→    const next = NEXT_MS[ms.status];
+   317→    setBusyKey(`${project.id}:${ms.id}`);
+   318→    try {
+   319→      await api.updateProject(project.id, { milestoneId: ms.id, milestoneStatus: next });
+   320→      toast.success(`Milestone "${ms.title}" → ${MS_LABEL[next]}`);
+   321→      await load();
+   322→    } catch (e) {
+   323→      toast.error((e as Error).message);
+   324→    } finally {
+   325→      setBusyKey(null);
+   326→    }
+   327→  }
+   328→
+   329→  async function changeStatus(project: ProjectDTO, status: ProjectStatus) {
+   330→    if (status === project.status) return;
+   331→    try {
+   332→      await api.updateProject(project.id, { status });
+   333→      toast.success(`${project.code} → ${PROJECT_STATUS_LABEL[status]}`);
+   334→      await load();
+   335→    } catch (e) {
+   336→      toast.error((e as Error).message);
+   337→    }
+   338→  }
+   339→
+   340→  async function removeDeliverable(d: DeliverableWithProject) {
+   341→    setBusyDelKey(d.id);
+   342→    try {
+   343→      await api.deleteDeliverable(d.id);
+   344→      toast.success(`"${d.name}" dihapus`);
+   345→      await fetchDeliverables();
+   346→    } catch (e) {
+   347→      toast.error((e as Error).message);
+   348→    } finally {
+   349→      setBusyDelKey(null);
+   350→    }
+   351→  }
+   352→
+   353→  function resetForm() {
+   354→    setMode("LINK");
+   355→    setFProjectId("");
+   356→    setFName("");
+   357→    setFUrl("");
+   358→    setFMilestone("none");
+   359→    setFNote("");
+   360→    setFFile(null);
+   361→    setUrlErr(null);
+   362→  }
+   363→
+   364→  async function submitDeliverable() {
+   365→    if (!fProjectId) {
+   366→      toast.error("Pilih proyek tujuan terlebih dahulu");
+   367→      return;
+   368→    }
+   369→    if (!fName.trim()) {
+   370→      toast.error("Isi nama deliverable terlebih dahulu");
+   371→      return;
+   372→    }
+   373→    if (mode === "LINK" && !/^https?:\/\/.+/i.test(fUrl.trim())) {
+   374→      setUrlErr("URL harus diawali http:// atau https://");
+   375→      return;
+   376→    }
+   377→    if (mode === "FILE") {
+   378→      if (!fFile) {
+   379→        toast.error("Pilih file yang akan diunggah");
+   380→        return;
+   381→      }
+   382→      if (fFile.size > MAX_UPLOAD_BYTES) {
+   383→        toast.error("Ukuran file maksimal 10 MB — gunakan link Google Drive untuk file besar");
+   384→        return;
+   385→      }
+   386→    }
+   387→
+   388→    const milestoneLabel = fMilestone !== "none" ? fMilestone : undefined;
+   389→    setSubmitting(true);
+   390→    try {
+   391→      if (mode === "LINK") {
+   392→        await api.addDeliverableLink({
+   393→          projectId: fProjectId,
+   394→          name: fName.trim(),
+   395→          url: fUrl.trim(),
+   396→          note: fNote.trim() || undefined,
+   397→          milestoneLabel,
+   398→        });
+   399→      } else if (fFile) {
+   400→        const fd = new FormData();
+   401→        fd.set("projectId", fProjectId);
+   402→        fd.set("name", fName.trim());
+   403→        fd.set("note", fNote.trim());
+   404→        if (milestoneLabel) fd.set("milestoneLabel", milestoneLabel);
+   405→        fd.set("file", fFile);
+   406→        await api.uploadDeliverableFile(fd);
+   407→      }
+   408→      const code = projects?.find((p) => p.id === fProjectId)?.code ?? "proyek";
+   409→      toast.success(mode === "LINK" ? `Tautan terkirim ke ${code}` : `File terkirim ke ${code}`);
+   410→      setDlgOpen(false);
+   411→      resetForm();
+   412→      await fetchDeliverables();
+   413→    } catch (e) {
+   414→      toast.error((e as Error).message || "Gagal mengirim deliverable");
+   415→    } finally {
+   416→      setSubmitting(false);
+   417→    }
+   418→  }
+   419→
+   420→  if (failed) {
+   421→    return (
+   422→      <Card className="rounded-2xl">
+   423→        <CardContent className="flex flex-col items-center gap-3 py-14 text-center">
+   424→          <AlertTriangle className="size-8 text-rose-500" />
+   425→          <div>
+   426→            <p className="text-sm font-semibold text-slate-900">Gagal memuat data produksi</p>
+   427→            <p className="text-xs text-muted-foreground">Periksa koneksi Anda lalu coba lagi.</p>
+   428→          </div>
+   429→          <Button size="sm" onClick={() => void load()}>
+   430→            <RefreshCw className="size-3.5" /> Coba Lagi
+   431→          </Button>
+   432→        </CardContent>
+   433→      </Card>
+   434→    );
+   435→  }
+   436→
+   437→  if (!stats || !projects) return <ProductionSkeleton />;
+   438→
+   439→  // ---- agregat chart gabungan (bila overview tersedia) ----
+   440→  const monthly = overview?.monthly ?? [];
+   441→  const maxRevenue = Math.max(...monthly.map((m) => m.revenue), 1);
+   442→  const maxDone = Math.max(...monthly.map((m) => m.projectsCompleted), 1);
+   443→  const maxStatusCount = Math.max(...stats.byStatus.map((s) => s.count), 1);
+   444→
+   445→  // ---- agregat deliverables ----
+   446→  const delList = deliverables ?? [];
+   447→  const linkCount = delList.filter((d) => d.type === "LINK").length;
+   448→  const fileCount = delList.filter((d) => d.type === "FILE").length;
+   449→  const delProjectCount = new Set(delList.map((d) => d.projectId)).size;
+   450→  const deliverableGroups = deliverables ? groupDeliverables(deliverables, projects) : [];
+   451→
+   452→  const delSummary = [
+   453→    { label: "Total File / Tautan", value: delList.length, icon: FolderOpen, iconBox: "bg-slate-100 text-slate-600" },
+   454→    { label: "Proyek dengan File", value: delProjectCount, icon: Factory, iconBox: "bg-emerald-100 text-emerald-600" },
+   455→    { label: "Tautan (LINK)", value: linkCount, icon: Link2, iconBox: "bg-amber-100 text-amber-600" },
+   456→    { label: "File Unggahan", value: fileCount, icon: FileText, iconBox: "bg-teal-100 text-teal-600" },
+   457→  ];
+   458→
+   459→  const kpis = [
+   460→    { label: "Proyek Aktif", value: String(stats.activeCount), icon: Factory, iconBox: "bg-slate-100 text-slate-600" },
+   461→    { label: "Selesai", value: String(stats.doneCount), icon: CheckCircle2, iconBox: "bg-emerald-100 text-emerald-600" },
+   462→    { label: "Progress Rata-rata", value: `${stats.avgProgress}%`, icon: Gauge, iconBox: "bg-teal-100 text-teal-600" },
+   463→    { label: "Milestone Selesai", value: `${stats.milestoneDonePct}%`, icon: ListChecks, iconBox: "bg-amber-100 text-amber-600" },
+   464→  ];
+   465→
+   466→  const segBtnCls = (active: boolean) =>
+   467→    cn(
+   468→      "flex cursor-pointer items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-xs font-medium transition-colors",
+   469→      active ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
+   470→    );
+   471→
+   472→  return (
+   473→    <div className="space-y-6">
+   474→      {/* Header */}
+   475→      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+   476→        <div>
+   477→          <h2 className="text-xl font-bold tracking-tight text-slate-900">Produksi</h2>
+   478→          <p className="text-sm text-muted-foreground">
+   479→            Proyek, milestone, file produksi, dan keterkaitan produksi dengan keuangan.
+   480→          </p>
+   481→        </div>
+   482→        <Button variant="outline" size="sm" onClick={reloadAll} disabled={loading || delLoading}>
+   483→          <RefreshCw className={cn("size-3.5", (loading || delLoading) && "animate-spin")} /> Muat ulang
+   484→        </Button>
+   485→      </div>
+   486→
+   487→      <Tabs value={tab} onValueChange={setTab} className="gap-5">
+   488→        <TabsList className="h-10 w-full rounded-xl bg-slate-100 p-1 sm:w-auto">
+   489→          <TabsTrigger value="proyek" className="gap-1.5 px-3 sm:px-4">
+   490→            <Factory className="size-4" aria-hidden /> Proyek
+   491→          </TabsTrigger>
+   492→          <TabsTrigger value="files" className="gap-1.5 px-3 sm:px-4">
+   493→            <FolderOpen className="size-4" aria-hidden /> File &amp; Google Drive
+   494→          </TabsTrigger>
+   495→        </TabsList>
+   496→
+   497→        {/* ================= TAB PROYEK ================= */}
+   498→        <TabsContent value="proyek" className="mt-0 space-y-6">
+   499→          {/* KPI */}
+   500→          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+   501→            {kpis.map((kpi) => (
+   502→              <Card key={kpi.label} className="rounded-2xl">
+   503→                <CardContent className="flex items-center gap-3 px-4 py-5 sm:gap-4 sm:px-5">
+   504→                  <div className={cn("flex size-10 shrink-0 items-center justify-center rounded-xl sm:size-11", kpi.iconBox)}>
+   505→                    <kpi.icon className="size-5" />
+   506→                  </div>
+   507→                  <div className="min-w-0">
+   508→                    <p className="truncate text-xs text-muted-foreground">{kpi.label}</p>
+   509→                    <p className="text-3xl font-bold tabular-nums text-slate-900">{kpi.value}</p>
+   510→                  </div>
+   511→                </CardContent>
+   512→              </Card>
+   513→            ))}
+   514→          </div>
+   515→
+   516→          {/* Bagan gabungan Keuangan × Produksi (hanya OWNER/MANAGER/FINANCE) */}
+   517→          {overview && (
+   518→            <Card className="rounded-2xl">
+   519→              <CardHeader>
+   520→                <CardTitle className="text-base">Pendapatan vs Proyek Selesai (6 bulan)</CardTitle>
+   521→                <CardDescription>
+   522→                  Bar emerald = pendapatan (skala nilai), bar amber = proyek selesai (skala jumlah). Keduanya dinormalisasi terhadap nilai tertinggi masing-masing.
+   523→                </CardDescription>
+   524→              </CardHeader>
+   525→              <CardContent className="px-5 pb-5">
+   526→                <div className="mb-3 flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
+   527→                  <span className="flex items-center gap-1.5">
+   528→                    <span className="size-2.5 rounded-sm bg-emerald-500" aria-hidden /> Pendapatan
+   529→                  </span>
+   530→                  <span className="flex items-center gap-1.5">
+   531→                    <span className="size-2.5 rounded-sm bg-amber-500" aria-hidden /> Proyek selesai
+   532→                  </span>
+   533→                </div>
+   534→                <div className="flex items-end gap-2 sm:gap-4">
+   535→                  {monthly.map((m) => {
+   536→                    const revPct = m.revenue > 0 ? Math.max(4, Math.round((m.revenue / maxRevenue) * 100)) : 0;
+   537→                    const donePct = m.projectsCompleted > 0 ? Math.max(6, Math.round((m.projectsCompleted / maxDone) * 100)) : 0;
+   538→                    return (
+   539→                      <div key={m.month} className="flex min-w-0 flex-1 flex-col items-center gap-1.5">
+   540→                        <div className="flex h-40 w-full items-end justify-center gap-1 sm:gap-1.5">
+   541→                          <div
+   542→                            className="w-3 rounded-t-md bg-emerald-500 transition-all sm:w-5"
+   543→                            style={{ height: `${revPct}%` }}
+   544→                            role="img"
+   545→                            aria-label={`${m.label}: pendapatan ${fmtRp(m.revenue)}`}
+   546→                            title={`Pendapatan: ${fmtRp(m.revenue)}`}
+   547→                          />
+   548→                          <div className="flex h-full flex-col items-center justify-end gap-0.5">
+   549→                            <span className="text-[10px] font-semibold tabular-nums text-amber-600">{m.projectsCompleted}</span>
+   550→                            <div
+   551→                              className="w-3 rounded-t-md bg-amber-500 transition-all sm:w-5"
+   552→                              style={{ height: `${donePct}%` }}
+   553→                              role="img"
+   554→                              aria-label={`${m.label}: ${m.projectsCompleted} proyek selesai`}
+   555→                              title={`${m.projectsCompleted} proyek selesai`}
+   556→                            />
+   557→                          </div>
+   558→                        </div>
+   559→                        <span className="truncate text-[10px] text-muted-foreground sm:text-xs">{m.label}</span>
+   560→                      </div>
+   561→                    );
+   562→                  })}
+   563→                </div>
+   564→                <p className="mt-4 flex items-center gap-1.5 rounded-xl bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+   565→                  <Info className="size-3.5 shrink-0" aria-hidden />
+   566→                  <span>
+   567→                    Keuangan &amp; produksi saling terhubung: penawaran disetujui otomatis membuka proyek &amp; invoice DP.
+   568→                  </span>
+   569→                </p>
+   570→              </CardContent>
+   571→            </Card>
+   572→          )}
+   573→
+   574→          {/* Distribusi status + per brand */}
+   575→          <div className="grid gap-4 lg:grid-cols-2">
+   576→            <Card className="rounded-2xl">
+   577→              <CardHeader>
+   578→                <CardTitle className="text-base">Distribusi Status Proyek</CardTitle>
+   579→                <CardDescription>{stats.totalProjects} proyek tercatat.</CardDescription>
+   580→              </CardHeader>
+   581→              <CardContent className="space-y-3 px-5 pb-5">
+   582→                {stats.byStatus.map((s) => (
+   583→                  <div key={s.status} className="flex items-center gap-3">
+   584→                    <span className="w-28 shrink-0 truncate text-xs text-slate-600 sm:text-sm">{PROJECT_STATUS_LABEL[s.status]}</span>
+   585→                    <div className="h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-slate-100">
+   586→                      <div
+   587→                        className={cn("h-full rounded-full", STATUS_BAR_CLASS[s.status])}
+   588→                        style={{ width: `${s.count > 0 ? Math.max(4, Math.round((s.count / maxStatusCount) * 100)) : 0}%` }}
+   589→                      />
+   590→                    </div>
+   591→                    <span className="w-6 shrink-0 text-right text-xs font-semibold tabular-nums text-slate-700">{s.count}</span>
+   592→                  </div>
+   593→                ))}
+   594→              </CardContent>
+   595→            </Card>
+   596→
+   597→            <Card className="rounded-2xl">
+   598→              <CardHeader>
+   599→                <CardTitle className="text-base">Proyek per Brand</CardTitle>
+   600→                <CardDescription>Aktif vs selesai beserta total budget.</CardDescription>
+   601→              </CardHeader>
+   602→              <CardContent className="space-y-3 px-5 pb-5">
+   603→                {stats.byBrand.map((b) => {
+   604→                  const total = b.active + b.done;
+   605→                  const activeW = total ? Math.round((b.active / total) * 100) : 0;
+   606→                  return (
+   607→                    <div key={b.brand} className="rounded-xl border p-3">
+   608→                      <div className="flex flex-wrap items-center justify-between gap-1">
+   609→                        <span className="text-sm font-medium text-slate-900">{BRAND_LABEL[b.brand] ?? b.brand}</span>
+   610→                        <span className="text-xs text-muted-foreground tabular-nums">
+   611→                          <span className="font-semibold text-teal-700">{b.active} aktif</span> · <span className="font-semibold text-emerald-700">{b.done} selesai</span>
+   612→                        </span>
+   613→                      </div>
+   614→                      <div className="mt-2 flex h-1.5 overflow-hidden rounded-full bg-slate-100">
+   615→                        <div className="h-full bg-teal-500 transition-all" style={{ width: `${activeW}%` }} />
+   616→                        <div className="h-full bg-emerald-500 transition-all" style={{ width: `${100 - activeW}%` }} />
+   617→                      </div>
+   618→                      <p className="mt-1.5 text-xs text-muted-foreground">
+   619→                        Total budget: <span className="font-medium text-slate-700 tabular-nums">{fmtRp(b.budget)}</span>
+   620→                      </p>
+   621→                    </div>
+   622→                  );
+   623→                })}
+   624→              </CardContent>
+   625→            </Card>
+   626→          </div>
+   627→
+   628→          {/* Daftar proyek */}
+   629→          <div className="space-y-3">
+   630→            <h3 className="text-base font-semibold text-slate-900">
+   631→              Daftar Proyek <span className="text-sm font-normal text-muted-foreground">({projects.length})</span>
+   632→            </h3>
+   633→            {projects.length === 0 ? (
+   634→              <Card className="rounded-2xl">
+   635→                <CardContent className="flex flex-col items-center gap-2 py-14 text-center">
+   636→                  <Factory className="size-9 text-slate-300" aria-hidden />
+   637→                  <p className="text-sm font-semibold text-slate-900">Belum ada proyek produksi</p>
+   638→                  <p className="max-w-md text-xs text-muted-foreground">
+   639→                    Proyek otomatis terbuka saat penawaran disetujui di menu Keuangan.
+   640→                  </p>
+   641→                </CardContent>
+   642→              </Card>
+   643→            ) : (
+   644→              <div className="grid gap-4 md:grid-cols-2">
+   645→                {projects.map((p) => {
+   646→                  const isLate = Boolean(p.dueDate) && p.status !== "DONE" && new Date(p.dueDate!).getTime() < nowMs;
+   647→                  const msDone = p.milestones.filter((m) => m.status === "DONE").length;
+   648→                  return (
+   649→                    <Card key={p.id} className="rounded-2xl">
+   650→                      <CardContent className="space-y-3 p-4 sm:p-5">
+   651→                        <div className="flex flex-wrap items-start justify-between gap-2">
+   652→                          <div className="min-w-0">
+   653→                            <div className="flex flex-wrap items-center gap-1.5">
+   654→                              <Badge variant="outline" className="font-mono text-[10px]">
+   655→                                {p.code}
+   656→                              </Badge>
+   657→                              <Badge variant="outline" className={PROJECT_STATUS_BADGE[p.status]}>
+   658→                                {PROJECT_STATUS_LABEL[p.status]}
+   659→                              </Badge>
+   660→                              <span className="text-xs text-muted-foreground">{BRAND_LABEL[p.brand] ?? p.brand}</span>
+   661→                            </div>
+   662→                            <h4 className="mt-1 truncate text-sm font-bold text-slate-900">{p.name}</h4>
+   663→                          </div>
+   664→                          {canChangeStatus && (
+   665→                            <Select value={p.status} onValueChange={(v) => void changeStatus(p, v as ProjectStatus)}>
+   666→                              <SelectTrigger className="h-8 w-[150px] shrink-0" aria-label={`Ubah status proyek ${p.code}`}>
+   667→                                <SelectValue />
+   668→                              </SelectTrigger>
+   669→                              <SelectContent>
+   670→                                {PROJECT_STATUSES.map((s) => (
+   671→                                  <SelectItem key={s} value={s}>
+   672→                                    {PROJECT_STATUS_LABEL[s]}
+   673→                                  </SelectItem>
+   674→                                ))}
+   675→                              </SelectContent>
+   676→                            </Select>
+   677→                          )}
+   678→                        </div>
+   679→
+   680→                        {/* Progress */}
+   681→                        <div>
+   682→                          <div className="flex items-center justify-between text-xs">
+   683→                            <span className="text-muted-foreground">Progress</span>
+   684→                            <span className="font-semibold tabular-nums text-slate-700">{p.progress}%</span>
+   685→                          </div>
+   686→                          <div className="mt-1 h-2 overflow-hidden rounded-full bg-slate-100">
+   687→                            <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${p.progress}%` }} />
+   688→                          </div>
+   689→                        </div>
+   690→
+   691→                        {/* Meta (budget read-only untuk semua role, termasuk PRODUCTION) */}
+   692→                        <div className="grid gap-1.5 text-xs text-muted-foreground sm:grid-cols-2">
+   693→                          <span className="flex items-center gap-1.5">
+   694→                            <Wallet className="size-3.5 shrink-0" aria-hidden />
+   695→                            Budget: <span className="font-medium tabular-nums text-slate-700">{fmtRp(p.budget)}</span>
+   696→                          </span>
+   697→                          <span className="flex min-w-0 items-center gap-1.5">
+   698→                            <Building2 className="size-3.5 shrink-0" aria-hidden />
+   699→                            <span className="truncate">{p.companyName ?? "—"}</span>
+   700→                          </span>
+   701→                          <span className="flex items-center gap-1.5">
+   702→                            <CalendarDays className="size-3.5 shrink-0" aria-hidden />
+   703→                            Deadline: {fmtDate(p.dueDate)}
+   704→                            {isLate && (
+   705→                              <Badge variant="outline" className="border-rose-200 bg-rose-50 text-rose-700">
+   706→                                Terlambat
+   707→                              </Badge>
+   708→                            )}
+   709→                          </span>
+   710→                          <span className="flex items-center gap-1.5">
+   711→                            <ReceiptText className="size-3.5 shrink-0" aria-hidden />
+   712→                            Terbit invoice: <span className="font-medium tabular-nums text-slate-700">{fmtRp(p.billedAmount)}</span>
+   713→                          </span>
+   714→                        </div>
+   715→
+   716→                        {/* Info brief */}
+   717→                        {p.brief && <BriefBox brief={p.brief} />}
+   718→
+   719→                        {/* Milestone */}
+   720→                        <div>
+   721→                          <p className="mb-1.5 flex items-center justify-between text-xs">
+   722→                            <span className="font-medium uppercase tracking-wide text-muted-foreground">Milestone</span>
+   723→                            <span className="tabular-nums text-muted-foreground">
+   724→                              {msDone}/{p.milestones.length} selesai
+   725→                            </span>
+   726→                          </p>
+   727→                          {p.milestones.length === 0 ? (
+   728→                            <p className="rounded-xl border border-dashed px-3 py-3 text-center text-xs text-muted-foreground">
+   729→                              Belum ada milestone
+   730→                            </p>
+   731→                          ) : (
+   732→                            <div className="max-h-40 divide-y overflow-y-auto rounded-xl border">
+   733→                              {p.milestones.map((ms) => {
+   734→                                const Icon = MS_ICON[ms.status];
+   735→                                const busy = busyKey === `${p.id}:${ms.id}`;
+   736→                                const next = NEXT_MS[ms.status];
+   737→                                if (!canToggleMilestone) {
+   738→                                  return (
+   739→                                    <div key={ms.id} className="flex items-center gap-2 px-3 py-2 text-xs">
+   740→                                      <Icon className={cn("size-4 shrink-0", MS_ICON_CLASS[ms.status])} aria-hidden />
+   741→                                      <span className={cn("min-w-0 flex-1 truncate", ms.status === "DONE" && "text-muted-foreground line-through")}>
+   742→                                        {ms.title}
+   743→                                      </span>
+   744→                                      <span className="shrink-0 tabular-nums text-muted-foreground">{ms.weight}%</span>
+   745→                                    </div>
+   746→                                  );
+   747→                                }
+   748→                                return (
+   749→                                  <button
+   750→                                    key={ms.id}
+   751→                                    type="button"
+   752→                                    role="checkbox"
+   753→                                    aria-checked={ms.status === "DONE"}
+   754→                                    aria-label={`Milestone ${ms.title}, status ${MS_LABEL[ms.status]}. Klik untuk ubah menjadi ${MS_LABEL[next]}`}
+   755→                                    disabled={busy}
+   756→                                    onClick={() => void cycleMilestone(p, ms)}
+   757→                                    className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-accent/60 disabled:opacity-60"
+   758→                                  >
+   759→                                    <Icon className={cn("size-4 shrink-0", MS_ICON_CLASS[ms.status])} aria-hidden />
+   760→                                    <span className={cn("min-w-0 flex-1 truncate", ms.status === "DONE" && "text-muted-foreground line-through")}>
+   761→                                      {ms.title}
+   762→                                    </span>
+   763→                                    <span className="shrink-0 tabular-nums text-muted-foreground">{ms.weight}%</span>
+   764→                                  </button>
+   765→                                );
+   766→                              })}
+   767→                            </div>
+   768→                          )}
+   769→                        </div>
+   770→                      </CardContent>
+   771→                    </Card>
+   772→                  );
+   773→                })}
+   774→              </div>
+   775→            )}
+   776→          </div>
+   777→        </TabsContent>
+   778→
+   779→        {/* ================= TAB FILE & GOOGLE DRIVE ================= */}
+   780→        <TabsContent value="files" className="mt-0 space-y-4">
+   781→          {delLoading && deliverables === null ? (
+   782→            <div className="space-y-4">
+   783→              <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+   784→                {Array.from({ length: 4 }).map((_, i) => (
+   785→                  <SkeletonBlock key={i} className="h-24" />
+   786→                ))}
+   787→              </div>
+   788→              <SkeletonBlock className="h-64" />
+   789→            </div>
+   790→          ) : deliverables === null ? (
+   791→            <Card className="rounded-2xl">
+   792→              <CardContent className="flex flex-col items-center gap-3 py-14 text-center">
+   793→                <AlertTriangle className="size-8 text-rose-500" />
+   794→                <p className="text-sm font-semibold text-slate-900">Gagal memuat file produksi</p>
+   795→                <Button size="sm" onClick={() => void fetchDeliverables()}>
+   796→                  <RefreshCw className="size-3.5" /> Coba Lagi
+   797→                </Button>
+   798→              </CardContent>
+   799→            </Card>
+   800→          ) : (
+   801→            <>
+   802→              {/* Ringkasan ringkas */}
+   803→              {delList.length > 0 && (
+   804→                <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+   805→                  {delSummary.map((s) => (
+   806→                    <Card key={s.label} className="rounded-2xl">
+   807→                      <CardContent className="flex items-center gap-3 px-4 py-4 sm:px-5">
+   808→                        <div className={cn("flex size-10 shrink-0 items-center justify-center rounded-xl", s.iconBox)}>
+   809→                          <s.icon className="size-5" aria-hidden />
+   810→                        </div>
+   811→                        <div className="min-w-0">
+   812→                          <p className="truncate text-xs text-muted-foreground">{s.label}</p>
+   813→                          <p className="text-2xl font-bold tabular-nums text-slate-900 sm:text-3xl">{s.value}</p>
+   814→                        </div>
+   815→                      </CardContent>
+   816→                    </Card>
+   817→                  ))}
+   818→                </div>
+   819→              )}
+   820→
+   821→              <Card className="rounded-2xl">
+   822→                <CardHeader className="flex flex-col gap-2 px-5 pt-5 sm:flex-row sm:items-center sm:justify-between">
+   823→                  <div>
+   824→                    <CardTitle className="text-base">File &amp; Google Drive</CardTitle>
+   825→                    <CardDescription>
+   826→                      File final &amp; tautan produksi per proyek — otomatis terlihat klien di Portal.
+   827→                    </CardDescription>
+   828→                  </div>
+   829→                  {canSendDeliverable && projects.length > 0 && (
+   830→                    <Button size="sm" onClick={() => setDlgOpen(true)}>
+   831→                      <Plus className="size-4" /> Kirim File / Link
+   832→                    </Button>
+   833→                  )}
+   834→                </CardHeader>
+   835→                <CardContent className="px-5 pb-5">
+   836→                  {delList.length === 0 ? (
+   837→                    <div className="flex flex-col items-center gap-2 py-12 text-center">
+   838→                      <FolderOpen className="size-10 text-slate-300" aria-hidden />
+   839→                      <p className="text-sm font-semibold text-slate-900">Belum ada file produksi</p>
+   840→                      <p className="max-w-md text-xs text-muted-foreground">
+   841→                        Tim produksi bisa mengirim file final atau link Google Drive lewat tombol Kirim File / Link.
+   842→                      </p>
+   843→                    </div>
+   844→                  ) : (
+   845→                    <div className="space-y-4">
+   846→                      {deliverableGroups.map((g) => (
+   847→                        <div key={g.projectId} className="overflow-hidden rounded-xl border">
+   848→                          <div className="flex flex-wrap items-center gap-1.5 border-b bg-slate-50/70 px-4 py-2.5">
+   849→                            <Badge variant="outline" className="font-mono text-[10px]">
+   850→                              {g.code}
+   851→                            </Badge>
+   852→                            <span className="text-sm font-semibold text-slate-900">{g.name}</span>
+   853→                            {g.status && (
+   854→                              <Badge variant="outline" className={PROJECT_STATUS_BADGE[g.status]}>
+   855→                                {PROJECT_STATUS_LABEL[g.status]}
+   856→                              </Badge>
+   857→                            )}
+   858→                            <span className="ml-auto text-xs tabular-nums text-muted-foreground">
+   859→                              {g.items.length} file/tautan
+   860→                            </span>
+   861→                          </div>
+   862→                          <div className="divide-y">
+   863→                            {g.items.map((d) => {
+   864→                              const Icon = d.type === "LINK" ? Link2 : FileText;
+   865→                              const iconBox =
+   866→                                d.type === "LINK" ? "bg-amber-100 text-amber-600" : "bg-teal-100 text-teal-600";
+   867→                              const canDelete =
+   868→                                ["OWNER", "MANAGER"].includes(user.role) || d.uploadedByName === user.name;
+   869→                              return (
+   870→                                <div key={d.id} className="flex items-start gap-3 px-4 py-3">
+   871→                                  <div className={cn("flex size-9 shrink-0 items-center justify-center rounded-xl", iconBox)}>
+   872→                                    <Icon className="size-4" aria-hidden />
+   873→                                  </div>
+   874→                                  <div className="min-w-0 flex-1">
+   875→                                    <p className="truncate text-sm font-bold text-slate-900">{d.name}</p>
+   876→                                    {d.type === "FILE" && (d.fileName || d.sizeLabel) && (
+   877→                                      <p className="truncate text-xs text-muted-foreground">
+   878→                                        {[d.fileName, d.sizeLabel].filter(Boolean).join(" · ")}
+   879→                                      </p>
+   880→                                    )}
+   881→                                    {d.note && <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{d.note}</p>}
+   882→                                    <p className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+   883→                                      {d.milestoneLabel && (
+   884→                                        <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
+   885→                                          {d.milestoneLabel}
+   886→                                        </Badge>
+   887→                                      )}
+   888→                                      <span>
+   889→                                        oleh {d.uploadedByName} · {timeAgoId(d.createdAt, nowMs)}
+   890→                                      </span>
+   891→                                    </p>
+   892→                                  </div>
+   893→                                  <div className="flex shrink-0 items-center gap-1.5">
+   894→                                    {d.type === "LINK" ? (
+   895→                                      <Button asChild size="sm" variant="outline">
+   896→                                        <a
+   897→                                          href={d.url ?? "#"}
+   898→                                          target="_blank"
+   899→                                          rel="noreferrer"
+   900→                                          aria-label={`Buka tautan ${d.name}`}
+   901→                                        >
+   902→                                          <ExternalLink className="size-3.5" /> Buka Tautan
+   903→                                        </a>
+   904→                                      </Button>
+   905→                                    ) : (
+   906→                                      <Button asChild size="sm" variant="outline">
+   907→                                        <a
+   908→                                          href={`/api/deliverables/${d.id}/download`}
+   909→                                          download
+   910→                                          aria-label={`Unduh ${d.name}`}
+   911→                                        >
+   912→                                          <Download className="size-3.5" /> Unduh
+   913→                                        </a>
+   914→                                      </Button>
+   915→                                    )}
+   916→                                    {canDelete && (
+   917→                                      <Button
+   918→                                        size="icon-sm"
+   919→                                        variant="ghost"
+   920→                                        aria-label={`Hapus ${d.name}`}
+   921→                                        className="text-rose-600 hover:bg-rose-50 hover:text-rose-700"
+   922→                                        disabled={busyDelKey === d.id}
+   923→                                        onClick={() => void removeDeliverable(d)}
+   924→                                      >
+   925→                                        {busyDelKey === d.id ? (
+   926→                                          <Loader2 className="size-3.5 animate-spin" aria-hidden />
+   927→                                        ) : (
+   928→                                          <Trash2 className="size-3.5" aria-hidden />
+   929→                                        )}
+   930→                                      </Button>
+   931→                                    )}
+   932→                                  </div>
+   933→                                </div>
+   934→                              );
+   935→                            })}
+   936→                          </div>
+   937→                        </div>
+   938→                      ))}
+   939→                    </div>
+   940→                  )}
+   941→                </CardContent>
+   942→              </Card>
+   943→            </>
+   944→          )}
+   945→        </TabsContent>
+   946→      </Tabs>
+   947→
+   948→      {/* Dialog Kirim File / Link */}
+   949→      <Dialog
+   950→        open={dlgOpen}
+   951→        onOpenChange={(o) => {
+   952→          setDlgOpen(o);
+   953→          if (!o) setUrlErr(null);
+   954→        }}
+   955→      >
+   956→        <DialogContent className="sm:max-w-lg">
+   957→          <DialogHeader>
+   958→            <DialogTitle>Kirim File / Link ke Proyek</DialogTitle>
+   959→            <DialogDescription>
+   960→              File final atau tautan Google Drive akan langsung terlihat oleh klien di Portal.
+   961→            </DialogDescription>
+   962→          </DialogHeader>
+   963→
+   964→          <div className="space-y-4">
+   965→            {/* Proyek tujuan */}
+   966→            <div className="space-y-1.5">
+   967→              <Label htmlFor="dl-project">Proyek tujuan</Label>
+   968→              <Select
+   969→                value={fProjectId}
+   970→                onValueChange={(v) => {
+   971→                  setFProjectId(v);
+   972→                  setFMilestone("none");
+   973→                }}
+   974→              >
+   975→                <SelectTrigger id="dl-project" aria-label="Pilih proyek tujuan">
+   976→                  <SelectValue placeholder="Pilih proyek" />
+   977→                </SelectTrigger>
+   978→                <SelectContent>
+   979→                  {projects.map((p) => (
+   980→                    <SelectItem key={p.id} value={p.id}>
+   981→                      {p.code} · {p.name}
+   982→                    </SelectItem>
+   983→                  ))}
+   984→                </SelectContent>
+   985→              </Select>
+   986→            </div>
+   987→
+   988→            {/* Mode: tautan vs file */}
+   989→            <div className="grid grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1" role="group" aria-label="Jenis pengiriman">
+   990→              <button type="button" aria-pressed={mode === "LINK"} onClick={() => setMode("LINK")} className={segBtnCls(mode === "LINK")}>
+   991→                <Link2 className="size-4" aria-hidden /> Tautan (Drive dll)
+   992→              </button>
+   993→              <button type="button" aria-pressed={mode === "FILE"} onClick={() => setMode("FILE")} className={segBtnCls(mode === "FILE")}>
+   994→                <FileText className="size-4" aria-hidden /> Unggah File
+   995→              </button>
+   996→            </div>
+   997→
+   998→            {/* Nama */}
+   999→            <div className="space-y-1.5">
+  1000→              <Label htmlFor="dl-name">Nama deliverable</Label>
+  1001→              <Input
+  1002→                id="dl-name"
+  1003→                value={fName}
+  1004→                onChange={(e) => setFName(e.target.value)}
+  1005→                placeholder={mode === "LINK" ? "cth: Moodboard & Referensi" : "cth: Desain 3D Booth (rev. 3)"}
+  1006→              />
+  1007→            </div>
+  1008→
+  1009→            {mode === "LINK" ? (
+  1010→              <div className="space-y-1.5">
+  1011→                <Label htmlFor="dl-url">URL tautan</Label>
+  1012→                <Input
+  1013→                  id="dl-url"
+  1014→                  value={fUrl}
+  1015→                  onChange={(e) => {
+  1016→                    setFUrl(e.target.value);
+  1017→                    if (urlErr) setUrlErr(null);
+  1018→                  }}
+  1019→                  placeholder="https://drive.google.com/..."
+  1020→                  inputMode="url"
+  1021→                  aria-invalid={Boolean(urlErr)}
+  1022→                />
+  1023→                {urlErr ? (
+  1024→                  <p className="text-xs text-rose-600">{urlErr}</p>
+  1025→                ) : (
+  1026→                  <p className="text-xs text-muted-foreground">Wajib diawali http:// atau https://</p>
+  1027→                )}
+  1028→              </div>
+  1029→            ) : (
+  1030→              <div className="space-y-1.5">
+  1031→                <Label htmlFor="dl-file">Pilih file</Label>
+  1032→                <Input
+  1033→                  id="dl-file"
+  1034→                  type="file"
+  1035→                  onChange={(e) => setFFile(e.target.files?.[0] ?? null)}
+  1036→                  className="cursor-pointer file:mr-3 file:cursor-pointer file:rounded-md file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-slate-700 hover:file:bg-slate-200"
+  1037→                />
+  1038→                {fFile && (
+  1039→                  <p className="text-xs text-muted-foreground">
+  1040→                    {fFile.name} · {formatBytes(fFile.size)}
+  1041→                  </p>
+  1042→                )}
+  1043→                <p className="flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800">
+  1044→                  <Info className="size-3.5 shrink-0" aria-hidden />
+  1045→                  Maks 10 MB — file besar gunakan link Google Drive
+  1046→                </p>
+  1047→              </div>
+  1048→            )}
+  1049→
+  1050→            {/* Milestone terkait */}
+  1051→            <div className="space-y-1.5">
+  1052→              <Label htmlFor="dl-milestone">Milestone terkait (opsional)</Label>
+  1053→              <Select value={fMilestone} onValueChange={setFMilestone}>
+  1054→                <SelectTrigger id="dl-milestone" aria-label="Pilih milestone terkait">
+  1055→                  <SelectValue placeholder="— Tanpa milestone —" />
+  1056→                </SelectTrigger>
+  1057→                <SelectContent>
+  1058→                  <SelectItem value="none">— Tanpa milestone —</SelectItem>
+  1059→                  {(projects.find((p) => p.id === fProjectId)?.milestones ?? []).map((m) => (
+  1060→                    <SelectItem key={m.id} value={m.title}>
+  1061→                      {m.title}
+  1062→                    </SelectItem>
+  1063→                  ))}
+  1064→                </SelectContent>
+  1065→              </Select>
+  1066→            </div>
+  1067→
+  1068→            {/* Catatan */}
+  1069→            <div className="space-y-1.5">
+  1070→              <Label htmlFor="dl-note">Catatan (opsional)</Label>
+  1071→              <Textarea
+  1072→                id="dl-note"
+  1073→                rows={3}
+  1074→                value={fNote}
+  1075→                onChange={(e) => setFNote(e.target.value)}
+  1076→                placeholder="cth: Revisi ke-3, sudah disetujui klien via WhatsApp"
+  1077→              />
+  1078→            </div>
+  1079→          </div>
+  1080→
+  1081→          <DialogFooter>
+  1082→            <Button variant="outline" onClick={() => setDlgOpen(false)} disabled={submitting}>
+  1083→              Batal
+  1084→            </Button>
+  1085→            <Button onClick={() => void submitDeliverable()} disabled={submitting}>
+  1086→              {submitting ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Plus className="size-4" aria-hidden />}
+  1087→              {mode === "LINK" ? "Kirim Tautan" : "Unggah File"}
+  1088→            </Button>
+  1089→          </DialogFooter>
+  1090→        </DialogContent>
+  1091→      </Dialog>
+  1092→    </div>
+  1093→  );
+  1094→}
+  1095→
