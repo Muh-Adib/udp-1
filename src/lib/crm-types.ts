@@ -548,6 +548,7 @@ export interface BrandProfileDTO {
   address: string;
   phone: string;
   email: string;
+  instagram: string; // akun IG resmi brand (mis. @unimasi.id) — dipakai kop surat & identifikasi kanal lead
   website: string;
   primaryColor: string; // hex
   letterheadNote: string; // baris legal di bawah kop

@@ -223,6 +223,7 @@ export const api = {
       address?: string;
       phone?: string;
       email?: string;
+      instagram?: string;
       website?: string;
       primaryColor?: string;
       letterheadNote?: string;

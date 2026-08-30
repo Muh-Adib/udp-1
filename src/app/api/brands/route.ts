@@ -30,7 +30,7 @@ export async function PUT(req: Request) {
   }
 
   const data: Record<string, string> = {};
-  const strFields = ["name", "tagline", "address", "phone", "email", "website", "letterheadNote", "footerNote", "bankInfo"] as const;
+  const strFields = ["name", "tagline", "address", "phone", "email", "instagram", "website", "letterheadNote", "footerNote", "bankInfo"] as const;
   for (const f of strFields) {
     if (body[f] !== undefined) data[f] = String(body[f]).slice(0, 500);
   }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AtSign, Building2, ClipboardPaste, Hash, Loader2, Mail, UserRound } from "lucide-react";
+import { AtSign, Building2, ClipboardPaste, Globe, Hash, Loader2, Mail, UserRound } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api-client";
 import { COUNTRIES, DEFAULT_COUNTRY, findCountry, formatPhoneDisplay } from "@/lib/countries";
-import { BRANDS, type ChannelType, type IntakeLeadResult } from "@/lib/crm-types";
+import { BRANDS, type BrandProfileDTO, type ChannelType, type IntakeLeadResult } from "@/lib/crm-types";
 import { ChannelIcon } from "@/lib/channel-meta";
 
 const SOURCE_OPTIONS: { value: ChannelType | "manual"; label: string; hint: string }[] = [
@@ -56,11 +56,13 @@ export function IntakeLeadDialog({ open, onOpenChange, onCreated }: IntakeLeadDi
   const [igUsername, setIgUsername] = useState("");
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
-  const [brand, setBrand] = useState("unimasi");
+  const [brand, setBrand] = useState(""); // WAJIB dipilih eksplisit — tanpa default senyap
   const [sourceRef, setSourceRef] = useState("");
+  const [brandProfiles, setBrandProfiles] = useState<BrandProfileDTO[]>([]);
   const [busy, setBusy] = useState(false);
 
   const countryInfo = useMemo(() => findCountry(country), [country]);
+  const selectedBrand = useMemo(() => brandProfiles.find((b) => b.brand === brand) ?? null, [brandProfiles, brand]);
 
   useEffect(() => {
     if (!open) return;
@@ -74,9 +76,14 @@ export function IntakeLeadDialog({ open, onOpenChange, onCreated }: IntakeLeadDi
     setIgUsername("");
     setSubject("");
     setBody("");
-    setBrand("unimasi");
+    setBrand("");
     setSourceRef("");
     setBusy(false);
+    // Muat identitas kanal tiap brand (IG/email/web asli) untuk bantuan pemilihan brand
+    api
+      .brands()
+      .then((r) => setBrandProfiles(r.brands))
+      .catch(() => setBrandProfiles([]));
   }, [open]);
 
   // Pra-isi subjek otomatis bila kosong sesuai kanal
@@ -84,7 +91,13 @@ export function IntakeLeadDialog({ open, onOpenChange, onCreated }: IntakeLeadDi
     setSubject((cur) => (cur ? cur : ""));
   }, [channel]);
 
-  const canSubmit = name.trim() && subject.trim() && body.trim() && (phone.trim() || email.trim() || igUsername.trim() || channel === "web" || channel === "manual") && !busy;
+  const canSubmit =
+    name.trim() &&
+    subject.trim() &&
+    body.trim() &&
+    !!brand &&
+    (phone.trim() || email.trim() || igUsername.trim() || channel === "web" || channel === "manual") &&
+    !busy;
 
   async function submit() {
     setBusy(true);
@@ -260,24 +273,75 @@ export function IntakeLeadDialog({ open, onOpenChange, onCreated }: IntakeLeadDi
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="in-brand">Brand yang dituju</Label>
-            <Select value={brand} onValueChange={setBrand}>
-              <SelectTrigger id="in-brand" aria-label="Brand">
-                <SelectValue />
+            <Label htmlFor="in-brand">
+              Brand yang dituju <span className="text-rose-600">*</span>
+            </Label>
+            <Select value={brand} onValueChange={setBrand} required>
+              <SelectTrigger id="in-brand" aria-label="Brand yang dituju (wajib)">
+                <SelectValue placeholder="Pilih brand…" />
               </SelectTrigger>
               <SelectContent>
-                {BRANDS.map((b) => (
-                  <SelectItem key={b.key} value={b.key}>
-                    {b.name}
-                  </SelectItem>
-                ))}
+                {(brandProfiles.length > 0
+                  ? brandProfiles.map((b) => ({ key: b.brand, name: b.name }))
+                  : BRANDS.map((b) => ({ key: b.key as string, name: b.name }))
+                )
+                  .filter((b) => b.key)
+                  .map((b) => (
+                    <SelectItem key={b.key} value={b.key}>
+                      {b.name}
+                    </SelectItem>
+                  ))}
               </SelectContent>
             </Select>
+            {selectedBrand ? (
+              <div className="rounded-lg bg-slate-50 px-2.5 py-2 text-[11px] leading-relaxed text-slate-600">
+                <p className="font-medium text-slate-700">Percakapan tercatat atas akun resmi brand ini:</p>
+                <p className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5">
+                  {selectedBrand.instagram ? (
+                    <span className="inline-flex items-center gap-1">
+                      <AtSign className="size-3 text-slate-400" aria-hidden /> {selectedBrand.instagram}
+                    </span>
+                  ) : null}
+                  {selectedBrand.email ? (
+                    <span className="inline-flex items-center gap-1">
+                      <Mail className="size-3 text-slate-400" aria-hidden /> {selectedBrand.email}
+                    </span>
+                  ) : null}
+                  {selectedBrand.website ? (
+                    <span className="inline-flex items-center gap-1">
+                      <Globe className="size-3 text-slate-400" aria-hidden /> {selectedBrand.website}
+                    </span>
+                  ) : null}
+                </p>
+                <p className="mt-1 italic text-slate-400">Kop dokumen (penawaran/brief) otomatis mengikuti identitas brand ini.</p>
+              </div>
+            ) : (
+              <p className="text-[11px] text-muted-foreground">Wajib dipilih — lead tidak boleh menggantung tanpa brand.</p>
+            )}
           </div>
 
           <div className="space-y-1.5">
             <Label htmlFor="in-ref">Sumber detail (opsional)</Label>
-            <Input id="in-ref" value={sourceRef} onChange={(e) => setSourceRef(e.target.value)} placeholder="mis. @unimasi_id / campaign ads" />
+            <Input
+              id="in-ref"
+              value={sourceRef}
+              onChange={(e) => setSourceRef(e.target.value)}
+              placeholder={
+                selectedBrand
+                  ? channel === "instagram"
+                    ? `mis. DM masuk ke ${selectedBrand.instagram}`
+                    : channel === "email"
+                      ? `mis. masuk ke ${selectedBrand.email}`
+                      : channel === "web"
+                        ? `mis. form di ${selectedBrand.website}`
+                        : channel === "whatsapp"
+                          ? selectedBrand.phone
+                            ? `mis. WA bisnis ${selectedBrand.phone}`
+                            : "mis. WA bisnis brand"
+                          : "mis. event / referral / telepon"
+                  : "Pilih brand dulu untuk saran akun"
+              }
+            />
           </div>
         </div>
 

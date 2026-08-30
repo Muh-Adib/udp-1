@@ -32,6 +32,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { ChannelBadge } from "@/components/channel-badge";
 import { BrandDocDialog } from "@/components/brand-document";
+import { BrandChip } from "@/components/brand-chip";
 import { CreateBriefFromLeadDialog, CreateQuotationFromLeadDialog } from "@/components/lead-doc-dialogs";
 import { BriefDocContent, QuotationDocContent } from "@/components/doc-content";
 import { IntakeLeadDialog } from "@/components/intake-lead-dialog";
@@ -222,6 +223,7 @@ export function InboxView({ user, initialLeadId }: { user: SessionUser; initialL
                     </div>
                     <p className="mt-0.5 truncate text-xs text-muted-foreground">{l.subject}</p>
                     <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                      <BrandChip brand={l.brand} />
                       <ChannelBadge channel={l.channel} />
                       <Badge variant="outline" className={LEAD_STATUS_BADGE[l.status]}>
                         {LEAD_STATUS_LABEL[l.status]}
@@ -433,6 +435,7 @@ function LeadDetailPanel({
               <Badge variant="outline" className="font-mono text-[10px]">
                 {lead.code}
               </Badge>
+              <BrandChip brand={lead.brand} />
               <ChannelBadge channel={lead.channel} />
               <Badge variant="outline" className={LEAD_STATUS_BADGE[lead.status]}>
                 {LEAD_STATUS_LABEL[lead.status]}

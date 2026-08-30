@@ -152,6 +152,7 @@ export async function ingestChannelMessage(input: IngestInput): Promise<IngestRe
     })) ?? null;
 
   let isNewLead = false;
+  const brandKey = await resolveBrand(input.brand, input.channel);
 
   if (!lead) {
     isNewLead = true;
@@ -170,7 +171,7 @@ export async function ingestChannelMessage(input: IngestInput): Promise<IngestRe
       data: {
         code,
         subject,
-        brand: normalizeBrand(input.brand),
+        brand: brandKey,
         channel: input.channel,
         status: "NEW",
         score: CHANNEL_BASE_SCORE[input.channel],
@@ -212,7 +213,7 @@ export async function ingestChannelMessage(input: IngestInput): Promise<IngestRe
   }
 
   if (isNewLead) {
-    const label = BRAND_LABEL_FALLBACK(normalizeBrand(input.brand));
+    const label = BRAND_LABEL_FALLBACK(brandKey);
     await notifyRoles(["OWNER", "MANAGER", "MARKETER"], {
       title: `Lead baru dari ${channelLabel(input.channel)}`,
       body: `${displayName} — ${lead.subject} (${label})`,
@@ -231,9 +232,27 @@ export async function ingestChannelMessage(input: IngestInput): Promise<IngestRe
   return { leadId: lead.id, leadCode: lead.code, isNewLead, contactId: contact.id, contactName: contact.name, newContact: matchedBy === null, matchedBy };
 }
 
-function normalizeBrand(b?: string | null): string {
+/**
+ * Resolusi brand lead — TANPA default senyap ke unimasi bila bisa dihindari:
+ * 1) brand eksplisit dari pemanggil (form intake / webhook identifikasi akun),
+ * 2) defaultBrand kanal (akun resmi yang terpasang pada kanal tsb),
+ * 3) fallback terakhir unimasi (brand utama) agar skema non-null tetap terpenuhi.
+ */
+async function resolveBrand(b: string | null | undefined, channel: string): Promise<string> {
+  const VALID = ["unimasi", "segia", "erfo", "unicam"];
   const v = (b ?? "").trim().toLowerCase();
-  return ["unimasi", "segia", "erfo", "unicam"].includes(v) ? v : "unimasi";
+  if (VALID.includes(v)) return v;
+  try {
+    const cfg = await db.channelConfig.findUnique({ where: { type: channel } });
+    if (cfg) {
+      const json = JSON.parse(cfg.configJson || "{}") as { defaultBrand?: string };
+      const d = (json.defaultBrand ?? "").trim().toLowerCase();
+      if (VALID.includes(d)) return d;
+    }
+  } catch {
+    /* konfigurasi kanal tidak valid — lanjut fallback */
+  }
+  return "unimasi";
 }
 
 function channelLabel(c: ChannelType | "manual"): string {

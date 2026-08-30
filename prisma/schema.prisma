@@ -233,6 +233,7 @@ model BrandProfile {
   address        String   @default("")
   phone          String   @default("")
   email          String   @default("")
+  instagram      String   @default("") // akun Instagram resmi brand (mis. @unimasi.id)
   website        String   @default("")
   primaryColor   String   @default("#059669") // warna identitas (hex)
   letterheadNote String   @default("") // baris legal/izin di bawah kop

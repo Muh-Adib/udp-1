@@ -40,11 +40,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ChannelBadge } from "@/components/channel-badge";
+import { BrandChip } from "@/components/brand-chip";
 import { toast } from "@/components/ui/sonner";
 import { api } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import {
-  BRAND_LABEL,
   CHANNEL_BASE_SCORE,
   LEAD_STAGES,
   LEAD_STAGE_BADGE,
@@ -223,9 +223,7 @@ function LeadCard({
       </p>
       <div className="flex flex-wrap items-center gap-1.5">
         <ChannelBadge channel={lead.channel} />
-        <Badge variant="outline" className="border-slate-200 bg-slate-50 text-slate-600">
-          {BRAND_LABEL[lead.brand] ?? lead.brand}
-        </Badge>
+        <BrandChip brand={lead.brand} />
       </div>
       <p className="text-sm font-bold text-slate-900">{formatRupiah(lead.estValue)}</p>
       <div className="flex flex-wrap items-center gap-1.5 border-t border-slate-100 pt-2">

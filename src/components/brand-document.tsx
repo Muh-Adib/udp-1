@@ -58,7 +58,11 @@ export function BrandDocument({
   children: React.ReactNode;
 }) {
   const c = brand.primaryColor || "#059669";
-  const contactLines = [brand.address, [brand.phone, brand.email].filter(Boolean).join(" · "), brand.website].filter(Boolean);
+  const contactLines = [
+    brand.address,
+    [brand.phone, brand.email].filter(Boolean).join(" · "),
+    [brand.instagram, brand.website].filter(Boolean).join(" · "),
+  ].filter(Boolean);
   return (
     <div
       className="brand-doc mx-auto flex w-full max-w-[800px] flex-col rounded-2xl bg-white p-6 text-slate-900 shadow-2xl sm:p-10"
@@ -142,9 +146,7 @@ export function BrandDocument({
       {/* ===== FOOTER ===== */}
       <footer className="mt-8 border-t pt-3 text-center text-[10px] text-slate-400">
         <p>{brand.footerNote || brand.name}</p>
-        <p>
-          {[brand.address, brand.phone, brand.email].filter(Boolean).join(" · ")}
-        </p>
+        <p>{[brand.address, brand.phone, brand.email, brand.instagram, brand.website].filter(Boolean).join(" · ")}</p>
       </footer>
     </div>
   );

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
+  AtSign,
   FileText,
   Globe,
   Info,
@@ -45,6 +46,7 @@ interface BrandFormState {
   address: string;
   phone: string;
   email: string;
+  instagram: string;
   website: string;
   primaryColor: string;
   letterheadNote: string;
@@ -59,6 +61,7 @@ function toFormState(b: BrandProfileDTO): BrandFormState {
     address: b.address,
     phone: b.phone,
     email: b.email,
+    instagram: b.instagram,
     website: b.website,
     primaryColor: b.primaryColor,
     letterheadNote: b.letterheadNote,
@@ -96,6 +99,7 @@ function LetterheadPreview({
   address,
   phone,
   email,
+  instagram,
   website,
   color,
   logoUrl,
@@ -107,6 +111,7 @@ function LetterheadPreview({
   address: string;
   phone: string;
   email: string;
+  instagram: string;
   website: string;
   color: string;
   logoUrl: string | null;
@@ -116,7 +121,7 @@ function LetterheadPreview({
   const c = HEX_RE.test(color) ? color : "#059669";
   const contactLines = [
     [address, [phone, email].filter(Boolean).join(" · ")].filter(Boolean).join(" — "),
-    website,
+    [instagram, website].filter(Boolean).join(" · "),
   ].filter(Boolean);
   return (
     <div className="rounded-xl border bg-white p-4 shadow-sm">
@@ -278,6 +283,7 @@ export default function BrandView({ user }: { user: SessionUser }) {
         address: form.address,
         phone: form.phone,
         email: form.email,
+        instagram: form.instagram,
         website: form.website,
         primaryColor: form.primaryColor,
         letterheadNote: form.letterheadNote,
@@ -381,6 +387,7 @@ export default function BrandView({ user }: { user: SessionUser }) {
                   address={b.address}
                   phone={b.phone}
                   email={b.email}
+                  instagram={b.instagram}
                   website={b.website}
                   color={b.primaryColor}
                   logoUrl={b.logoUrl}
@@ -397,6 +404,9 @@ export default function BrandView({ user }: { user: SessionUser }) {
                   </p>
                   <p className="flex items-center gap-1.5 truncate">
                     <Mail className="size-3.5 shrink-0 text-slate-400" aria-hidden /> <span className="truncate">{b.email || "—"}</span>
+                  </p>
+                  <p className="flex items-center gap-1.5 truncate">
+                    <AtSign className="size-3.5 shrink-0 text-slate-400" aria-hidden /> <span className="truncate">{b.instagram || "—"}</span>
                   </p>
                   <p className="flex items-center gap-1.5 truncate">
                     <Globe className="size-3.5 shrink-0 text-slate-400" aria-hidden /> <span className="truncate">{b.website || "—"}</span>
@@ -436,6 +446,7 @@ export default function BrandView({ user }: { user: SessionUser }) {
                   address={form.address}
                   phone={form.phone}
                   email={form.email}
+                  instagram={form.instagram}
                   website={form.website}
                   color={form.primaryColor}
                   logoUrl={logoPreview ?? editing.logoUrl}
@@ -465,9 +476,16 @@ export default function BrandView({ user }: { user: SessionUser }) {
                   <Label htmlFor="bf-email">Email</Label>
                   <Input id="bf-email" type="email" value={form.email} onChange={(e) => setField("email", e.target.value)} placeholder="halo@brand.co.id" />
                 </div>
-                <div className="space-y-1.5 sm:col-span-2">
+                <div className="space-y-1.5">
                   <Label htmlFor="bf-website">Website</Label>
                   <Input id="bf-website" value={form.website} onChange={(e) => setField("website", e.target.value)} placeholder="https://brand.co.id" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="bf-instagram">Instagram</Label>
+                  <div className="relative">
+                    <AtSign className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+                    <Input id="bf-instagram" value={form.instagram} onChange={(e) => setField("instagram", e.target.value)} placeholder="@brand.ig" className="pl-8" />
+                  </div>
                 </div>
 
                 {/* Warna utama: color picker + hex tersinkronisasi dua arah */}

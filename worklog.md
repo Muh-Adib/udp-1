@@ -479,3 +479,34 @@ Stage Summary:
 - Milestone kini bisa DIBUAT & DIHAPUS manual dari detail proyek (sebelumnya hanya otomatis) dengan label yang terlihat di mobile.
 - Skor lead transparan: dialog "Bagaimana skor terbentuk?" di Pipeline (basis kanal 15-35, +5/pesan masuk maks +25, +5/balasan, WON=100).
 - Saran lanjutan: kirim otomatis pesan secure link ke kanal lead (WA/IG/email) sekali klik, total bobot milestone = 100% divalidasi server, notifikasi ke sales saat klien membuka dokumen, password expiry hint di halaman publik.
+
+---
+Task ID: 17 (main orchestrator)
+Agent: main (orchestrator)
+Task: Push GitHub dengan PAT user + identitas kanal per brand (Instagram/web/email masing-masing brand) + lead wajib ter-identifikasi brand (tidak boleh kosong)
+
+Work Log:
+- GIT PUSH BERHASIL: user kirim PAT (github_pat_...). Verifikasi via API: token milik Muh-Adib, akses push penuh ke Muh-Adib/udp-1. `git remote set-url origin <token>@github.com/Muh-Adib/udp-1.git` + push 3 commit tertahan (693493f..04063bb). Commit 04063bb = hasil Task 16 (secure link, milestone manual, kartu skor). Semua kerja sebelumnya kini aman di GitHub.
+- Keluhan user: "masing masing brand memiliki instagram dan juga webnya sendiri jadi lead sudah ter identifikasi brand mana yang nyantol tidak blank kosongan, termasuk email nya".
+- AKAR MASALAH DITEMUKAN: `normalizeBrand()` di lead-ingest.ts diam-diam fallback ke "unimasi" untuk lead tanpa brand — lead tidak benar-benar ter-identifikasi brand (persis "blank kosongan" yang dirasakan user). BrandProfile juga belum punya field Instagram.
+- PRISMA: BrandProfile += `instagram String @default("")` + db push + generate.
+- RESTART DEV SERVER 2x: setelah generate pertama, Next.js masih memakai Prisma client lama dari cache (dev.log: "Unknown argument `instagram`") → fix final: `pkill next dev` + `rm -rf .next` + restart. Pelajaran: perubahan schema Prisma = restart + clear .next bila muncul Unknown argument.
+- LIB brands.ts: DEFAULT_BRAND_PROFILES += instagram per brand (@unimasi.id, @segia.tech, @erfo.id, @unicam.studio); getOrCreateBrandProfiles kini BACKFILL field kanal kosong (instagram/email/website/phone) tanpa menimpa editan user (patch hanya utk field kosong); mapBrandProfile += instagram.
+- KONTRAK: BrandProfileDTO += instagram; api-client updateBrand += instagram; /api/brands PUT strFields += instagram.
+- INTAKE API (/api/leads/intake): brand kini WAJIB — kosong → 400 "Pilih brand yang dituju lead", tidak dikenal → 400 (tanpa default senyap).
+- LEAD-INGEST: normalizeBrand diganti resolveBrand async — 1) brand eksplisit, 2) defaultBrand dari configJson ChannelConfig kanal (akun resmi terpasang), 3) fallback unimasi hanya agar kolom non-null terpenuhi (webhook). brandKey dihitung sekali, dipakai lead.create + notifikasi.
+- KOMPONEN BARU brand-chip.tsx: BrandChip — badge brand berdot warna identitas (unimasi emerald/segia teal/erfo amber/unicam violet). Dipasang di: baris list Inbox (paling depan), header detail lead, kartu Pipeline (menggantikan badge BRAND_LABEL polos).
+- INTAKE DIALOG (intake-lead-dialog.tsx): brand state default "" (tanpa default senyap) + marker wajib merah + placeholder "Pilih brand…"; canSubmit menuntut brand terisi; load api.brands() saat dialog dibuka → helper box "Percakapan tercatat atas akun resmi brand ini:" menampilkan IG + email + website brand terpilih + catatan "Kop dokumen otomatis mengikuti identitas brand ini"; placeholder Sumber detail dinamis per kanal dari akun brand (IG → "DM masuk ke @segia.tech", email → "masuk ke halo@...", web → "form di www...", WA → "WA bisnis +62...").
+- BRAND VIEW (brand-view.tsx): form state + input Instagram (ikon AtSign) di dialog edit (sebaris Website); kartu brand += baris Instagram; LetterheadPreview baris kontak kedua = "IG · website" (kartu + live preview edit).
+- KOP SURAT (brand-document.tsx): baris kontak kop += "[instagram · website]"; footer dokumen += instagram. Semua dokumen ter-brand (penawaran/brief/internal + halaman publik /s/token) otomatis menampilkan IG brand.
+- E2E BROWSER (Sinta/marketing): Login persist ✓ → Inbox → Catat Lead Masuk: brand kosong + tombol Catat DISABLED ✓ → pilih Segia Tech → helper "@segia.tech · hello@segia.tech · www.segia.tech" ✓ → isi form (Ayu Lestari, Skincare Global Pte Ltd, WA 812…) → submit → LD-000014 muncul di list dgn chip "Segia Tech" ✓ → detail header "LD-000014 · Segia Tech · WhatsApp Business · Baru · Skor 35/100" (35 = basis kanal WA, skor nyata) ✓.
+- E2E IDENTITAS BRAND: kartu menampilkan @unimasi.id/@segia.tech/@erfo.id/@unicam.studio ✓ → dialog Edit: field Instagram terisi @unimasi.id ✓, live preview kop mengandung IG ✓.
+- MOBILE 390px screenshot: label "Brand yang dituju *" merah + helper akun brand rapi + placeholder sumber detail dinamis ("mis. WA bisnis +62 21 5150 3311") + TANPA overflow horizontal ✓.
+- Verifikasi: bunx tsc --noEmit = 0 error; eslint file tersentuh = 0 error (warning baseline lama pipeline-view); bun run lint = 0 error/2 warning baseline; /api/brands pulih (401 tanpa cookie, 200 dgn sesi).
+
+Stage Summary:
+- PUSH GITHUB AMAN: semua commit tertahan sudah di github.com/Muh-Adib/udp-1 (remote kini menyimpan PAT untuk push berikutnya tanpa input ulang).
+- Setiap brand kini punya identitas kanal lengkap yang bisa diedit Owner/Manajer: Instagram + email + website + telepon (salinan default realistis, backfill otomatis, tidak menimpa editan).
+- LEAD TIDAK LAGI "BLANK KOSONGAN": form intake mewajibkan pilih brand eksplisit (API menolak kosong), staf langsung melihat akun resmi brand (IG/email/web) saat mencatat percakapan, dan chip brand berwarna tampil di daftar/detail Inbox + kartu Pipeline + notifikasi.
+- Kop surat semua dokumen (termasuk halaman secure link publik) kini mencantumkan Instagram brand di samping email & website.
+- Saran lanjutan: filter daftar lead per brand di Inbox; webhook IG memetakan handle via data BrandProfile.instagram (bukan hardcode brandMap); statistik lead per brand di Reports.

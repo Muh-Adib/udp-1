@@ -3,6 +3,8 @@ import { requireAuth } from "@/lib/auth";
 import { ingestChannelMessage } from "@/lib/lead-ingest";
 import { logAudit } from "@/lib/audit";
 
+const DEFAULT_BRAND_KEYS: readonly string[] = ["unimasi", "segia", "erfo", "unicam"];
+
 /**
  * POST /api/leads/intake — pintu masuk lead REAL (bukan dummy).
  * Dipakai form "Lead Masuk" di Inbox: staf mencatat percakapan yang benar-benar terjadi
@@ -29,6 +31,13 @@ export async function POST(req: Request) {
   if (!subject) return NextResponse.json({ error: "Subjek wajib diisi" }, { status: 400 });
   if (!msgBody) return NextResponse.json({ error: "Isi pesan wajib diisi" }, { status: 400 });
 
+  // Brand WAJIB eksplisit — lead tidak boleh menggantung tanpa brand (tidak ada default senyap).
+  const brand = String(body.brand ?? "").trim().toLowerCase();
+  if (!brand) return NextResponse.json({ error: "Pilih brand yang dituju lead" }, { status: 400 });
+  if (!DEFAULT_BRAND_KEYS.includes(brand)) {
+    return NextResponse.json({ error: "Brand tidak dikenal" }, { status: 400 });
+  }
+
   const phone = String(body.phone ?? "").trim();
   const email = String(body.email ?? "").trim();
   const ig = String(body.igUsername ?? "").trim();
@@ -51,7 +60,7 @@ export async function POST(req: Request) {
     contactNotes: body.contactNotes ? String(body.contactNotes) : null,
     body: msgBody,
     subject,
-    brand: body.brand ? String(body.brand) : null,
+    brand,
     sourceRef: body.sourceRef ? String(body.sourceRef) : null,
   });
 

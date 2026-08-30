@@ -11,6 +11,7 @@ export const DEFAULT_BRAND_PROFILES: Record<
     address: string;
     phone: string;
     email: string;
+    instagram: string;
     website: string;
     primaryColor: string;
     letterheadNote: string;
@@ -24,6 +25,7 @@ export const DEFAULT_BRAND_PROFILES: Record<
     address: "Jl. Cendrawasih No. 21, Kebayoran Baru, Jakarta Selatan 12180",
     phone: "+62 21 5150 3311",
     email: "halo@unimasi.id",
+    instagram: "@unimasi.id",
     website: "www.unimasi.id",
     primaryColor: "#059669",
     letterheadNote: "Bagian dari PT. Unicam Digital Pictvres",
@@ -36,6 +38,7 @@ export const DEFAULT_BRAND_PROFILES: Record<
     address: "Jl. Gatot Subroto Kav. 45, Gumaya Tower Lt. 12, Semarang 50249",
     phone: "+62 24 7610 8842",
     email: "hello@segia.tech",
+    instagram: "@segia.tech",
     website: "www.segia.tech",
     primaryColor: "#0D9488",
     letterheadNote: "Bagian dari PT. Unicam Digital Pictvres",
@@ -48,6 +51,7 @@ export const DEFAULT_BRAND_PROFILES: Record<
     address: "Jl. Diponegoro No. 88, Dago, Bandung 40115",
     phone: "+62 22 2504 7788",
     email: "info@erfo.id",
+    instagram: "@erfo.id",
     website: "www.erfo.id",
     primaryColor: "#D97706",
     letterheadNote: "Bagian dari PT. Unicam Digital Pictvres",
@@ -60,6 +64,7 @@ export const DEFAULT_BRAND_PROFILES: Record<
     address: "Jl. Kalibata Raya No. 10, Pancoran, Jakarta Selatan 12740",
     phone: "+62 21 7980 1120",
     email: "studio@unicam.co.id",
+    instagram: "@unicam.studio",
     website: "www.unicam.co.id",
     primaryColor: "#7C3AED",
     letterheadNote: "Bagian dari PT. Unicam Digital Pictvres",
@@ -71,11 +76,21 @@ export const DEFAULT_BRAND_PROFILES: Record<
 /** Ambil semua profil brand; buat otomatis dengan nilai default bila belum ada. */
 export async function getOrCreateBrandProfiles(): Promise<BrandProfile[]> {
   for (const [brand, def] of Object.entries(DEFAULT_BRAND_PROFILES)) {
-    await db.brandProfile.upsert({
-      where: { brand },
-      update: {},
-      create: { brand, ...def },
-    });
+    const existing = await db.brandProfile.findUnique({ where: { brand } });
+    if (!existing) {
+      await db.brandProfile.create({ data: { brand, ...def } });
+      continue;
+    }
+    // Backfill identitas kanal yang masih kosong (mis. kolom instagram baru) —
+    // TIDAK menimpa nilai yang sudah diisi/diedit user.
+    const patch: Record<string, string> = {};
+    if (!existing.instagram && def.instagram) patch.instagram = def.instagram;
+    if (!existing.email && def.email) patch.email = def.email;
+    if (!existing.website && def.website) patch.website = def.website;
+    if (!existing.phone && def.phone) patch.phone = def.phone;
+    if (Object.keys(patch).length > 0) {
+      await db.brandProfile.update({ where: { brand }, data: patch });
+    }
   }
   const rows = await db.brandProfile.findMany({ orderBy: { createdAt: "asc" } });
   // Urutkan sesuai BRANDS agar UI stabil: unimasi, segia, erfo, unicam
@@ -92,6 +107,7 @@ export function mapBrandProfile(b: BrandProfile): BrandProfileDTO {
     address: b.address,
     phone: b.phone,
     email: b.email,
+    instagram: b.instagram,
     website: b.website,
     primaryColor: b.primaryColor,
     letterheadNote: b.letterheadNote,
