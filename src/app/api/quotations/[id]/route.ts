@@ -92,6 +92,13 @@ export async function PATCH(req: Request, ctx: Ctx) {
     })),
   });
 
+  // 2b) Hubungkan brief terakhir lead → proyek (alur Lead → Brief → Estimasi → Penawaran → Proyek)
+  const latestBrief = await db.brief.findFirst({ where: { leadId: lead.id }, orderBy: { createdAt: "desc" } });
+  if (latestBrief) {
+    await db.project.update({ where: { id: project.id }, data: { briefId: latestBrief.id, status: "BRIEFED" } });
+    await db.brief.update({ where: { id: latestBrief.id }, data: { status: "QUOTED" } });
+  }
+
   // 3) Invoice DP 50% otomatis
   const dpp = Math.round(quotation.grandTotal / 1.11 / 2);
   const invoice = await db.invoice.create({
@@ -119,6 +126,9 @@ export async function PATCH(req: Request, ctx: Ctx) {
   });
   await db.notification.create({
     data: { role: "FINANCE", title: `Invoice DP ${invoice.number} terbit`, body: `${invoice.title} — ${invoice.grandTotal.toLocaleString("id-ID")}, jatuh tempo 14 hari`, type: "SYSTEM" },
+  });
+  await db.notification.create({
+    data: { role: "PRODUCTION", title: `Proyek baru ${project.code}`, body: `${project.name} — siap dikerjakan. Milestone & upload file ada di menu Produksi.`, type: "SYSTEM" },
   });
   await logAudit({ actorName: user.name, action: "QUOTATION_APPROVED", entity: "Quotation", entityId: id, detail: `${quotation.number} → ${projectCode} + ${invoice.number}` });
 

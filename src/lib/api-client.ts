@@ -1,9 +1,12 @@
 "use client";
 
 import type {
+  BriefDTO,
   ChannelConfigDTO,
   ContactDTO,
   DashboardStats,
+  DeliverableDTO,
+  EstimateItemDTO,
   FinanceStats,
   InvoiceDTO,
   LeadDTO,
@@ -18,12 +21,15 @@ import type {
   QuotationDTO,
   QuotationItemDTO,
   SessionUser,
+  WorkEstimateDTO,
 } from "@/lib/crm-types";
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
+  // FormData (upload file) tidak boleh diberi Content-Type manual — biarkan browser set multipart boundary
+  const isForm = typeof FormData !== "undefined" && init?.body instanceof FormData;
   const res = await fetch(url, {
     ...init,
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+    headers: isForm ? init?.headers : { "Content-Type": "application/json", ...(init?.headers ?? {}) },
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -112,6 +118,32 @@ export const api = {
   projects: () => request<{ projects: ProjectDTO[] }>("/api/projects"),
   updateProject: (id: string, patch: { status?: string; progress?: number; milestoneId?: string; milestoneStatus?: string }) =>
     request<{ ok: true }>(`/api/projects/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+
+  // ---------- brief & estimasi produksi ----------
+  briefs: () => request<{ briefs: BriefDTO[] }>("/api/briefs"),
+  createBrief: (input: {
+    leadId: string;
+    title: string;
+    objective: string;
+    audience?: string;
+    deliverables?: string;
+    references?: string;
+    deadline?: string;
+    notes?: string;
+  }) => request<{ brief: BriefDTO }>("/api/briefs", { method: "POST", body: JSON.stringify(input) }),
+  updateBrief: (id: string, action: "submit", notes?: string) =>
+    request<{ ok: true; brief: BriefDTO }>(`/api/briefs/${id}`, { method: "PATCH", body: JSON.stringify({ action, notes }) }),
+  createEstimate: (input: { briefId: string; items: EstimateItemDTO[]; notes?: string }) =>
+    request<{ estimate: WorkEstimateDTO; briefCode: string }>("/api/estimates", { method: "POST", body: JSON.stringify(input) }),
+
+  // ---------- deliverable (file produksi / Google Drive) ----------
+  deliverables: (projectId?: string) =>
+    request<{ deliverables: DeliverableDTO[] }>(`/api/deliverables${projectId ? `?projectId=${projectId}` : ""}`),
+  addDeliverableLink: (input: { projectId: string; name: string; url: string; note?: string; milestoneLabel?: string }) =>
+    request<{ deliverable: DeliverableDTO }>("/api/deliverables", { method: "POST", body: JSON.stringify({ type: "LINK", ...input }) }),
+  uploadDeliverableFile: (form: FormData) =>
+    request<{ deliverable: DeliverableDTO }>("/api/deliverables", { method: "POST", body: form }),
+  deleteDeliverable: (id: string) => request<{ ok: true }>(`/api/deliverables/${id}`, { method: "DELETE" }),
 
   // ---------- portal klien ----------
   portalSummary: () => request<PortalSummaryDTO>("/api/portal"),

@@ -7,7 +7,7 @@ import type { DashboardStats, LeadDTO, LeadStatus, ChannelType } from "@/lib/crm
 const CHANNELS_ALL: (ChannelType | "manual")[] = ["whatsapp", "email", "instagram", "web", "manual"];
 
 export async function GET() {
-  const user = await requireAuth(["OWNER", "MANAGER", "MARKETER", "FINANCE"]);
+  const user = await requireAuth(["OWNER", "MANAGER", "MARKETER", "PRODUCTION", "FINANCE"]);
   if (!user) return NextResponse.json({ error: "Tidak diizinkan" }, { status: 401 });
 
   const slaRow = await db.appSetting.findUnique({ where: { key: "firstResponseSlaHours" } });

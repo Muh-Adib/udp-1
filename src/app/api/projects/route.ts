@@ -6,7 +6,7 @@ import { defaultMilestones, mapProject, nextDocNumber } from "@/lib/ops";
 
 /** GET /api/projects — daftar proyek produksi + milestone. */
 export async function GET() {
-  const user = await requireAuth(["OWNER", "MANAGER", "MARKETER", "FINANCE"]);
+  const user = await requireAuth(["OWNER", "MANAGER", "MARKETER", "PRODUCTION", "FINANCE"]);
   if (!user) return NextResponse.json({ error: "Tidak diizinkan" }, { status: 401 });
 
   const projects = await db.project.findMany({
@@ -16,6 +16,8 @@ export async function GET() {
       quotation: { select: { number: true } },
       milestones: true,
       invoices: { select: { grandTotal: true } },
+      deliverables: { orderBy: { createdAt: "desc" } },
+      brief: { select: { code: true, title: true, objective: true, deliverables: true, deadline: true } },
     },
     orderBy: { createdAt: "desc" },
     take: 200,
@@ -27,6 +29,8 @@ export async function GET() {
       leadCode: p.lead?.code ?? null,
       quotationNumber: p.quotation?.number ?? null,
       billedAmount: p.invoices.reduce((s, i) => s + i.grandTotal, 0),
+      deliverables: p.deliverables,
+      brief: p.brief,
     })
   );
 

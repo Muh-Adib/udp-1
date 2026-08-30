@@ -12,7 +12,7 @@ model User {
   name         String
   email        String   @unique
   passwordHash String
-  role         String // OWNER | MANAGER | MARKETER | FINANCE | CLIENT
+  role         String // OWNER | MANAGER | MARKETER | PRODUCTION | FINANCE | CLIENT
   companyId    String? // hanya untuk role CLIENT
   active       Boolean  @default(true)
   createdAt    DateTime @default(now())
@@ -20,6 +20,7 @@ model User {
   company  Company? @relation(fields: [companyId], references: [id])
   leads    Lead[]   @relation("AssigneeLeads")
   messages LeadMessage[] @relation("SenderMessages")
+  briefs   Brief[]  @relation("BriefCreator")
 }
 
 model Company {
@@ -81,11 +82,78 @@ model Lead {
   messages   LeadMessage[]
   quotations Quotation[]
   projects   Project[]
+  briefs     Brief[]
 
   @@index([status])
   @@index([stage])
   @@index([channel])
   @@index([createdAt])
+}
+
+// ============ BRIEF & ESTIMASI PRODUKSI ============
+
+model Brief {
+  id           String    @id @default(cuid())
+  code         String    @unique // BRF-0001
+  leadId       String
+  brand        String
+  title        String
+  objective    String // tujuan kampanye / pekerjaan
+  audience     String? // target audiens
+  deliverables String    @default("") // daftar output yang diminta (multiline)
+  references   String? // link referensi (mendrive dsb)
+  deadline     DateTime?
+  notes        String?
+  status       String    @default("DRAFT") // DRAFT | SUBMITTED | ESTIMATED | QUOTED
+  createdById  String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  lead        Lead           @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  createdBy   User?          @relation("BriefCreator", fields: [createdById], references: [id])
+  estimates   WorkEstimate[]
+  project     Project?
+
+  @@index([status])
+  @@index([leadId])
+}
+
+model WorkEstimate {
+  id            String   @id @default(cuid())
+  briefId       String
+  itemsJson     String   @default("[]") // [{task, qty, unit, hours, cost}]
+  totalHours    Int      @default(0)
+  totalCost     Int      @default(0)
+  notes         String?
+  status        String   @default("SUBMITTED") // SUBMITTED
+  createdById   String?
+  createdByName String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  brief Brief @relation(fields: [briefId], references: [id], onDelete: Cascade)
+
+  @@index([briefId])
+}
+
+model Deliverable {
+  id             String   @id @default(cuid())
+  projectId      String
+  name           String
+  type           String   @default("LINK") // FILE | LINK
+  url            String? // untuk LINK: Google Drive / URL lainnya
+  filePath       String? // untuk FILE: path fisik di server
+  fileName       String?
+  mimeType       String?
+  sizeLabel      String?
+  milestoneLabel String? // opsional: milestone terkait
+  note           String?
+  uploadedByName String
+  createdAt      DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
 }
 
 model LeadMessage {
@@ -188,6 +256,7 @@ model Project {
   companyId   String?
   leadId      String?
   quotationId String?
+  briefId     String? @unique
   status      String    @default("PLANNED") // PLANNED | BRIEFED | IN_PROGRESS | REVIEW | DONE
   progress    Int       @default(0) // 0-100
   budget      Int       @default(0)
@@ -200,8 +269,10 @@ model Project {
   company    Company?    @relation(fields: [companyId], references: [id])
   lead       Lead?       @relation(fields: [leadId], references: [id])
   quotation  Quotation?  @relation(fields: [quotationId], references: [id])
+  brief      Brief?      @relation(fields: [briefId], references: [id])
   milestones Milestone[]
   invoices   Invoice[]
+  deliverables Deliverable[]
 
   @@index([status])
   @@index([brand])

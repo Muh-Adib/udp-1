@@ -16,7 +16,7 @@ const VALID_MS_STATUS = ["PENDING", "IN_PROGRESS", "DONE"];
  * - Toggle milestone → progress proyek dihitung ulang otomatis dari bobot milestone
  */
 export async function PATCH(req: Request, ctx: Ctx) {
-  const user = await requireAuth(["OWNER", "MANAGER", "MARKETER"]);
+  const user = await requireAuth(["OWNER", "MANAGER", "MARKETER", "PRODUCTION"]);
   if (!user) return NextResponse.json({ error: "Tidak diizinkan" }, { status: 401 });
 
   const { id } = await ctx.params;

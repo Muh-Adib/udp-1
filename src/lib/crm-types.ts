@@ -3,12 +3,13 @@
  * Dipakai oleh backend (route handlers) dan frontend (views).
  */
 
-export type Role = "OWNER" | "MANAGER" | "MARKETER" | "FINANCE" | "CLIENT";
+export type Role = "OWNER" | "MANAGER" | "MARKETER" | "PRODUCTION" | "FINANCE" | "CLIENT";
 
 export const ROLE_LABEL: Record<Role, string> = {
   OWNER: "Owner / Dirut",
   MANAGER: "Manajer",
   MARKETER: "Marketing",
+  PRODUCTION: "Produksi",
   FINANCE: "Finance",
   CLIENT: "Klien",
 };
@@ -135,6 +136,85 @@ export const INVOICE_STATUS_BADGE: Record<InvoiceStatus, string> = {
   PARTIAL: "bg-amber-100 text-amber-800 border-amber-200",
   PAID: "bg-emerald-100 text-emerald-800 border-emerald-200",
   OVERDUE: "bg-rose-100 text-rose-700 border-rose-200",
+};
+
+// ============ BRIEF & ESTIMASI ============
+
+export type BriefStatus = "DRAFT" | "SUBMITTED" | "ESTIMATED" | "QUOTED";
+
+export const BRIEF_STATUS_LABEL: Record<BriefStatus, string> = {
+  DRAFT: "Draf",
+  SUBMITTED: "Menunggu Estimasi",
+  ESTIMATED: "Sudah Ters Estimasi",
+  QUOTED: "Sudah Ditawarkan",
+};
+
+export const BRIEF_STATUS_BADGE: Record<BriefStatus, string> = {
+  DRAFT: "bg-stone-200 text-stone-700 border-stone-300",
+  SUBMITTED: "bg-amber-100 text-amber-800 border-amber-200",
+  ESTIMATED: "bg-teal-100 text-teal-800 border-teal-200",
+  QUOTED: "bg-emerald-100 text-emerald-800 border-emerald-200",
+};
+
+export interface EstimateItemDTO {
+  task: string;
+  qty: number;
+  unit: string; // jam | unit | orang dsb
+  hours: number;
+  cost: number;
+}
+
+export interface WorkEstimateDTO {
+  id: string;
+  briefId: string;
+  items: EstimateItemDTO[];
+  totalHours: number;
+  totalCost: number;
+  notes?: string | null;
+  createdByName?: string | null;
+  createdAt: string;
+}
+
+export interface BriefDTO {
+  id: string;
+  code: string;
+  leadId: string;
+  brand: string;
+  title: string;
+  objective: string;
+  audience?: string | null;
+  deliverables: string;
+  references?: string | null;
+  deadline?: string | null;
+  notes?: string | null;
+  status: BriefStatus;
+  createdByName?: string | null;
+  createdAt: string;
+  lead?: { code: string; subject: string; stage?: LeadStage; contactName: string; companyName?: string | null; estValue?: number } | null;
+  estimates: WorkEstimateDTO[];
+  projectCode?: string | null;
+}
+
+export type DeliverableType = "FILE" | "LINK";
+
+export interface DeliverableDTO {
+  id: string;
+  projectId: string;
+  name: string;
+  type: DeliverableType;
+  url?: string | null;
+  fileName?: string | null;
+  mimeType?: string | null;
+  sizeLabel?: string | null;
+  milestoneLabel?: string | null;
+  note?: string | null;
+  uploadedByName: string;
+  createdAt: string;
+}
+
+export const DELIVERABLE_TYPE_LABEL: Record<DeliverableType, string> = {
+  FILE: "File",
+  LINK: "Tautan",
 };
 
 export interface QuotationItemDTO {
@@ -317,6 +397,8 @@ export interface ProjectDTO {
   quotationNumber?: string | null;
   billedAmount: number; // total invoice terkait proyek
   milestones: MilestoneDTO[];
+  deliverables: DeliverableDTO[]; // file produksi / link Google Drive
+  brief?: { code: string; title: string; objective: string; deliverables: string; deadline?: string | null } | null;
 }
 
 export interface PipelineStageStat {

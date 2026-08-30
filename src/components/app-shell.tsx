@@ -6,6 +6,7 @@ import {
   BookOpen,
   Building2,
   Banknote,
+  ClipboardList,
   Factory,
   Inbox,
   KanbanSquare,
@@ -37,25 +38,28 @@ import ClientPortalView from "@/components/views/client-portal-view";
 import PipelineView from "@/components/views/pipeline-view";
 import FinanceView from "@/components/views/finance-view";
 import ProductionView from "@/components/views/production-view";
+import BriefView from "@/components/views/brief-view";
 import GuideView from "@/components/views/guide-view";
 import { api } from "@/lib/api-client";
 import { ROLE_LABEL, type NotificationDTO, type SessionUser } from "@/lib/crm-types";
 import { cn } from "@/lib/utils";
 
-type ViewKey = "dashboard" | "inbox" | "pipeline" | "finance" | "production" | "channels" | "contacts" | "guide" | "portal";
+type ViewKey = "dashboard" | "inbox" | "pipeline" | "brief" | "finance" | "production" | "channels" | "contacts" | "guide" | "portal";
 
-const INTERNAL_ROLES = ["OWNER", "MANAGER", "MARKETER", "FINANCE"];
+const ALL_ROLES = ["OWNER", "MANAGER", "MARKETER", "PRODUCTION", "FINANCE"];
+const SALES_ROLES = ["OWNER", "MANAGER", "MARKETER", "FINANCE"];
 
 const NAV: { key: ViewKey; label: string; icon: typeof LayoutDashboard; roles: string[] }[] = [
-  { key: "dashboard", label: "Dashboard", icon: LayoutDashboard, roles: INTERNAL_ROLES },
-  { key: "inbox", label: "Inbox Lead", icon: Inbox, roles: INTERNAL_ROLES },
-  { key: "pipeline", label: "Pipeline & Funnel", icon: KanbanSquare, roles: INTERNAL_ROLES },
+  { key: "dashboard", label: "Dashboard", icon: LayoutDashboard, roles: ALL_ROLES },
+  { key: "inbox", label: "Inbox Lead", icon: Inbox, roles: SALES_ROLES },
+  { key: "pipeline", label: "Pipeline & Funnel", icon: KanbanSquare, roles: SALES_ROLES },
+  { key: "brief", label: "Brief & Estimasi", icon: ClipboardList, roles: ALL_ROLES },
   { key: "finance", label: "Keuangan", icon: Banknote, roles: ["OWNER", "MANAGER", "FINANCE"] },
-  { key: "production", label: "Produksi", icon: Factory, roles: INTERNAL_ROLES },
-  { key: "channels", label: "Pengaturan Kanal", icon: Radio, roles: INTERNAL_ROLES },
-  { key: "contacts", label: "Kontak", icon: Users, roles: INTERNAL_ROLES },
+  { key: "production", label: "Produksi", icon: Factory, roles: ALL_ROLES },
+  { key: "channels", label: "Pengaturan Kanal", icon: Radio, roles: ["OWNER", "MANAGER", "MARKETER"] },
+  { key: "contacts", label: "Kontak", icon: Users, roles: SALES_ROLES },
   { key: "portal", label: "Portal Klien", icon: Building2, roles: ["CLIENT"] },
-  { key: "guide", label: "Petunjuk", icon: BookOpen, roles: [...INTERNAL_ROLES, "CLIENT"] },
+  { key: "guide", label: "Petunjuk", icon: BookOpen, roles: [...ALL_ROLES, "CLIENT"] },
 ];
 
 export function AppShell() {
@@ -239,6 +243,7 @@ export function AppShell() {
             {effectiveView === "dashboard" && <DashboardView user={user} />}
             {effectiveView === "inbox" && <InboxView user={user} />}
             {effectiveView === "pipeline" && <PipelineView user={user} />}
+            {effectiveView === "brief" && <BriefView user={user} />}
             {effectiveView === "finance" && <FinanceView user={user} />}
             {effectiveView === "production" && <ProductionView user={user} />}
             {effectiveView === "channels" && <ChannelsView user={user} />}

@@ -5,6 +5,7 @@ import {
   AlarmClock,
   Banknote,
   CheckCircle2,
+  ClipboardList,
   Loader2,
   Plus,
   RefreshCw,
@@ -31,6 +32,7 @@ import {
   INVOICE_STATUS_LABEL,
   QUOTATION_STATUS_BADGE,
   QUOTATION_STATUS_LABEL,
+  type BriefDTO,
   type FinanceStats,
   type InvoiceDTO,
   type LeadDTO,
@@ -85,6 +87,7 @@ export default function FinanceView({ user }: { user: SessionUser }) {
   const [createOpen, setCreateOpen] = useState(false);
   const [leadsCache, setLeadsCache] = useState<LeadDTO[] | null>(null);
   const [leadsLoading, setLeadsLoading] = useState(false);
+  const [briefsCache, setBriefsCache] = useState<BriefDTO[] | null>(null);
   const [formLeadId, setFormLeadId] = useState("");
   const [formTitle, setFormTitle] = useState("");
   const [formItems, setFormItems] = useState<DraftItem[]>([emptyDraftItem()]);
@@ -196,7 +199,7 @@ export default function FinanceView({ user }: { user: SessionUser }) {
 
   function openCreate() {
     setCreateOpen(true);
-    // fetch sekali saat dialog pertama kali dibuka
+    // fetch sekali saat dialog pertama kali dibuka (lead + brief utk referensi estimasi)
     if (leadsCache === null) {
       setLeadsLoading(true);
       api
@@ -204,6 +207,12 @@ export default function FinanceView({ user }: { user: SessionUser }) {
         .then(({ leads }) => setLeadsCache(leads))
         .catch((e) => toast.error((e as Error).message))
         .finally(() => setLeadsLoading(false));
+    }
+    if (briefsCache === null) {
+      api
+        .briefs()
+        .then(({ briefs }) => setBriefsCache(briefs))
+        .catch(() => setBriefsCache([]));
     }
   }
 
@@ -821,6 +830,24 @@ export default function FinanceView({ user }: { user: SessionUser }) {
               {!leadsLoading && (leadsCache ?? []).length === 0 && (
                 <p className="text-xs text-muted-foreground">Belum ada lead tersedia.</p>
               )}
+              {(() => {
+                const leadBriefs = (briefsCache ?? []).filter((b) => b.leadId === formLeadId && b.estimates.length > 0);
+                const est = leadBriefs[0]?.estimates[0];
+                if (!est || !leadBriefs[0]) return null;
+                return (
+                  <div className="flex items-start gap-2 rounded-xl border border-teal-200 bg-teal-50 px-3 py-2.5 text-xs text-teal-900">
+                    <ClipboardList className="mt-0.5 size-4 shrink-0 text-teal-600" />
+                    <div>
+                      <p className="font-semibold">
+                        Estimasi produksi tersedia — {leadBriefs[0].code}
+                      </p>
+                      <p>
+                        {est.totalHours} jam kerja · biaya produksi {formatRp(est.totalCost)} (oleh {est.createdByName ?? "tim produksi"}). Gunakan sebagai dasar penentuan harga penawaran.
+                      </p>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
 
             <div className="space-y-1.5">

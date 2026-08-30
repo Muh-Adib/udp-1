@@ -5,7 +5,7 @@ import { LEAD_STAGES, type LeadStage, type PipelineLeadDTO, type PipelineStats }
 
 /** GET /api/pipeline — data funnel & kanban pipeline penjualan. */
 export async function GET() {
-  const user = await requireAuth(["OWNER", "MANAGER", "MARKETER", "FINANCE"]);
+  const user = await requireAuth(["OWNER", "MANAGER", "MARKETER", "PRODUCTION", "FINANCE"]);
   if (!user) return NextResponse.json({ error: "Tidak diizinkan" }, { status: 401 });
 
   const leads = await db.lead.findMany({

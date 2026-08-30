@@ -9,7 +9,7 @@ const STATUSES: ProjectStatus[] = ["PLANNED", "BRIEFED", "IN_PROGRESS", "REVIEW"
 
 /** GET /api/reports/production — agregat produksi (proyek, milestone, per brand). */
 export async function GET() {
-  const user = await requireAuth(["OWNER", "MANAGER", "MARKETER", "FINANCE"]);
+  const user = await requireAuth(["OWNER", "MANAGER", "MARKETER", "PRODUCTION", "FINANCE"]);
   if (!user) return NextResponse.json({ error: "Tidak diizinkan" }, { status: 401 });
 
   const [projects, milestones] = await Promise.all([

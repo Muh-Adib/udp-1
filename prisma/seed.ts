@@ -1,5 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import { randomBytes, scryptSync } from "crypto";
+import { mkdirSync, writeFileSync } from "fs";
+import path from "path";
 
 const db = new PrismaClient();
 
@@ -20,6 +22,9 @@ async function main() {
   await db.notification.deleteMany();
   await db.payment.deleteMany();
   await db.invoice.deleteMany();
+  await db.deliverable.deleteMany();
+  await db.workEstimate.deleteMany();
+  await db.brief.deleteMany();
   await db.milestone.deleteMany();
   await db.project.deleteMany();
   await db.quotation.deleteMany();
@@ -44,6 +49,7 @@ async function main() {
       { name: "Dewi Anggraini", email: "marketing@udp.co.id", passwordHash: hashPassword("marketing123"), role: "MARKETER" },
       { name: "Rizky Hakim", email: "marketing2@udp.co.id", passwordHash: hashPassword("marketing123"), role: "MARKETER" },
       { name: "Putri Larasati", email: "finance@udp.co.id", passwordHash: hashPassword("finance123"), role: "FINANCE" },
+      { name: "Bayu Aji Saputra", email: "produksi@udp.co.id", passwordHash: hashPassword("produksi123"), role: "PRODUCTION" },
       { name: "Bapak Hendra (Klien)", email: "klien@majubersama.co.id", passwordHash: hashPassword("klien123"), role: "CLIENT", companyId: ptMaju.id },
       { name: "Bu Ratna (Klien)", email: "klien@kopikita.id", passwordHash: hashPassword("klien123"), role: "CLIENT", companyId: kopiKita.id },
     ],
@@ -302,6 +308,114 @@ async function main() {
   await db.milestone.create({ data: { projectId: prj2.id, title: "Finalisasi", orderIdx: 4, weight: 20, status: "PENDING", dueDate: ago(-5) } });
   await db.milestone.create({ data: { projectId: prj2.id, title: "Serah Terima", orderIdx: 5, weight: 10, status: "PENDING", dueDate: ago(-7) } });
 
+  // ===== Brief & Estimasi Produksi (alur: Lead → Brief → Estimasi → Penawaran → Proyek) =====
+  const bayu = await db.user.findFirst({ where: { email: "produksi@udp.co.id" } });
+  const sinta = await db.user.findFirst({ where: { email: "manager@udp.co.id" } });
+
+  // BRF-0001: lead PROPOSAL, sudah ada estimasi → siap ditawarkan
+  const brf1 = await db.brief.create({
+    data: {
+      code: "BRF-0001", leadId: l2.id, brand: "segia", title: "Redesign Website Corporate Sinar Jaya",
+      objective: "Memperbarui identitas digital & meningkatkan kredibilitas B2B dengan website corporate baru yang modern.",
+      audience: "Procurement & manajemen B2B (pabrik, distributor, pemerintahan)",
+      deliverables: "Desain UI 12 halaman\nDevelopment WordPress custom\nCopywriting halaman utama\nSetup SEO dasar",
+      references: "https://drive.google.com/drive/folders/referensi-sinarjaya",
+      deadline: new Date(Date.now() + 21 * 86400000), status: "ESTIMATED",
+      createdById: sinta?.id, createdAt: ago(5),
+    },
+  });
+  await db.workEstimate.create({
+    data: {
+      briefId: brf1.id,
+      itemsJson: JSON.stringify([
+        { task: "Riset & wireframe", qty: 2, unit: "hari", hours: 16, cost: 800000 },
+        { task: "Desain UI 12 halaman", qty: 12, unit: "halaman", hours: 60, cost: 750000 },
+        { task: "Development WordPress", qty: 1, unit: "paket", hours: 80, cost: 1200000 },
+        { task: "Copywriting & review konten", qty: 1, unit: "paket", hours: 24, cost: 600000 },
+      ]),
+      totalHours: 180, totalCost: 19800000,
+      notes: "Butuh 1 desainer + 1 programmer, durasi 3 minggu.",
+      status: "SUBMITTED", createdById: bayu?.id, createdByName: "Bayu Aji Saputra", createdAt: ago(3),
+    },
+  });
+
+  // BRF-0002: lead QUALIFIED, menunggu estimasi produksi
+  await db.brief.create({
+    data: {
+      code: "BRF-0002", leadId: l1.id, brand: "unimasi", title: "Website Company Profile + Katalog Produk",
+      objective: "Website company profile 5-7 halaman dengan katalog produk agar calon klien bisa melihat portofolio & produk.",
+      audience: "Owner UMKM & pengelola pengadaan",
+      deliverables: "Desain 7 halaman\nKatalog produk dinamis (min. 50 SKU)\nForm kontak terhubung WhatsApp\nMaintenance 3 bulan",
+      deadline: new Date(Date.now() + 30 * 86400000), status: "SUBMITTED",
+      createdById: dewi?.id, createdAt: ago(1),
+    },
+  });
+
+  // BRF-0003 & BRF-0004: brief untuk lead WON → terhubung proyek produksi
+  const brf3 = await db.brief.create({
+    data: {
+      code: "BRF-0003", leadId: l7.id, brand: "erfo", title: "Konsep Booth Brand Activation Kopi Kita 3 Kota",
+      objective: "Booth modular interaktif untuk aktivasi brand di 3 kota, menarik pengunjung & mendongkrak sampling produk.",
+      audience: "Pengunjung mall & event kuliner (18-40 tahun)",
+      deliverables: "Desain 3D booth modular\nProduksi rangka & print\nDokumentasi event",
+      references: "https://drive.google.com/drive/folders/moodboard-kopikita",
+      deadline: ago(-5), status: "QUOTED",
+      createdById: dewi?.id, createdAt: ago(27),
+    },
+  });
+  await db.project.update({ where: { id: prj2.id }, data: { briefId: brf3.id } });
+
+  const brf4 = await db.brief.create({
+    data: {
+      code: "BRF-0004", leadId: l5.id, brand: "erfo", title: "Paket Konten Sosial Media 3 Bulan Maju Bersama",
+      objective: "Konten feed & reels rutin 3 bulan untuk menjaga engagement & awareness brand di Instagram.",
+      audience: "Ibu rumah tangga & pekerja muda 22-40 tahun",
+      deliverables: "12 konten feed/bulan\n8 reels/bulan\nMonthly report",
+      deadline: ago(-30), status: "QUOTED",
+      createdById: dewi?.id, createdAt: ago(58),
+    },
+  });
+  await db.project.update({ where: { id: prj1.id }, data: { briefId: brf4.id } });
+
+  // ===== Deliverable produksi: file & link Google Drive =====
+  const uploadDir = path.join(process.cwd(), "uploads");
+  mkdirSync(uploadDir, { recursive: true });
+  const demoFileName = `seed-ringkasan-produksi-prj2-${Date.now()}.txt`;
+  writeFileSync(
+    path.join(uploadDir, demoFileName),
+    "RINGKASAN PRODUKSI — PRJ-0002 Brand Activation Booth 3 Kota\n\n" +
+      "- Desain 3D booth modular: disetujui klien (rev. 3)\n- Produksi rangka: 2 dari 3 booth selesai\n" +
+      "- Jadwal Kota 1: minggu depan\n- PIC: Bayu Aji Saputra\n\nDokumen demo dihasilkan otomatis oleh seed UDP CRM.\n"
+  );
+  await db.deliverable.createMany({
+    data: [
+      {
+        projectId: prj2.id, name: "Moodboard & Referensi Booth", type: "LINK",
+        url: "https://drive.google.com/drive/folders/moodboard-kopikita?demo=1",
+        milestoneLabel: "Brief & Konsep", note: "Folder Google Drive berisi moodboard, palet warna, dan referensi material booth.",
+        uploadedByName: "Bayu Aji Saputra", createdAt: ago(22),
+      },
+      {
+        projectId: prj2.id, name: "Desain 3D Booth (rev. 3)", type: "FILE",
+        filePath: demoFileName, fileName: "Desain-3D-Booth-rev3.txt", mimeType: "text/plain", sizeLabel: "1 KB",
+        milestoneLabel: "Produksi Awal", note: "Revisi ke-3 — sudah disetujui klien via WhatsApp.",
+        uploadedByName: "Bayu Aji Saputra", createdAt: ago(12),
+      },
+      {
+        projectId: prj2.id, name: "Jadwal Produksi 3 Kota (Google Sheets)", type: "LINK",
+        url: "https://docs.google.com/spreadsheets/jadwal-produksi-kopikita?demo=1",
+        milestoneLabel: "Review & Revisi", note: "Jadwal rigging & event per kota — diperbarui berkala.",
+        uploadedByName: "Dewi Anggraini", createdAt: ago(5),
+      },
+      {
+        projectId: prj1.id, name: "File Final Konten 3 Bulan", type: "LINK",
+        url: "https://drive.google.com/drive/folders/final-konten-majubersama?demo=1",
+        milestoneLabel: "Serah Terima", note: "Seluruh file final (feed, reels, report) sudah diserahkan ke klien.",
+        uploadedByName: "Bayu Aji Saputra", createdAt: ago(11),
+      },
+    ],
+  });
+
   // ===== Invoice & pembayaran (tersebar untuk chart 6 bulan) =====
   const inv1 = await db.invoice.create({
     data: {
@@ -353,6 +467,8 @@ async function main() {
       { role: "MANAGER", title: "Lead baru dari Form Web", body: "Budi Santoso — Katalog digital 200 SKU (Erfo Multimedia)", type: "NEW_LEAD" },
       { role: "FINANCE", title: "Invoice INV-0004 terbit", body: "Pelunasan — Brand Activation Booth 3 Kota — Rp 16.233.750", type: "SYSTEM" },
       { role: "MANAGER", title: "Milestone Review & Revisi berjalan", body: "PRJ-0002 Brand Activation Booth 3 Kota — progress 50%", type: "SYSTEM" },
+      { role: "PRODUCTION", title: "Brief BRF-0002 menunggu estimasi", body: "Website Company Profile + Katalog Produk — dari Rangga Prasetyo (Unimasi). Mohon hitung estimasi pengerjaan.", type: "SYSTEM" },
+      { role: "MANAGER", title: "Deliverable baru — PRJ-0002", body: "Jadwal Produksi 3 Kota (tautan) dikirim oleh Dewi Anggraini", type: "SYSTEM" },
     ],
   });
 

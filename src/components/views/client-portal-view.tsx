@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Banknote, Building2, Circle, CircleDashed, CheckCircle2, FileText, Inbox, Phone, Wallet } from "lucide-react";
+import { Banknote, Building2, Circle, CircleDashed, CheckCircle2, FileText, FolderOpen, Inbox, Link2, Phone, Wallet } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ChannelBadge } from "@/components/channel-badge";
@@ -195,6 +195,57 @@ export default function ClientPortalView({ user }: { user: SessionUser }) {
                         <span className="ml-auto text-[10px] text-muted-foreground">{m.weight}%</span>
                       </div>
                     ))}
+                  </div>
+                  {/* File dari Tim Produksi (read-only — tanpa aksi hapus untuk klien) */}
+                  <div className="border-t border-slate-100 pt-2.5">
+                    <p className="mb-1.5 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      <FolderOpen className="size-3.5 shrink-0" aria-hidden /> File dari Tim Produksi
+                    </p>
+                    {p.deliverables.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">Belum ada file yang dibagikan.</p>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {p.deliverables.map((d) => (
+                          <div
+                            key={d.id}
+                            className="flex items-center gap-2 rounded-lg border border-slate-100 bg-slate-50/60 px-2.5 py-2 text-xs"
+                          >
+                            {d.type === "LINK" ? (
+                              <Link2 className="size-3.5 shrink-0 text-amber-600" aria-hidden />
+                            ) : (
+                              <FileText className="size-3.5 shrink-0 text-teal-600" aria-hidden />
+                            )}
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate font-medium text-slate-800">{d.name}</p>
+                              <p className="text-[10px] text-muted-foreground">
+                                {d.type === "FILE" && d.sizeLabel ? `${d.sizeLabel} · ` : ""}
+                                {formatDate(d.createdAt)}
+                              </p>
+                            </div>
+                            {d.type === "LINK" ? (
+                              <a
+                                href={d.url ?? "#"}
+                                target="_blank"
+                                rel="noreferrer"
+                                aria-label={`Buka tautan ${d.name}`}
+                                className="shrink-0 font-medium text-emerald-700 hover:underline"
+                              >
+                                Buka
+                              </a>
+                            ) : (
+                              <a
+                                href={`/api/deliverables/${d.id}/download`}
+                                download
+                                aria-label={`Unduh ${d.name}`}
+                                className="shrink-0 font-medium text-teal-700 hover:underline"
+                              >
+                                Unduh
+                              </a>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}

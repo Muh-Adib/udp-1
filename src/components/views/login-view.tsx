@@ -14,6 +14,7 @@ const DEMO_ACCOUNTS: { label: string; email: string; password: string }[] = [
   { label: "Owner", email: "owner@udp.co.id", password: "owner123" },
   { label: "Manajer", email: "manager@udp.co.id", password: "manager123" },
   { label: "Marketing", email: "marketing@udp.co.id", password: "marketing123" },
+  { label: "Produksi", email: "produksi@udp.co.id", password: "produksi123" },
   { label: "Finance", email: "finance@udp.co.id", password: "finance123" },
   { label: "Klien", email: "klien@majubersama.co.id", password: "klien123" },
 ];

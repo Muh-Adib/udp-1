@@ -18,10 +18,12 @@ import {
   Calculator,
   CheckCircle2,
   ChevronDown,
+  ClipboardList,
   Crown,
   Factory,
   Filter,
   Globe,
+  HardHat,
   HelpCircle,
   Inbox,
   LayoutDashboard,
@@ -81,10 +83,11 @@ const ROLE_GUIDES: RoleGuide[] = [
   {
     role: "MANAGER",
     icon: Briefcase,
-    menus: ["Dashboard", "Inbox Lead", "Pipeline & Funnel", "Keuangan", "Produksi", "Kontak"],
+    menus: ["Dashboard", "Inbox Lead", "Pipeline & Funnel", "Brief & Estimasi", "Keuangan", "Produksi", "Kontak"],
     duties: [
       "Memantau funnel & kepatuhan SLA tim",
       "Menugaskan lead ke marketer yang sesuai",
+      "Membuat & mengirim brief ke tim produksi",
       "Mengawasi proyek, milestone, dan progress produksi",
       "Meninjau penawaran sebelum dikirim ke klien",
     ],
@@ -92,20 +95,32 @@ const ROLE_GUIDES: RoleGuide[] = [
   {
     role: "MARKETER",
     icon: Megaphone,
-    menus: ["Dashboard", "Inbox Lead", "Pipeline & Funnel", "Kontak"],
+    menus: ["Dashboard", "Inbox Lead", "Pipeline & Funnel", "Brief & Estimasi", "Kontak"],
     duties: [
       "Membalas pesan pertama lead ≤ SLA 2 jam",
       "Menggeser tahap funnel: kualifikasi → usulan penawaran → negosiasi",
+      "Membuat brief dari lead terkualifikasi dan mengirimnya untuk estimasi",
       "Memprioritaskan lead Hot (skor ≥ 80)",
       "Menandai lead Menang / Hilang beserta alasannya",
     ],
   },
   {
+    role: "PRODUCTION",
+    icon: HardHat,
+    menus: ["Dashboard", "Brief & Estimasi", "Produksi", "Petunjuk"],
+    duties: [
+      "Menghitung estimasi pengerjaan dari brief (jam & biaya)",
+      "Mengerjakan milestone proyek sesuai urutan & bobot",
+      "Mengirim file produksi atau link Google Drive ke proyek",
+      "Menjaga progress proyek tetap akurat di menu Produksi",
+    ],
+  },
+  {
     role: "FINANCE",
     icon: Calculator,
-    menus: ["Dashboard", "Keuangan", "Pipeline & Funnel"],
+    menus: ["Dashboard", "Brief & Estimasi", "Keuangan", "Pipeline & Funnel"],
     duties: [
-      "Membuat & mengirim penawaran (QT)",
+      "Membuat & mengirim penawaran (QT) — pakai estimasi produksi sebagai dasar harga",
       "Menyetujui penawaran — otomatis membuat proyek + invoice DP",
       "Mencatat pembayaran invoice (DP & pelunasan)",
       "Memantau outstanding & invoice jatuh tempo",
@@ -117,6 +132,7 @@ const ROLE_GUIDES: RoleGuide[] = [
     menus: ["Portal Klien"],
     duties: [
       "Melihat proyek & progress milik perusahaannya",
+      "Mengunduh file produksi atau membuka link Google Drive dari Portal",
       "Melihat invoice dan penawaran di Portal",
       "Mengajukan permintaan baru lewat kanal (WA / Email / IG / Web)",
     ],
@@ -165,26 +181,37 @@ const MENU_GUIDES: MenuGuide[] = [
     ],
   },
   {
+    icon: ClipboardList,
+    name: "Brief & Estimasi",
+    desc: "Penghubung antar tim: Marketing membuat brief, Produksi menghitung estimasi, Keuangan menyusun penawaran.",
+    steps: [
+      "Buat brief dari lead terkualifikasi: tujuan, target audiens, deliverable, deadline, dan referensi.",
+      "Klik 'Kirim untuk Estimasi' — tim Produksi mendapat notifikasi.",
+      "Role Produksi membuka brief dan mengisi 'Buat Estimasi': pekerjaan, qty, jam, biaya — total live.",
+      "Setelah ters estimasi, brief berstatus 'Siap Ditawarkan' — lanjutkan di menu Keuangan.",
+    ],
+  },
+  {
     icon: ReceiptText,
     name: "Keuangan",
     desc: "Penawaran (QT), invoice, pembayaran, dan pemantauan outstanding per brand.",
     steps: [
-      "Klik 'Penawaran Baru', pilih lead, isi rincian item, diskon, dan PPN — nomor QT dibuat otomatis.",
+      "Klik 'Penawaran Baru', pilih lead — bila ada estimasi produksi, kotak referensi jam & biaya tampil otomatis.",
+      "Isi rincian item, diskon, dan PPN — nomor QT dibuat otomatis.",
       "Kirim penawaran ke klien (status berubah menjadi 'Terkirim').",
-      "Saat klien setuju, tekan 'Setujui' — sistem otomatis membuat Proyek PRJ + milestone + Invoice DP 50%.",
-      "Catat pembayaran pada invoice (metode & jumlah); status Lunas terdeteksi otomatis.",
-      "Pantau kartu outstanding dan invoice jatuh tempo (merah) secara berkala.",
+      "Saat klien setuju, tekan 'Setujui' — sistem otomatis membuat Proyek PRJ + milestone + Invoice DP 50%, dan brief terhubung ke proyek.",
+      "Catat pembayaran pada invoice; status Lunas terdeteksi otomatis.",
     ],
   },
   {
     icon: Factory,
     name: "Produksi",
-    desc: "Proyek berjalan, milestone berbobot, dan progress pengerjaan yang terhitung otomatis.",
+    desc: "Proyek berjalan, milestone berbobot, progress otomatis, plus kirim file / link Google Drive.",
     steps: [
       "Buka menu Produksi dan pilih proyek yang sedang berjalan.",
       "Kerjakan sesuai urutan milestone; centang (toggle) milestone saat tahap itu selesai.",
-      "Progress proyek terhitung otomatis dari total bobot milestone yang selesai.",
-      "Perbarui status proyek: Brief Masuk → Dikerjakan → Review Klien → Selesai.",
+      "Tab 'File & Google Drive': kirim file final (maks 10 MB) atau tempel link Google Drive per milestone.",
+      "File yang dikirim otomatis tampil di Portal Klien untuk diserahkan ke pelanggan.",
     ],
   },
   {
@@ -453,8 +480,14 @@ export default function GuideView({ user }: { user: SessionUser }) {
                 <FlowArrow />
                 <FlowStep
                   step="4"
+                  title="Brief & Estimasi"
+                  desc="Marketing membuat brief dari lead terkualifikasi, lalu Produksi menghitung estimasi jam & biaya."
+                />
+                <FlowArrow />
+                <FlowStep
+                  step="5"
                   title="Penawaran QT"
-                  desc="Finance membuat penawaran (QT) di menu Keuangan dari lead terkualifikasi, lalu mengirimkannya ke klien."
+                  desc="Finance menyusun penawaran (QT) memakai estimasi produksi sebagai dasar harga, lalu mengirimkannya ke klien."
                 />
               </div>
 
@@ -465,14 +498,14 @@ export default function GuideView({ user }: { user: SessionUser }) {
               {/* Baris 2: keputusan → otomatis → produksi → lunas */}
               <div className="flex flex-col lg:flex-row lg:items-stretch">
                 <FlowStep
-                  step="5"
+                  step="6"
                   title="Disetujui?"
                   tone="amber"
                   desc="Keputusan klien atas penawaran QT yang dikirim."
                 >
                   <div className="mt-2 space-y-1 text-[11px] font-medium">
                     <p className="flex items-center gap-1 text-emerald-700">
-                      <CheckCircle2 className="size-3 shrink-0" /> Ya → lanjut ke langkah 6 (otomatis)
+                      <CheckCircle2 className="size-3 shrink-0" /> Ya → lanjut ke langkah 7 (otomatis)
                     </p>
                     <p className="flex items-center gap-1 text-rose-600">
                       <XCircle className="size-3 shrink-0" /> Tidak → cabang &quot;Tandai Hilang&quot; (lihat bawah)
@@ -481,30 +514,30 @@ export default function GuideView({ user }: { user: SessionUser }) {
                 </FlowStep>
                 <FlowArrow at="lg" />
                 <FlowStep
-                  step="6"
+                  step="7"
                   title="Proyek PRJ + Milestone"
                   tone="emerald"
                   badge="OTOMATIS"
-                  desc="Sistem langsung membuat Proyek PRJ, milestone default, dan Invoice DP 50%."
-                />
-                <FlowArrow at="lg" />
-                <FlowStep
-                  step="7"
-                  title="Produksi"
-                  desc="Tim mengerjakan milestone berbobot — bobot yang selesai menjadi progress proyek."
+                  desc="Sistem membuat Proyek PRJ, menghubungkan brief, milestone default, dan Invoice DP 50%."
                 />
                 <FlowArrow at="lg" />
                 <FlowStep
                   step="8"
+                  title="Produksi + File"
+                  desc="Tim mengerjakan milestone berbobot dan mengirim file produksi / link Google Drive — tampil di Portal Klien."
+                />
+                <FlowArrow at="lg" />
+                <FlowStep
+                  step="9"
                   title="Invoice Pelunasan"
                   desc="Finance menerbitkan invoice pelunasan dan mencatat pembayarannya."
                 />
                 <FlowArrow at="lg" />
                 <FlowStep
-                  step="9"
+                  step="10"
                   title="Lunas & Serah Terima"
                   tone="emerald"
-                  desc="Invoice lunas, proyek berstatus Selesai, hasil diserahkan ke klien."
+                  desc="Invoice lunas, proyek berstatus Selesai, file final diserahkan via Portal."
                 />
               </div>
 

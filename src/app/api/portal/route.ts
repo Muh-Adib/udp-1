@@ -21,6 +21,7 @@ export async function GET() {
         quotation: { select: { number: true } },
         milestones: true,
         invoices: { select: { grandTotal: true } },
+        deliverables: { orderBy: { createdAt: "desc" } },
       },
       orderBy: { createdAt: "desc" },
     }),
@@ -51,6 +52,7 @@ export async function GET() {
         leadCode: p.lead?.code ?? null,
         quotationNumber: p.quotation?.number ?? null,
         billedAmount: p.invoices.reduce((s, i) => s + i.grandTotal, 0),
+        deliverables: p.deliverables,
       })
     ),
     invoices: invoices.map((inv) =>

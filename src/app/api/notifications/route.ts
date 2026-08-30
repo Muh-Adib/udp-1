@@ -4,7 +4,7 @@ import { requireAuth } from "@/lib/auth";
 import type { NotificationDTO } from "@/lib/crm-types";
 
 export async function GET(req: Request) {
-  const user = await requireAuth(["OWNER", "MANAGER", "MARKETER", "FINANCE"]);
+  const user = await requireAuth(["OWNER", "MANAGER", "MARKETER", "PRODUCTION", "FINANCE"]);
   if (!user) return NextResponse.json({ error: "Tidak diizinkan" }, { status: 401 });
 
   const url = new URL(req.url);
@@ -36,7 +36,7 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const user = await requireAuth(["OWNER", "MANAGER", "MARKETER", "FINANCE"]);
+  const user = await requireAuth(["OWNER", "MANAGER", "MARKETER", "PRODUCTION", "FINANCE"]);
   if (!user) return NextResponse.json({ error: "Tidak diizinkan" }, { status: 401 });
   const body = await req.json().catch(() => ({}));
   if (body.ids && Array.isArray(body.ids)) {
