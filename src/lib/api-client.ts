@@ -4,9 +4,19 @@ import type {
   ChannelConfigDTO,
   ContactDTO,
   DashboardStats,
+  FinanceStats,
+  InvoiceDTO,
   LeadDTO,
   LeadMessageDTO,
   NotificationDTO,
+  OverviewStats,
+  PipelineLeadDTO,
+  PipelineStats,
+  PortalSummaryDTO,
+  ProductionStats,
+  ProjectDTO,
+  QuotationDTO,
+  QuotationItemDTO,
   SessionUser,
 } from "@/lib/crm-types";
 
@@ -70,4 +80,39 @@ export const api = {
   getSettings: () => request<{ firstResponseSlaHours: number }>("/api/settings"),
   updateSettings: (firstResponseSlaHours: number) =>
     request<{ ok: true }>("/api/settings", { method: "PUT", body: JSON.stringify({ firstResponseSlaHours }) }),
+
+  // ---------- pipeline / funnel ----------
+  pipeline: () => request<{ stats: PipelineStats; leads: PipelineLeadDTO[] }>("/api/pipeline"),
+  updateLeadStage: (id: string, patch: { stage?: string; estValue?: number; lostReason?: string }) =>
+    request<{ ok: true; stage: string; status: string }>(`/api/leads/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+
+  // ---------- keuangan ----------
+  quotations: () => request<{ quotations: QuotationDTO[] }>("/api/quotations"),
+  createQuotation: (input: {
+    leadId: string;
+    title: string;
+    items: QuotationItemDTO[];
+    discountPct?: number;
+    ppnPct?: number;
+    notes?: string;
+  }) => request<{ quotation: QuotationDTO }>("/api/quotations", { method: "POST", body: JSON.stringify(input) }),
+  updateQuotationStatus: (id: string, action: "send" | "approve" | "reject", decidedNote?: string) =>
+    request<{ ok: true; projectCode?: string | null; invoiceNumber?: string | null }>(`/api/quotations/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ action, decidedNote }),
+    }),
+  invoices: () => request<{ invoices: InvoiceDTO[] }>("/api/invoices"),
+  addPayment: (invoiceId: string, input: { amount: number; method?: string; note?: string }) =>
+    request<{ invoice: InvoiceDTO }>(`/api/invoices/${invoiceId}/payments`, { method: "POST", body: JSON.stringify(input) }),
+  financeStats: () => request<{ stats: FinanceStats }>("/api/reports/finance"),
+  productionStats: () => request<{ stats: ProductionStats }>("/api/reports/production"),
+  overviewStats: () => request<{ stats: OverviewStats }>("/api/reports/overview"),
+
+  // ---------- produksi ----------
+  projects: () => request<{ projects: ProjectDTO[] }>("/api/projects"),
+  updateProject: (id: string, patch: { status?: string; progress?: number; milestoneId?: string; milestoneStatus?: string }) =>
+    request<{ ok: true }>(`/api/projects/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+
+  // ---------- portal klien ----------
+  portalSummary: () => request<PortalSummaryDTO>("/api/portal"),
 };

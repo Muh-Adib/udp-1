@@ -5,7 +5,7 @@ import { ingestChannelMessage } from "@/lib/lead-ingest";
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, X-GK-Api-Key",
+  "Access-Control-Allow-Headers": "Content-Type, X-UDP-Api-Key",
 };
 
 export async function OPTIONS() {
@@ -15,7 +15,7 @@ export async function OPTIONS() {
 /**
  * Endpoint form kontak website.
  * - POST JSON { name, email, phone, message, brand?, page? } atau form-encoded
- * - Autentikasi: header `X-GK-Api-Key` atau query `?key=` = apiKey kanal web
+ * - Autentikasi: header `X-UDP-Api-Key` atau query `?key=` = apiKey kanal web
  * Dipakai oleh snippet embed di website tiap brand.
  */
 export async function POST(req: Request) {

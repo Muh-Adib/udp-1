@@ -1,5 +1,5 @@
 /**
- * Kontrak tipe bersama untuk Grupa Kreasi CRM.
+ * Kontrak tipe bersama untuk UDP CRM — PT. Unicam Digital Pictvres.
  * Dipakai oleh backend (route handlers) dan frontend (views).
  */
 
@@ -52,6 +52,97 @@ export const BRAND_LABEL: Record<string, string> = Object.fromEntries(BRANDS.map
 
 export type LeadStatus = "NEW" | "FOLLOW_UP" | "QUOTED" | "WON" | "LOST";
 
+/** Tahapan funnel penjualan (stage detail). `status` adalah ringkasan yang tersinkron otomatis. */
+export type LeadStage = "NEW" | "QUALIFIED" | "PROPOSAL" | "NEGOTIATION" | "WON" | "LOST";
+
+export const LEAD_STAGES: LeadStage[] = ["NEW", "QUALIFIED", "PROPOSAL", "NEGOTIATION", "WON", "LOST"];
+
+export const LEAD_STAGE_LABEL: Record<LeadStage, string> = {
+  NEW: "Lead Baru",
+  QUALIFIED: "Terkualifikasi",
+  PROPOSAL: "Usulan Penawaran",
+  NEGOTIATION: "Negosiasi",
+  WON: "Menang",
+  LOST: "Hilang",
+};
+
+export const LEAD_STAGE_BADGE: Record<LeadStage, string> = {
+  NEW: "bg-amber-100 text-amber-800 border-amber-200",
+  QUALIFIED: "bg-teal-100 text-teal-800 border-teal-200",
+  PROPOSAL: "bg-violet-100 text-violet-800 border-violet-200",
+  NEGOTIATION: "bg-orange-100 text-orange-800 border-orange-200",
+  WON: "bg-emerald-100 text-emerald-800 border-emerald-200",
+  LOST: "bg-rose-100 text-rose-700 border-rose-200",
+};
+
+/** Pemetaan stage → status ringkasan (untuk sinkronisasi kolom lama). */
+export const STAGE_TO_STATUS: Record<LeadStage, LeadStatus> = {
+  NEW: "NEW",
+  QUALIFIED: "FOLLOW_UP",
+  PROPOSAL: "QUOTED",
+  NEGOTIATION: "QUOTED",
+  WON: "WON",
+  LOST: "LOST",
+};
+
+export const LOST_REASONS = ["Harga", "Kompetitor", "Budget tidak ada", "Timing", "Tidak ada balasan", "Lainnya"] as const;
+
+export type ProjectStatus = "PLANNED" | "BRIEFED" | "IN_PROGRESS" | "REVIEW" | "DONE";
+
+export const PROJECT_STATUS_LABEL: Record<ProjectStatus, string> = {
+  PLANNED: "Perencanaan",
+  BRIEFED: "Brief Masuk",
+  IN_PROGRESS: "Dikerjakan",
+  REVIEW: "Review Klien",
+  DONE: "Selesai",
+};
+
+export const PROJECT_STATUS_BADGE: Record<ProjectStatus, string> = {
+  PLANNED: "bg-stone-200 text-stone-700 border-stone-300",
+  BRIEFED: "bg-amber-100 text-amber-800 border-amber-200",
+  IN_PROGRESS: "bg-teal-100 text-teal-800 border-teal-200",
+  REVIEW: "bg-violet-100 text-violet-800 border-violet-200",
+  DONE: "bg-emerald-100 text-emerald-800 border-emerald-200",
+};
+
+export type QuotationStatus = "DRAFT" | "SENT" | "APPROVED" | "REJECTED";
+
+export const QUOTATION_STATUS_LABEL: Record<QuotationStatus, string> = {
+  DRAFT: "Draf",
+  SENT: "Terkirim",
+  APPROVED: "Disetujui",
+  REJECTED: "Ditolak",
+};
+
+export const QUOTATION_STATUS_BADGE: Record<QuotationStatus, string> = {
+  DRAFT: "bg-stone-200 text-stone-700 border-stone-300",
+  SENT: "bg-amber-100 text-amber-800 border-amber-200",
+  APPROVED: "bg-emerald-100 text-emerald-800 border-emerald-200",
+  REJECTED: "bg-rose-100 text-rose-700 border-rose-200",
+};
+
+export type InvoiceStatus = "UNPAID" | "PARTIAL" | "PAID" | "OVERDUE";
+
+export const INVOICE_STATUS_LABEL: Record<InvoiceStatus, string> = {
+  UNPAID: "Belum Dibayar",
+  PARTIAL: "Dibayar Sebagian",
+  PAID: "Lunas",
+  OVERDUE: "Jatuh Tempo",
+};
+
+export const INVOICE_STATUS_BADGE: Record<InvoiceStatus, string> = {
+  UNPAID: "bg-stone-200 text-stone-700 border-stone-300",
+  PARTIAL: "bg-amber-100 text-amber-800 border-amber-200",
+  PAID: "bg-emerald-100 text-emerald-800 border-emerald-200",
+  OVERDUE: "bg-rose-100 text-rose-700 border-rose-200",
+};
+
+export interface QuotationItemDTO {
+  desc: string;
+  qty: number;
+  price: number;
+}
+
 export const LEAD_STATUS_LABEL: Record<LeadStatus, string> = {
   NEW: "Baru",
   FOLLOW_UP: "Diikuti",
@@ -92,6 +183,8 @@ export interface LeadDTO {
   brand: string;
   channel: ChannelType | "manual";
   status: LeadStatus;
+  stage?: LeadStage;
+  estValue?: number;
   score: number;
   sourceRef?: string | null;
   lostReason?: string | null;
@@ -157,6 +250,134 @@ export interface ContactDTO {
   company?: string | null;
   createdAt: string;
   leadCount: number;
+}
+
+export interface QuotationDTO {
+  id: string;
+  number: string;
+  leadId: string;
+  brand: string;
+  title: string;
+  items: QuotationItemDTO[];
+  subtotal: number;
+  discountPct: number;
+  ppnPct: number;
+  grandTotal: number;
+  status: QuotationStatus;
+  notes?: string | null;
+  sentAt?: string | null;
+  decidedAt?: string | null;
+  decidedNote?: string | null;
+  createdAt: string;
+  lead?: { code: string; subject: string; contactName: string; companyName?: string | null } | null;
+  projectCode?: string | null; // terisi bila proyek produksi sudah dibuat
+}
+
+export interface InvoiceDTO {
+  id: string;
+  number: string;
+  brand: string;
+  title: string;
+  amount: number;
+  ppnPct: number;
+  grandTotal: number;
+  paidAmount: number;
+  dueDate?: string | null;
+  status: InvoiceStatus;
+  issuedAt: string;
+  projectCode?: string | null;
+  quotationNumber?: string | null;
+  companyName?: string | null;
+  payments: { id: string; amount: number; method: string; paidAt: string; note?: string | null }[];
+}
+
+export interface MilestoneDTO {
+  id: string;
+  title: string;
+  orderIdx: number;
+  weight: number;
+  status: "PENDING" | "IN_PROGRESS" | "DONE";
+  dueDate?: string | null;
+  doneAt?: string | null;
+}
+
+export interface ProjectDTO {
+  id: string;
+  code: string;
+  name: string;
+  brand: string;
+  status: ProjectStatus;
+  progress: number;
+  budget: number;
+  managerName?: string | null;
+  startDate?: string | null;
+  dueDate?: string | null;
+  companyName?: string | null;
+  leadCode?: string | null;
+  quotationNumber?: string | null;
+  billedAmount: number; // total invoice terkait proyek
+  milestones: MilestoneDTO[];
+}
+
+export interface PipelineStageStat {
+  stage: LeadStage;
+  count: number;
+  value: number; // akumulasi estValue
+  pctOfWon: number; // konversi terhadap total lead masuk (won+lost)
+}
+
+export interface PipelineStats {
+  stages: PipelineStageStat[];
+  totalOpen: number;
+  totalValueOpen: number;
+  wonCount: number;
+  wonValue: number;
+  lostCount: number;
+  conversionPct: number; // won / (won+lost)
+  avgDealSize: number;
+}
+
+export interface PipelineLeadDTO extends LeadDTO {
+  stage: LeadStage;
+  estValue: number;
+  quotationCount?: number;
+}
+
+export interface FinanceStats {
+  revenuePaid: number; // total pembayaran masuk
+  outstanding: number; // belum dibayar (termasuk sebagian)
+  overdueCount: number;
+  invoiceCount: number;
+  quotationCount: number;
+  quotationApprovedPct: number;
+  monthly: { month: string; label: string; revenue: number; invoiced: number }[]; // 6 bulan terakhir
+  byBrand: { brand: string; revenue: number; outstanding: number }[];
+  statusBreakdown: { status: InvoiceStatus; count: number; amount: number }[];
+}
+
+export interface ProductionStats {
+  totalProjects: number;
+  activeCount: number; // belum DONE
+  doneCount: number;
+  avgProgress: number;
+  milestoneDonePct: number;
+  byStatus: { status: ProjectStatus; count: number }[];
+  monthly: { month: string; label: string; completed: number; started: number }[]; // 6 bulan terakhir
+  byBrand: { brand: string; active: number; done: number; budget: number }[];
+}
+
+/** Gabungan keuangan + produksi — "bagan keuangan dan produksi bekerja sama". */
+export interface OverviewStats {
+  monthly: { month: string; label: string; revenue: number; projectsCompleted: number; leadsWon: number }[];
+  perBrand: { brand: string; revenue: number; activeProjects: number; doneProjects: number; pipelineValue: number }[];
+  totals: { revenue: number; projectsDone: number; projectsActive: number; pipelineValue: number; avgProjectValue: number };
+}
+
+export interface PortalSummaryDTO {
+  company: { name: string } | null;
+  projects: ProjectDTO[];
+  invoices: InvoiceDTO[];
+  quotations: QuotationDTO[];
 }
 
 export const SLA_KEY = "firstResponseSlaHours";

@@ -3,8 +3,8 @@ import { cookies } from "next/headers";
 import { db } from "@/lib/db";
 import type { Role, SessionUser } from "@/lib/crm-types";
 
-const SECRET = process.env.SESSION_SECRET || "grupa-kreasi-dev-secret-change-me";
-const COOKIE_NAME = "gk_session";
+const SECRET = process.env.SESSION_SECRET || "udp-dev-secret-change-me";
+const COOKIE_NAME = "udp_session";
 const MAX_AGE = 60 * 60 * 24 * 7; // 7 hari
 
 export function hashPassword(password: string): string {

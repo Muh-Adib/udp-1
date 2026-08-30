@@ -3,8 +3,12 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Bell,
+  BookOpen,
   Building2,
+  Banknote,
+  Factory,
   Inbox,
+  KanbanSquare,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -30,18 +34,28 @@ import { InboxView } from "@/components/views/inbox-view";
 import { ChannelsView } from "@/components/views/channels-view";
 import ContactsView from "@/components/views/contacts-view";
 import ClientPortalView from "@/components/views/client-portal-view";
+import PipelineView from "@/components/views/pipeline-view";
+import FinanceView from "@/components/views/finance-view";
+import ProductionView from "@/components/views/production-view";
+import GuideView from "@/components/views/guide-view";
 import { api } from "@/lib/api-client";
 import { ROLE_LABEL, type NotificationDTO, type SessionUser } from "@/lib/crm-types";
 import { cn } from "@/lib/utils";
 
-type ViewKey = "dashboard" | "inbox" | "channels" | "contacts" | "portal";
+type ViewKey = "dashboard" | "inbox" | "pipeline" | "finance" | "production" | "channels" | "contacts" | "guide" | "portal";
+
+const INTERNAL_ROLES = ["OWNER", "MANAGER", "MARKETER", "FINANCE"];
 
 const NAV: { key: ViewKey; label: string; icon: typeof LayoutDashboard; roles: string[] }[] = [
-  { key: "dashboard", label: "Dashboard", icon: LayoutDashboard, roles: ["OWNER", "MANAGER", "MARKETER", "FINANCE"] },
-  { key: "inbox", label: "Inbox Lead", icon: Inbox, roles: ["OWNER", "MANAGER", "MARKETER", "FINANCE"] },
-  { key: "channels", label: "Pengaturan Kanal", icon: Radio, roles: ["OWNER", "MANAGER", "MARKETER", "FINANCE"] },
-  { key: "contacts", label: "Kontak", icon: Users, roles: ["OWNER", "MANAGER", "MARKETER", "FINANCE"] },
+  { key: "dashboard", label: "Dashboard", icon: LayoutDashboard, roles: INTERNAL_ROLES },
+  { key: "inbox", label: "Inbox Lead", icon: Inbox, roles: INTERNAL_ROLES },
+  { key: "pipeline", label: "Pipeline & Funnel", icon: KanbanSquare, roles: INTERNAL_ROLES },
+  { key: "finance", label: "Keuangan", icon: Banknote, roles: ["OWNER", "MANAGER", "FINANCE"] },
+  { key: "production", label: "Produksi", icon: Factory, roles: INTERNAL_ROLES },
+  { key: "channels", label: "Pengaturan Kanal", icon: Radio, roles: INTERNAL_ROLES },
+  { key: "contacts", label: "Kontak", icon: Users, roles: INTERNAL_ROLES },
   { key: "portal", label: "Portal Klien", icon: Building2, roles: ["CLIENT"] },
+  { key: "guide", label: "Petunjuk", icon: BookOpen, roles: [...INTERNAL_ROLES, "CLIENT"] },
 ];
 
 export function AppShell() {
@@ -91,7 +105,7 @@ export function AppShell() {
       <div className="flex min-h-screen items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-3">
           <RefreshCw className="size-6 animate-spin text-muted-foreground" />
-          <p className="text-sm text-muted-foreground">Memuat Grupa Kreasi CRM…</p>
+          <p className="text-sm text-muted-foreground">Memuat CRM UDP…</p>
         </div>
       </div>
     );
@@ -120,10 +134,10 @@ export function AppShell() {
   const SidebarContent = (
     <>
       <div className="flex items-center gap-2.5 px-4 py-5">
-        <span className="flex size-9 items-center justify-center rounded-xl bg-emerald-500 font-black text-white">GK</span>
+        <span className="flex size-9 items-center justify-center rounded-xl bg-emerald-500 font-black text-white">UDP</span>
         <div>
-          <p className="text-sm font-bold leading-tight">Grupa Kreasi</p>
-          <p className="text-[10px] leading-tight text-slate-400">CRM Multi-Brand</p>
+          <p className="text-sm font-bold leading-tight">UDP CRM</p>
+          <p className="text-[10px] leading-tight text-slate-400">PT. Unicam Digital Pictvres</p>
         </div>
       </div>
       <nav className="flex-1 space-y-1 px-3" aria-label="Navigasi utama">
@@ -175,8 +189,8 @@ export function AppShell() {
           <Menu className="size-5" />
         </Button>
         <span className="flex items-center gap-2 text-sm font-bold">
-          <span className="flex size-7 items-center justify-center rounded-lg bg-slate-900 text-[10px] font-black text-white">GK</span>
-          Grupa Kreasi
+          <span className="flex size-7 items-center justify-center rounded-lg bg-slate-900 text-[10px] font-black text-white">UDP</span>
+          UDP CRM
         </span>
         <div className="ml-auto flex items-center gap-1">
           {user.role !== "CLIENT" && <NotifBell unread={unread} notifs={notifs} open={notifOpen} setOpen={setNotifOpen} onMarkAll={() => void loadNotifs(true)} onOpenChange={() => void loadNotifs()} />}
@@ -224,8 +238,12 @@ export function AppShell() {
 
             {effectiveView === "dashboard" && <DashboardView user={user} />}
             {effectiveView === "inbox" && <InboxView user={user} />}
+            {effectiveView === "pipeline" && <PipelineView user={user} />}
+            {effectiveView === "finance" && <FinanceView user={user} />}
+            {effectiveView === "production" && <ProductionView user={user} />}
             {effectiveView === "channels" && <ChannelsView user={user} />}
             {effectiveView === "contacts" && <ContactsView user={user} />}
+            {effectiveView === "guide" && <GuideView user={user} />}
             {effectiveView === "portal" && <ClientPortalView user={user} />}
           </div>
         </main>
@@ -234,7 +252,7 @@ export function AppShell() {
       {/* Footer sticky */}
       <footer className="mt-auto border-t bg-card">
         <div className="mx-auto flex w-full max-w-6xl flex-col items-center justify-between gap-1.5 px-4 py-3 text-xs text-muted-foreground sm:flex-row sm:px-6 lg:px-8">
-          <p>© 2026 Grupa Kreasi — Unimasi · Segia Tech · Erfo Multimedia · Unicam Studio</p>
+          <p>© 2026 UDP — PT. Unicam Digital Pictvres · Unimasi · Segia Tech · Erfo Multimedia · Unicam Studio</p>
           <p className="flex items-center gap-1.5">
             <Radio className="size-3" /> Kanal terhubung: WhatsApp · Email · Instagram · Web
           </p>

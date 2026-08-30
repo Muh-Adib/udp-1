@@ -11,10 +11,10 @@ import { api } from "@/lib/api-client";
 import type { SessionUser } from "@/lib/crm-types";
 
 const DEMO_ACCOUNTS: { label: string; email: string; password: string }[] = [
-  { label: "Owner", email: "owner@grupakreasi.id", password: "owner123" },
-  { label: "Manajer", email: "manager@grupakreasi.id", password: "manager123" },
-  { label: "Marketing", email: "marketing@grupakreasi.id", password: "marketing123" },
-  { label: "Finance", email: "finance@grupakreasi.id", password: "finance123" },
+  { label: "Owner", email: "owner@udp.co.id", password: "owner123" },
+  { label: "Manajer", email: "manager@udp.co.id", password: "manager123" },
+  { label: "Marketing", email: "marketing@udp.co.id", password: "marketing123" },
+  { label: "Finance", email: "finance@udp.co.id", password: "finance123" },
   { label: "Klien", email: "klien@majubersama.co.id", password: "klien123" },
 ];
 
@@ -58,10 +58,11 @@ export default function LoginView({ onLogin }: { onLogin: (user: SessionUser) =>
         {/* Brand header */}
         <div className="flex flex-col items-center gap-3 text-center">
           <div className="flex size-12 items-center justify-center rounded-2xl bg-emerald-500 shadow-lg shadow-emerald-500/25">
-            <span className="text-lg font-black tracking-tight text-slate-950">GK</span>
+            <span className="text-lg font-black tracking-tight text-slate-950">UDP</span>
           </div>
           <div className="space-y-1">
-            <h1 className="text-2xl font-bold tracking-tight text-slate-50">Grupa Kreasi</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-slate-50">UDP CRM</h1>
+            <p className="text-[11px] font-medium tracking-wide text-emerald-400">PT. UNICAM DIGITAL PICTVRES</p>
             <p className="text-xs text-slate-400 sm:text-sm">
               CRM Multi-Brand — Unimasi · Segia Tech · Erfo Multimedia · Unicam Studio
             </p>
@@ -82,7 +83,7 @@ export default function LoginView({ onLogin }: { onLogin: (user: SessionUser) =>
                   id="login-email"
                   type="email"
                   autoComplete="email"
-                  placeholder="nama@grupakreasi.id"
+                  placeholder="nama@udp.co.id"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
@@ -159,7 +160,7 @@ export default function LoginView({ onLogin }: { onLogin: (user: SessionUser) =>
         </Card>
 
         <p className="text-center text-xs text-slate-500">
-          © {new Date().getFullYear()} Grupa Kreasi — Semua kanal lead dalam satu dashboard.
+          © {new Date().getFullYear()} UDP — Semua kanal lead dalam satu dashboard.
         </p>
       </div>
     </div>

@@ -23,28 +23,28 @@ export function maskSecret(value?: string | null): string {
 /** Definisi field konfigurasi per kanal — dipakai oleh form Pengaturan Kanal. */
 export const CHANNEL_CONFIG_FIELDS: Record<ChannelType, ChannelField[]> = {
   whatsapp: [
-    { key: "displayName", label: "Nama Tampilan Nomor", placeholder: "Grupa Kreasi WA Bisnis", required: true },
+    { key: "displayName", label: "Nama Tampilan Nomor", placeholder: "UDP WA Bisnis", required: true },
     { key: "phoneNumber", label: "Nomor WhatsApp Bisnis", placeholder: "+62 812-3456-7890", required: true },
     { key: "phoneNumberId", label: "Phone Number ID (Meta Cloud API)", placeholder: "123456789012345", required: true, hint: "Ambil dari Meta Business Suite → WhatsApp → API Setup." },
     { key: "accessToken", label: "Access Token (permanen)", type: "password", placeholder: "EAAG...", required: true, secret: true, hint: "Token sistem pengguna dengan izin whatsapp_business_messaging." },
     { key: "apiVersion", label: "Versi Graph API", placeholder: "v21.0", hint: "Kosongkan untuk default v21.0." },
   ],
   email: [
-    { key: "displayName", label: "Nama Tampilan", placeholder: "Sales & Inquiry Grupa Kreasi", required: true },
-    { key: "inboundAddress", label: "Alamat Email Masuk", placeholder: "leads@grupakreasi.id", required: true, hint: "Semua inquiry dari website/kartu nama diarahkan ke alamat ini." },
+    { key: "displayName", label: "Nama Tampilan", placeholder: "Sales & Inquiry UDP", required: true },
+    { key: "inboundAddress", label: "Alamat Email Masuk", placeholder: "leads@udp.co.id", required: true, hint: "Semua inquiry dari website/kartu nama diarahkan ke alamat ini." },
     { key: "forwardingRule", label: "Aturan Forwarding / Auto-BCC", placeholder: "forward → webhook CRM", hint: "Set mail server untuk meneruskan (parse) email ke Webhook URL di bawah." },
-    { key: "smtpHost", label: "SMTP Host (balasan)", placeholder: "smtp.grupakreasi.id" },
-    { key: "smtpUser", label: "SMTP User", placeholder: "crm@grupakreasi.id" },
+    { key: "smtpHost", label: "SMTP Host (balasan)", placeholder: "smtp.udp.co.id" },
+    { key: "smtpUser", label: "SMTP User", placeholder: "crm@udp.co.id" },
   ],
   instagram: [
-    { key: "displayName", label: "Nama Tampilan", placeholder: "DM @grupakreasi", required: true },
+    { key: "displayName", label: "Nama Tampilan", placeholder: "DM @udp.co.id", required: true },
     { key: "igUsernames", label: "Akun IG Bisnis (pisahkan koma)", placeholder: "@unimasi_id, @segiatech, @erfomultimedia, @unicamstudio", required: true, hint: "DM masuk ke akun manapun akan ditarik ke Inbox Lead." },
     { key: "igAccountId", label: "IG Business Account ID", placeholder: "1784xxxxxxxxxxx", required: true },
     { key: "accessToken", label: "Access Token (Meta)", type: "password", placeholder: "IGQVJ...", required: true, secret: true },
   ],
   web: [
-    { key: "displayName", label: "Nama Tampilan", placeholder: "Form Website grupakreasi.id", required: true },
-    { key: "siteUrls", label: "URL Situs Sumber (pisahkan koma)", placeholder: "https://grupakreasi.id, https://unimasi.id", required: true },
+    { key: "displayName", label: "Nama Tampilan", placeholder: "Form Website udp.co.id", required: true },
+    { key: "siteUrls", label: "URL Situs Sumber (pisahkan koma)", placeholder: "https://udp.co.id, https://unimasi.id", required: true },
     { key: "defaultBrand", label: "Brand Default (jika form tidak mengirim brand)", placeholder: "unimasi", hint: "unimasi | segia | erfo | unicam" },
   ],
 };

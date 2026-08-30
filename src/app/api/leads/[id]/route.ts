@@ -59,7 +59,23 @@ export async function GET(_req: Request, ctx: Ctx) {
 }
 
 const VALID_STATUSES = ["NEW", "FOLLOW_UP", "QUOTED", "WON", "LOST"];
+const VALID_STAGES = ["NEW", "QUALIFIED", "PROPOSAL", "NEGOTIATION", "WON", "LOST"];
 const LOST_REASONS = ["Harga", "Kompetitor", "Budget tidak ada", "Timing", "Tidak ada balasan", "Lainnya"];
+const STAGE_TO_STATUS: Record<string, string> = {
+  NEW: "NEW",
+  QUALIFIED: "FOLLOW_UP",
+  PROPOSAL: "QUOTED",
+  NEGOTIATION: "QUOTED",
+  WON: "WON",
+  LOST: "LOST",
+};
+const STATUS_TO_STAGE: Record<string, string> = {
+  NEW: "NEW",
+  FOLLOW_UP: "QUALIFIED",
+  QUOTED: "PROPOSAL",
+  WON: "WON",
+  LOST: "LOST",
+};
 
 export async function PATCH(req: Request, ctx: Ctx) {
   const user = await requireAuth(["OWNER", "MANAGER", "MARKETER"]);
@@ -72,11 +88,27 @@ export async function PATCH(req: Request, ctx: Ctx) {
 
   const data: Record<string, unknown> = {};
 
-  if (body.status !== undefined) {
+  if (body.stage !== undefined) {
+    if (!VALID_STAGES.includes(body.stage)) {
+      return NextResponse.json({ error: "Tahap funnel tidak valid" }, { status: 400 });
+    }
+    data.stage = body.stage;
+    data.status = STAGE_TO_STATUS[body.stage];
+    if (body.stage === "LOST") {
+      if (!body.lostReason || !LOST_REASONS.includes(body.lostReason)) {
+        return NextResponse.json({ error: "Alasan kalah wajib dipilih" }, { status: 400 });
+      }
+      data.lostReason = body.lostReason;
+    }
+    if (body.stage === "WON") {
+      data.score = Math.max(lead.score, 100);
+    }
+  } else if (body.status !== undefined) {
     if (!VALID_STATUSES.includes(body.status)) {
       return NextResponse.json({ error: "Status tidak valid" }, { status: 400 });
     }
     data.status = body.status;
+    data.stage = STATUS_TO_STAGE[body.status];
     if (body.status === "LOST") {
       if (!body.lostReason || !LOST_REASONS.includes(body.lostReason)) {
         return NextResponse.json({ error: "Alasan kalah wajib dipilih" }, { status: 400 });
@@ -87,6 +119,9 @@ export async function PATCH(req: Request, ctx: Ctx) {
       data.score = Math.max(lead.score, 100);
     }
   }
+  if (body.estValue !== undefined) {
+    data.estValue = Math.max(0, Math.round(Number(body.estValue) || 0));
+  }
   if (body.assigneeId !== undefined) data.assigneeId = body.assigneeId || null;
   if (body.brand !== undefined) data.brand = body.brand;
 
@@ -96,8 +131,8 @@ export async function PATCH(req: Request, ctx: Ctx) {
     action: "LEAD_UPDATED",
     entity: "Lead",
     entityId: id,
-    detail: `status=${updated.status} assignee=${updated.assigneeId ?? "-"} brand=${updated.brand}`,
+    detail: `stage=${updated.stage} status=${updated.status} estValue=${updated.estValue} assignee=${updated.assigneeId ?? "-"} brand=${updated.brand}`,
   });
 
-  return NextResponse.json({ ok: true, status: updated.status, lostReason: updated.lostReason, score: updated.score });
+  return NextResponse.json({ ok: true, stage: updated.stage, status: updated.status, lostReason: updated.lostReason, score: updated.score });
 }

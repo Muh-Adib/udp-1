@@ -6,7 +6,7 @@ import { ingestChannelMessage } from "@/lib/lead-ingest";
  * Webhook inbound email.
  * Format provider (Mailgun/SendGrid/Postmark/Zapier Email Parser) dinormalisasi ke:
  * { from: "Nama <a@b.co>", fromName?, fromEmail?, subject, text, to? }
- * Autentikasi: header `X-GK-Webhook-Token` atau query `?token=` — harus sama dengan webhookSecret kanal email.
+ * Autentikasi: header `X-UDP-Webhook-Token` atau query `?token=` — harus sama dengan webhookSecret kanal email.
  */
 export async function POST(req: Request) {
   try {

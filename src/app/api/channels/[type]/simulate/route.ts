@@ -19,7 +19,7 @@ const DEMO_BODIES: Record<string, string[]> = {
     "Selamat siang, kami butuh jasa video produksi untuk launch product bulan depan. Bisa diskusi?",
   ],
   email: [
-    "Selamat pagi Tim Grupa Kreasi,\n\nKami PT Sinar Jaya mencari vendor untuk redesign website corporate & SEO bulanan. Mohon kirim company profile dan portofolio.\n\nTerima kasih,\nMelisa",
+    "Selamat pagi Tim UDP,\n\nKami PT Sinar Jaya mencari vendor untuk redesign website corporate & SEO bulanan. Mohon kirim company profile dan portofolio.\n\nTerima kasih,\nMelisa",
     "Dear team,\n\nKami dari procurement PT Sinar Jaya, mohon informasi penawaran untuk pembuatan konten sosial media 3 bulan.\n\nSalam,\nMelisa Tanujaya",
   ],
   instagram: [
@@ -70,7 +70,7 @@ export async function POST(_req: Request, ctx: Ctx) {
     body,
     subject: channel === "email" ? bodies[0].split("\n")[0].slice(0, 60) : null,
     brand,
-    sourceRef: channel === "web" ? config.siteUrls?.split(",")[0]?.trim() ?? "https://grupakreasi.id" : null,
+    sourceRef: channel === "web" ? config.siteUrls?.split(",")[0]?.trim() ?? "https://udp.co.id" : null,
     externalId: `sim_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
   });
 

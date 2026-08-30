@@ -32,6 +32,7 @@ model Company {
   users    User[]
   contacts Contact[]
   leads    Lead[]
+  projects Project[]
 }
 
 model Contact {
@@ -60,7 +61,9 @@ model Lead {
   subject    String
   brand      String // unimasi | segia | erfo | unicam
   channel    String // whatsapp | email | instagram | web | manual
-  status     String   @default("NEW") // NEW | FOLLOW_UP | QUOTED | WON | LOST
+  status     String   @default("NEW") // NEW | FOLLOW_UP | QUOTED | WON | LOST (ringkasan, tersinkron dari stage)
+  stage      String   @default("NEW") // NEW | QUALIFIED | PROPOSAL | NEGOTIATION | WON | LOST (tahap funnel)
+  estValue   Int      @default(0) // estimasi nilai deal (Rp)
   score      Int      @default(0)
   contactId  String
   companyId  String?
@@ -72,12 +75,15 @@ model Lead {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  contact  Contact  @relation(fields: [contactId], references: [id])
-  company  Company? @relation(fields: [companyId], references: [id])
-  assignee User?    @relation("AssigneeLeads", fields: [assigneeId], references: [id])
-  messages LeadMessage[]
+  contact    Contact     @relation(fields: [contactId], references: [id])
+  company    Company?    @relation(fields: [companyId], references: [id])
+  assignee   User?       @relation("AssigneeLeads", fields: [assigneeId], references: [id])
+  messages   LeadMessage[]
+  quotations Quotation[]
+  projects   Project[]
 
   @@index([status])
+  @@index([stage])
   @@index([channel])
   @@index([createdAt])
 }
@@ -143,4 +149,114 @@ model AppSetting {
   key       String   @id
   value     String
   updatedAt DateTime @updatedAt
+}
+
+// ============ KEUANGAN & PRODUKSI ============
+
+model Quotation {
+  id           String    @id @default(cuid())
+  number       String    @unique // QT-0001
+  leadId       String
+  brand        String
+  title        String
+  itemsJson    String    @default("[]") // [{desc, qty, price}]
+  subtotal     Int       @default(0)
+  discountPct  Int       @default(0)
+  ppnPct       Int       @default(11)
+  grandTotal   Int       @default(0)
+  status       String    @default("DRAFT") // DRAFT | SENT | APPROVED | REJECTED
+  notes        String?
+  sentAt       DateTime?
+  decidedAt    DateTime?
+  decidedNote  String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  lead      Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  invoices  Invoice[]
+  projects  Project[]
+
+  @@index([status])
+  @@index([leadId])
+}
+
+model Project {
+  id          String    @id @default(cuid())
+  code        String    @unique // PRJ-0001
+  name        String
+  brand       String
+  companyId   String?
+  leadId      String?
+  quotationId String?
+  status      String    @default("PLANNED") // PLANNED | BRIEFED | IN_PROGRESS | REVIEW | DONE
+  progress    Int       @default(0) // 0-100
+  budget      Int       @default(0)
+  managerName String?
+  startDate   DateTime?
+  dueDate     DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  company    Company?    @relation(fields: [companyId], references: [id])
+  lead       Lead?       @relation(fields: [leadId], references: [id])
+  quotation  Quotation?  @relation(fields: [quotationId], references: [id])
+  milestones Milestone[]
+  invoices   Invoice[]
+
+  @@index([status])
+  @@index([brand])
+}
+
+model Milestone {
+  id        String    @id @default(cuid())
+  projectId String
+  title     String
+  orderIdx  Int       @default(0)
+  weight    Int       @default(0) // bobot % terhadap progress project
+  status    String    @default("PENDING") // PENDING | IN_PROGRESS | DONE
+  dueDate   DateTime?
+  doneAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
+model Invoice {
+  id          String    @id @default(cuid())
+  number      String    @unique // INV-0001
+  projectId   String?
+  quotationId String?
+  leadId      String?
+  brand       String
+  title       String
+  amount      Int       @default(0) // dpp sebelum PPN
+  ppnPct      Int       @default(11)
+  grandTotal  Int       @default(0)
+  dueDate     DateTime?
+  status      String    @default("UNPAID") // UNPAID | PARTIAL | PAID | OVERDUE (OVERDUE dihitung saat baca)
+  issuedAt    DateTime  @default(now())
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  project   Project?  @relation(fields: [projectId], references: [id])
+  quotation Quotation? @relation(fields: [quotationId], references: [id])
+  payments  Payment[]
+
+  @@index([status])
+  @@index([projectId])
+}
+
+model Payment {
+  id        String   @id @default(cuid())
+  invoiceId String
+  amount    Int
+  method    String   @default("TRANSFER") // TRANSFER | CASH | QRIS | OTHER
+  note      String?
+  paidAt    DateTime @default(now())
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
 }

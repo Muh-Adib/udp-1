@@ -50,9 +50,9 @@ const SETUP_STEPS: Record<ChannelType, string[]> = {
     "Di menu WhatsApp → Configuration, isi Webhook URL di bawah dengan Verify Token dari CRM, lalu subscribe ke field messages.",
   ],
   email: [
-    "Siapkan alamat email khusus lead (mis. leads@grupakreasi.id).",
+    "Siapkan alamat email khusus lead (mis. leads@udp.co.id).",
     "Di mail server (cPanel/Zoho/Google Workspace), buat forwarding / auto-BCC ke layanan email parser (Zapier, Make, Mailgun Routes).",
-    "Arahkan parser untuk POST JSON ke Webhook URL di bawah dengan header X-GK-Webhook-Token = token CRM.",
+    "Arahkan parser untuk POST JSON ke Webhook URL di bawah dengan header X-UDP-Webhook-Token = token CRM.",
   ],
   instagram: [
     "Konversi akun IG brand ke Professional (Business) dan hubungkan ke Page Facebook.",
@@ -61,7 +61,7 @@ const SETUP_STEPS: Record<ChannelType, string[]> = {
   ],
   web: [
     "Tambahkan snippet embed (di bawah) ke website tiap brand, atau kirim form dengan fetch POST ke endpoint.",
-    "Sertakan X-GK-Api-Key (atau query ?key=) dari panel kanal ini.",
+    "Sertakan X-UDP-Api-Key (atau query ?key=) dari panel kanal ini.",
     "Field wajib: name, (email atau phone), message; opsional: brand, page.",
   ],
 };
@@ -170,7 +170,7 @@ export function ChannelsView({ user }: { user: SessionUser }) {
   }
 
   const embedSnippet = (key: string) =>
-    `<form id="gk-lead-form">\n  <input name="name" placeholder="Nama" required />\n  <input name="email" type="email" placeholder="Email" required />\n  <input name="phone" placeholder="No. WhatsApp" />\n  <select name="brand">\n    <option value="unimasi">Unimasi</option>\n    <option value="segia">Segia Tech</option>\n    <option value="erfo">Erfo Multimedia</option>\n    <option value="unicam">Unicam Studio</option>\n  </select>\n  <textarea name="message" placeholder="Kebutuhan Anda" required></textarea>\n  <button type="submit">Kirim</button>\n</form>\n<script>\n  document.getElementById("gk-lead-form").addEventListener("submit", async (e) => {\n    e.preventDefault();\n    const data = Object.fromEntries(new FormData(e.target));\n    const res = await fetch("${typeof window !== "undefined" ? window.location.origin : ""}/api/webhooks/web-form", {\n      method: "POST",\n      headers: { "Content-Type": "application/json", "X-GK-Api-Key": "${key}" },\n      body: JSON.stringify({ ...data, page: location.href }),\n    });\n    alert((await res.json()).ok ? "Terima kasih! Tim kami akan menghubungi Anda." : "Gagal mengirim.");\n  });\n</script>`;
+    `<form id="udp-lead-form">\n  <input name="name" placeholder="Nama" required />\n  <input name="email" type="email" placeholder="Email" required />\n  <input name="phone" placeholder="No. WhatsApp" />\n  <select name="brand">\n    <option value="unimasi">Unimasi</option>\n    <option value="segia">Segia Tech</option>\n    <option value="erfo">Erfo Multimedia</option>\n    <option value="unicam">Unicam Studio</option>\n  </select>\n  <textarea name="message" placeholder="Kebutuhan Anda" required></textarea>\n  <button type="submit">Kirim</button>\n</form>\n<script>\n  document.getElementById("udp-lead-form").addEventListener("submit", async (e) => {\n    e.preventDefault();\n    const data = Object.fromEntries(new FormData(e.target));\n    const res = await fetch("${typeof window !== "undefined" ? window.location.origin : ""}/api/webhooks/web-form", {\n      method: "POST",\n      headers: { "Content-Type": "application/json", "X-UDP-Api-Key": "${key}" },\n      body: JSON.stringify({ ...data, page: location.href }),\n    });\n    alert((await res.json()).ok ? "Terima kasih! Tim kami akan menghubungi Anda." : "Gagal mengirim.");\n  });\n</script>`;
 
   function copy(text: string, label: string) {
     void navigator.clipboard.writeText(text).then(() => toast.success(`${label} disalin`));
@@ -414,13 +414,13 @@ export function ChannelsView({ user }: { user: SessionUser }) {
           </DialogHeader>
           <div className="relative">
             <pre className="max-h-72 overflow-auto rounded-xl bg-slate-950 p-4 text-xs leading-relaxed text-slate-200">
-              <code>{snippetFor && embedSnippet(sorted.find((c) => c.type === "web")?.apiKey ?? "GK_API_KEY")}</code>
+              <code>{snippetFor && embedSnippet(sorted.find((c) => c.type === "web")?.apiKey ?? "UDP_API_KEY")}</code>
             </pre>
             <Button
               size="sm"
               variant="secondary"
               className="absolute right-2 top-2"
-              onClick={() => snippetFor && copy(embedSnippet(sorted.find((c) => c.type === "web")?.apiKey ?? "GK_API_KEY"), "Snippet")}
+              onClick={() => snippetFor && copy(embedSnippet(sorted.find((c) => c.type === "web")?.apiKey ?? "UDP_API_KEY"), "Snippet")}
             >
               <Copy className="size-3.5" /> Salin
             </Button>

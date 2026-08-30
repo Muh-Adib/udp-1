@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, Inbox, MessagesSquare, RefreshCw, Timer, Trophy, Users, WifiOff } from "lucide-react";
+import { AlertTriangle, Banknote, Factory, Inbox, MessagesSquare, RefreshCw, Timer, Trophy, Users, WifiOff } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,10 +10,14 @@ import { toast } from "@/components/ui/sonner";
 import { api } from "@/lib/api-client";
 import {
   CHANNEL_LABEL,
+  LEAD_STAGES,
+  LEAD_STAGE_LABEL,
   LEAD_STATUS_BADGE,
   LEAD_STATUS_LABEL,
   type ChannelType,
   type DashboardStats,
+  type OverviewStats,
+  type PipelineStats,
   type SessionUser,
 } from "@/lib/crm-types";
 
@@ -47,6 +51,18 @@ function SkeletonBlock({ className }: { className?: string }) {
   return <div className={`animate-pulse rounded-xl bg-slate-200/70 ${className ?? ""}`} />;
 }
 
+const FUNNEL_BAR: Record<string, string> = {
+  NEW: "bg-amber-500",
+  QUALIFIED: "bg-teal-500",
+  PROPOSAL: "bg-violet-500",
+  NEGOTIATION: "bg-orange-500",
+  WON: "bg-emerald-500",
+};
+
+function formatRupiah(n: number) {
+  return "Rp " + n.toLocaleString("id-ID", { maximumFractionDigits: 0 });
+}
+
 function DashboardSkeleton() {
   return (
     <div className="space-y-6">
@@ -69,18 +85,29 @@ function DashboardSkeleton() {
 
 export default function DashboardView({ user }: { user: SessionUser }) {
   const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [pipeline, setPipeline] = useState<PipelineStats | null>(null);
+  const [overview, setOverview] = useState<OverviewStats | null>(null);
   const [failed, setFailed] = useState(false);
+
+  const canSeeOverview = user.role === "OWNER" || user.role === "MANAGER" || user.role === "FINANCE";
 
   const loadStats = useCallback(async () => {
     setFailed(false);
     try {
-      const { stats: s } = await api.dashboard();
+      const [{ stats: s }, pl] = await Promise.all([
+        api.dashboard(),
+        api.pipeline().catch(() => null),
+      ]);
       setStats(s);
+      setPipeline(pl?.stats ?? null);
+      if (canSeeOverview) {
+        api.overviewStats().then((r) => setOverview(r.stats)).catch(() => setOverview(null));
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Gagal memuat data dashboard.");
       setFailed(true);
     }
-  }, []);
+  }, [canSeeOverview]);
 
   useEffect(() => {
     void loadStats();
@@ -251,6 +278,86 @@ export default function DashboardView({ user }: { user: SessionUser }) {
             </div>
           </CardContent>
         </Card>
+
+        {/* Funnel Penjualan */}
+        {pipeline && (
+          <Card className="rounded-2xl">
+            <CardHeader>
+              <CardTitle className="text-base">Funnel Penjualan</CardTitle>
+              <CardDescription>
+                {pipeline.totalOpen} lead terbuka senilai {formatRupiah(pipeline.totalValueOpen)} · konversi {pipeline.conversionPct}%
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2.5 px-5 pb-5">
+              {LEAD_STAGES.filter((s) => s !== "LOST").map((stage) => {
+                const st = pipeline.stages.find((x) => x.stage === stage);
+                const maxCount = Math.max(...pipeline.stages.map((x) => x.count), 1);
+                return (
+                  <div key={stage} className="flex items-center gap-3">
+                    <span className="w-32 shrink-0 truncate text-xs text-slate-600 sm:text-sm">{LEAD_STAGE_LABEL[stage]}</span>
+                    <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-slate-100">
+                      <div
+                        className={`h-full rounded-full ${FUNNEL_BAR[stage]}`}
+                        style={{ width: `${Math.max(4, Math.round(((st?.count ?? 0) / maxCount) * 100))}%` }}
+                      />
+                    </div>
+                    <span className="w-8 shrink-0 text-right text-sm font-medium tabular-nums text-slate-700">{st?.count ?? 0}</span>
+                  </div>
+                );
+              })}
+              <p className="pt-1 text-xs text-muted-foreground">
+                {pipeline.lostCount} lead hilang · rata-rata deal menang {formatRupiah(pipeline.avgDealSize)}
+              </p>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Keuangan × Produksi */}
+        {overview && (
+          <Card className="rounded-2xl">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-1.5 text-base">
+                <Banknote className="size-4 text-emerald-600" /> Keuangan × Produksi
+              </CardTitle>
+              <CardDescription>Ringkasan gabungan pendapatan dan aktivitas proyek.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4 px-5 pb-5">
+              <div className="grid grid-cols-3 gap-3">
+                <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2.5">
+                  <p className="text-[11px] text-emerald-700">Pendapatan</p>
+                  <p className="truncate text-sm font-bold text-emerald-800">{formatRupiah(overview.totals.revenue)}</p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
+                  <p className="flex items-center gap-1 text-[11px] text-slate-600"><Factory className="size-3" /> Proyek aktif</p>
+                  <p className="text-sm font-bold text-slate-800">{overview.totals.projectsActive}</p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
+                  <p className="text-[11px] text-slate-600">Selesai</p>
+                  <p className="text-sm font-bold text-slate-800">{overview.totals.projectsDone}</p>
+                </div>
+              </div>
+              <div className="flex items-end justify-between gap-2">
+                {overview.monthly.map((m) => {
+                  const maxRev = Math.max(...overview.monthly.map((x) => x.revenue), 1);
+                  const maxDone = Math.max(...overview.monthly.map((x) => x.projectsCompleted), 1);
+                  return (
+                    <div key={m.month} className="flex flex-1 flex-col items-center gap-1" title={`${m.label}: ${formatRupiah(m.revenue)} · ${m.projectsCompleted} proyek selesai`}>
+                      <div className="flex h-16 items-end gap-0.5">
+                        <div className="w-2.5 rounded-t bg-emerald-500" style={{ height: `${Math.max(4, Math.round((m.revenue / maxRev) * 100))}%` }} />
+                        <div className="w-2.5 rounded-t bg-amber-400" style={{ height: `${Math.max(4, Math.round((m.projectsCompleted / maxDone) * 100))}%` }} />
+                      </div>
+                      <span className="text-[10px] text-muted-foreground">{m.label}</span>
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                <span className="mr-2 inline-block size-2 rounded-sm bg-emerald-500" aria-hidden /> Pendapatan
+                <span className="ml-3 mr-2 inline-block size-2 rounded-sm bg-amber-400" aria-hidden /> Proyek selesai
+              </p>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Lead Terbaru */}
         <Card className="rounded-2xl">

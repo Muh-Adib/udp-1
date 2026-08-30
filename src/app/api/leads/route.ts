@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { requireAuth } from "@/lib/auth";
 import { nextLeadCode } from "@/lib/lead-ingest";
 import { logAudit } from "@/lib/audit";
-import type { LeadDTO, LeadStatus } from "@/lib/crm-types";
+import type { LeadDTO, LeadStage, LeadStatus } from "@/lib/crm-types";
 
 const OPEN_STATUSES = ["NEW", "FOLLOW_UP", "QUOTED"];
 
@@ -58,6 +58,8 @@ export async function GET(req: Request) {
       brand: l.brand,
       channel: l.channel as LeadDTO["channel"],
       status: l.status as LeadStatus,
+      stage: l.stage as LeadStage,
+      estValue: l.estValue ?? 0,
       score: l.score,
       sourceRef: l.sourceRef,
       lostReason: l.lostReason,
@@ -109,6 +111,8 @@ export async function POST(req: Request) {
       brand: body.brand ?? "unimasi",
       channel: "manual",
       status: "NEW",
+      stage: "NEW",
+      estValue: Math.max(0, Math.round(Number(body.estValue) || 0)),
       score: 15,
       contactId: contact.id,
       firstInAt: new Date(),
