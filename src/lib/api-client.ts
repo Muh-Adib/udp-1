@@ -14,6 +14,7 @@ import type {
   InvoiceDTO,
   LeadDTO,
   LeadMessageDTO,
+  MilestoneDTO,
   NotificationDTO,
   OverviewStats,
   PipelineLeadDTO,
@@ -23,6 +24,9 @@ import type {
   ProjectDTO,
   QuotationDTO,
   QuotationItemDTO,
+  SecureAccessResult,
+  SecureLinkCreateInput,
+  SecureLinkDTO,
   SessionUser,
   WorkEstimateDTO,
 } from "@/lib/crm-types";
@@ -231,4 +235,41 @@ export const api = {
 
   // ---------- portal klien ----------
   portalSummary: () => request<PortalSummaryDTO>("/api/portal"),
+
+  // ---------- secure link (distribusi dokumen aman) ----------
+  secureLinks: (params?: { leadId?: string; projectId?: string }) => {
+    const sp = new URLSearchParams();
+    if (params?.leadId) sp.set("leadId", params.leadId);
+    if (params?.projectId) sp.set("projectId", params.projectId);
+    const qs = sp.toString();
+    return request<{ links: SecureLinkDTO[] }>(`/api/secure-links${qs ? `?${qs}` : ""}`);
+  },
+  /** Buat tautan aman — password PLAIN hanya dikembalikan sekali di respons. */
+  createSecureLink: (input: SecureLinkCreateInput) =>
+    request<{ link: SecureLinkDTO; password: string; shareMessage: string }>("/api/secure-links", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  /** Nonaktifkan/aktifkan kembali, atau reset password. */
+  updateSecureLink: (id: string, patch: { active?: boolean; password?: string }) =>
+    request<{ link: SecureLinkDTO; password?: string }>(`/api/secure-links/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+  deleteSecureLink: (id: string) => request<{ ok: true }>(`/api/secure-links/${id}`, { method: "DELETE" }),
+  /** Publik (tanpa login): buka dokumen dengan password. Dipakai halaman /s/<token>. */
+  secureAccess: (token: string, password: string) =>
+    request<SecureAccessResult>("/api/secure/access", { method: "POST", body: JSON.stringify({ token, password }) }),
+
+  // ---------- milestone (buat & kelola manual) ----------
+  createMilestone: (projectId: string, input: { title: string; weight?: number; dueDate?: string }) =>
+    request<{ milestone: MilestoneDTO }>(`/api/projects/${projectId}/milestones`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  updateMilestone: (
+    id: string,
+    patch: { title?: string; weight?: number; dueDate?: string | null; status?: string }
+  ) => request<{ milestone: MilestoneDTO }>(`/api/milestones/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  deleteMilestone: (id: string) => request<{ ok: true }>(`/api/milestones/${id}`, { method: "DELETE" }),
 };

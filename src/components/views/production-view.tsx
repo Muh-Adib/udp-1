@@ -18,8 +18,10 @@ import {
   FolderOpen,
   Gauge,
   Info,
+  KeyRound,
   Link2,
   ListChecks,
+  ListPlus,
   Loader2,
   Plus,
   RefreshCw,
@@ -44,6 +46,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { SecureLinkDialog } from "@/components/secure-link-dialog";
 import { api } from "@/lib/api-client";
 import {
   BRAND_LABEL,
@@ -55,6 +58,7 @@ import {
   type ProductionStats,
   type ProjectDTO,
   type ProjectStatus,
+  type SecureTargetType,
   type SessionUser,
 } from "@/lib/crm-types";
 import { cn } from "@/lib/utils";
@@ -62,6 +66,15 @@ import { cn } from "@/lib/utils";
 type MilestoneStatus = MilestoneDTO["status"];
 
 type DeliverableWithProject = DeliverableDTO & { projectCode: string; projectName: string };
+
+/** Target tetap secure link untuk satu deliverable produksi. */
+interface SecureTarget {
+  targetType: SecureTargetType;
+  targetId: string;
+  title?: string;
+  projectId?: string;
+  label?: string;
+}
 
 interface DeliverableGroup {
   projectId: string;
@@ -191,14 +204,18 @@ function DeliverableRow({
   d,
   nowMs,
   canDelete,
+  canShareSecure,
   busy,
   onRemove,
+  onShareSecure,
 }: {
   d: DeliverableDTO;
   nowMs: number;
   canDelete: boolean;
+  canShareSecure: boolean;
   busy: boolean;
   onRemove: (d: DeliverableDTO) => void;
+  onShareSecure: (d: DeliverableDTO) => void;
 }) {
   const Icon = d.type === "LINK" ? Link2 : FileText;
   const iconBox = d.type === "LINK" ? "bg-amber-100 text-amber-600" : "bg-teal-100 text-teal-600";
@@ -240,6 +257,17 @@ function DeliverableRow({
             <a href={`/api/deliverables/${d.id}/download`} download aria-label={`Unduh ${d.name}`}>
               <Download className="size-3.5" /> Unduh
             </a>
+          </Button>
+        )}
+        {canShareSecure && (
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            aria-label={`Kirim secure link untuk ${d.name}`}
+            className="text-teal-700 hover:bg-teal-50 hover:text-teal-800"
+            onClick={() => onShareSecure(d)}
+          >
+            <KeyRound className="size-3.5" aria-hidden />
           </Button>
         )}
         {canDelete && (
@@ -306,28 +334,38 @@ function ProjectDetailView({
   nowMs,
   busyMsKey,
   busyDelKey,
+  busyMsDelId,
   canToggleMilestone,
   canChangeStatus,
   canSendDeliverable,
+  canShareSecure,
   onBack,
   onCycleMilestone,
+  onCreateMilestone,
+  onRemoveMilestone,
   onChangeStatus,
   onRemoveDeliverable,
   onOpenDialog,
+  onSecureCreated,
 }: {
   project: ProjectDTO;
   user: SessionUser;
   nowMs: number;
   busyMsKey: string | null;
   busyDelKey: string | null;
+  busyMsDelId: string | null;
   canToggleMilestone: boolean;
   canChangeStatus: boolean;
   canSendDeliverable: boolean;
+  canShareSecure: boolean;
   onBack: () => void;
   onCycleMilestone: (p: ProjectDTO, ms: MilestoneDTO) => void;
+  onCreateMilestone: (input: { title: string; weight?: number; dueDate?: string }) => Promise<boolean>;
+  onRemoveMilestone: (ms: MilestoneDTO) => void;
   onChangeStatus: (p: ProjectDTO, s: ProjectStatus) => void;
   onRemoveDeliverable: (d: DeliverableDTO) => void;
   onOpenDialog: (projectId: string, milestoneLabel?: string) => void;
+  onSecureCreated: () => void;
 }) {
   const isLate = Boolean(project.dueDate) && project.status !== "DONE" && new Date(project.dueDate!).getTime() < nowMs;
   const msDone = project.milestones.filter((m) => m.status === "DONE").length;
@@ -343,6 +381,57 @@ function ProjectDetailView({
 
   const canDeleteDeliverable = (d: DeliverableDTO) =>
     ["OWNER", "MANAGER"].includes(user.role) || d.uploadedByName === user.name;
+
+  // Hapus milestone hanya OWNER/MANAGER (MARKETER/PRODUCTION/FINANCE/CLIENT tidak melihat tombol).
+  const canDeleteMilestone = ["OWNER", "MANAGER"].includes(user.role);
+
+  // ---- dialog tambah milestone ----
+  const [msDlgOpen, setMsDlgOpen] = useState(false);
+  const [msSubmitting, setMsSubmitting] = useState(false);
+  const [msTitle, setMsTitle] = useState("");
+  const [msWeight, setMsWeight] = useState("10");
+  const [msDue, setMsDue] = useState("");
+
+  // ---- secure link: SATU instance dialog untuk semua deliverable proyek ini ----
+  const [secureOpen, setSecureOpen] = useState(false);
+  const [secureTarget, setSecureTarget] = useState<SecureTarget | null>(null);
+
+  function openSecure(d: DeliverableDTO) {
+    setSecureTarget({ targetType: "DELIVERABLE", targetId: d.id, title: d.name, projectId: d.projectId, label: d.name });
+    setSecureOpen(true);
+  }
+
+  function openMilestoneDialog() {
+    setMsTitle("");
+    setMsWeight("10");
+    setMsDue("");
+    setMsDlgOpen(true);
+  }
+
+  async function submitMilestone() {
+    const title = msTitle.trim();
+    if (!title) {
+      toast.error("Isi judul milestone terlebih dahulu");
+      return;
+    }
+    const weightNum = Number(msWeight);
+    const weight =
+      msWeight.trim() !== "" && Number.isFinite(weightNum)
+        ? Math.min(100, Math.max(0, Math.round(weightNum)))
+        : undefined;
+    const dueDate = msDue ? new Date(msDue).toISOString() : undefined;
+    setMsSubmitting(true);
+    try {
+      const ok = await onCreateMilestone({ title, weight, dueDate });
+      if (!ok) return; // gagal → dialog tetap terbuka, input tidak hilang
+      setMsDlgOpen(false);
+      setMsTitle("");
+      setMsWeight("10");
+      setMsDue("");
+    } finally {
+      setMsSubmitting(false);
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -443,10 +532,19 @@ function ProjectDetailView({
               Klik milestone untuk ubah status, lalu kirim file/tautan langsung pada milestone terkait.
             </CardDescription>
           </div>
-          {canSendDeliverable && (
-            <Button size="sm" onClick={() => onOpenDialog(project.id)}>
-              <Plus className="size-4" /> Tambah File / Tautan
-            </Button>
+          {(canSendDeliverable || canToggleMilestone) && (
+            <div className="flex flex-col gap-2 sm:flex-row">
+              {canSendDeliverable && (
+                <Button size="sm" onClick={() => onOpenDialog(project.id)}>
+                  <Plus className="size-4" aria-hidden /> Tambah File / Tautan
+                </Button>
+              )}
+              {canToggleMilestone && (
+                <Button size="sm" variant="outline" onClick={openMilestoneDialog}>
+                  <ListPlus className="size-4" aria-hidden /> Tambah Milestone
+                </Button>
+              )}
+            </div>
           )}
         </CardHeader>
         <CardContent className="space-y-3 px-5 pb-5">
@@ -518,6 +616,22 @@ function ProjectDetailView({
                       <Plus className="size-3.5" aria-hidden />
                     </Button>
                   )}
+                  {canDeleteMilestone && (
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      aria-label={`Hapus milestone ${ms.title}`}
+                      className="shrink-0 text-rose-600 hover:bg-rose-50 hover:text-rose-700"
+                      disabled={busyMsDelId === ms.id}
+                      onClick={() => onRemoveMilestone(ms)}
+                    >
+                      {busyMsDelId === ms.id ? (
+                        <Loader2 className="size-3.5 animate-spin" aria-hidden />
+                      ) : (
+                        <Trash2 className="size-3.5" aria-hidden />
+                      )}
+                    </Button>
+                  )}
                 </div>
                 {items.length > 0 ? (
                   <div className="divide-y">
@@ -527,8 +641,10 @@ function ProjectDetailView({
                         d={d}
                         nowMs={nowMs}
                         canDelete={canDeleteDeliverable(d)}
+                        canShareSecure={canShareSecure}
                         busy={busyDelKey === d.id}
                         onRemove={onRemoveDeliverable}
+                        onShareSecure={openSecure}
                       />
                     ))}
                   </div>
@@ -558,8 +674,10 @@ function ProjectDetailView({
                     d={d}
                     nowMs={nowMs}
                     canDelete={canDeleteDeliverable(d)}
+                    canShareSecure={canShareSecure}
                     busy={busyDelKey === d.id}
                     onRemove={onRemoveDeliverable}
+                    onShareSecure={openSecure}
                   />
                 ))}
               </div>
@@ -567,6 +685,56 @@ function ProjectDetailView({
           )}
         </CardContent>
       </Card>
+
+      {/* Dialog Tambah Milestone — label selalu tampil di semua breakpoint */}
+      <Dialog open={msDlgOpen} onOpenChange={setMsDlgOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Tambah Milestone</DialogTitle>
+            <DialogDescription>Milestone baru menambah tahapan pekerjaan proyek ini.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="ms-title">Judul milestone</Label>
+              <Input
+                id="ms-title"
+                value={msTitle}
+                onChange={(e) => setMsTitle(e.target.value)}
+                placeholder="mis. Desain Konsep 3D"
+                required
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="ms-weight">Bobot (%)</Label>
+              <Input
+                id="ms-weight"
+                type="number"
+                min={0}
+                max={100}
+                value={msWeight}
+                onChange={(e) => setMsWeight(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">Total bobot semua milestone menjadi 100% progress.</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="ms-due">Tenggat (opsional)</Label>
+              <Input id="ms-due" type="date" value={msDue} onChange={(e) => setMsDue(e.target.value)} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setMsDlgOpen(false)} disabled={msSubmitting}>
+              Batal
+            </Button>
+            <Button onClick={() => void submitMilestone()} disabled={msSubmitting || !msTitle.trim()}>
+              {msSubmitting ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <ListPlus className="size-4" aria-hidden />}
+              Tambah Milestone
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Secure link — satu instance untuk semua deliverable proyek ini */}
+      <SecureLinkDialog open={secureOpen} onOpenChange={setSecureOpen} target={secureTarget} onCreated={onSecureCreated} />
     </div>
   );
 }
@@ -583,6 +751,8 @@ export default function ProductionView({ user }: { user: SessionUser }) {
   const canToggleMilestone = ["OWNER", "MANAGER", "MARKETER", "PRODUCTION"].includes(user.role);
   const canChangeStatus = ["OWNER", "MANAGER", "MARKETER"].includes(user.role);
   const canSendDeliverable = ["OWNER", "MANAGER", "MARKETER", "PRODUCTION"].includes(user.role);
+  // Secure link: semua role internal (bukan CLIENT)
+  const canShareSecure = ["OWNER", "MANAGER", "MARKETER", "FINANCE", "PRODUCTION"].includes(user.role);
   // Chart gabungan hanya utk role yang diizinkan API /api/reports/overview
   const canSeeOverview = ["OWNER", "MANAGER", "FINANCE"].includes(user.role);
 
@@ -595,6 +765,11 @@ export default function ProductionView({ user }: { user: SessionUser }) {
   const [delLoading, setDelLoading] = useState(false);
   const [delFailed, setDelFailed] = useState(false);
   const [busyDelKey, setBusyDelKey] = useState<string | null>(null);
+  const [msBusyId, setMsBusyId] = useState<string | null>(null); // milestone yang sedang dihapus
+
+  // ---- secure link (tab File & Google Drive) — satu instance dialog ----
+  const [secureOpen, setSecureOpen] = useState(false);
+  const [secureTarget, setSecureTarget] = useState<SecureTarget | null>(null);
 
   // ---- dialog kirim file / link ----
   const [dlgOpen, setDlgOpen] = useState(false);
@@ -682,6 +857,42 @@ export default function ProductionView({ user }: { user: SessionUser }) {
       setFProjectLocked(false);
     }
     setDlgOpen(true);
+  }
+
+  /** Buka secure link utk satu deliverable — dipakai baris di tab File & Google Drive. */
+  function openSecureDialogFor(d: DeliverableDTO) {
+    setSecureTarget({ targetType: "DELIVERABLE", targetId: d.id, title: d.name, projectId: d.projectId, label: d.name });
+    setSecureOpen(true);
+  }
+
+  /** Tambah milestone manual — return true bila sukses (dialog bisa menutup & reset). */
+  async function createMilestone(
+    project: ProjectDTO,
+    input: { title: string; weight?: number; dueDate?: string }
+  ): Promise<boolean> {
+    try {
+      await api.createMilestone(project.id, input);
+      toast.success(`Milestone "${input.title}" ditambahkan`);
+      await load(); // refresh list & detail sekaligus
+      return true;
+    } catch (e) {
+      toast.error((e as Error).message || "Gagal menambah milestone");
+      return false;
+    }
+  }
+
+  async function removeMilestone(project: ProjectDTO, ms: MilestoneDTO) {
+    if (!window.confirm(`Hapus milestone "${ms.title}"? File/tautan terkait tetap tersimpan di 'Tanpa milestone'.`)) return;
+    setMsBusyId(ms.id);
+    try {
+      await api.deleteMilestone(ms.id);
+      toast.success(`Milestone "${ms.title}" dihapus`);
+      await load(); // refresh list & detail sekaligus
+    } catch (e) {
+      toast.error((e as Error).message || "Gagal menghapus milestone");
+    } finally {
+      setMsBusyId(null);
+    }
   }
 
   async function cycleMilestone(project: ProjectDTO, ms: MilestoneDTO) {
@@ -876,14 +1087,19 @@ export default function ProductionView({ user }: { user: SessionUser }) {
               nowMs={nowMs}
               busyMsKey={busyKey}
               busyDelKey={busyDelKey}
+              busyMsDelId={msBusyId}
               canToggleMilestone={canToggleMilestone}
               canChangeStatus={canChangeStatus}
               canSendDeliverable={canSendDeliverable}
+              canShareSecure={canShareSecure}
               onBack={() => setSelectedId(null)}
               onCycleMilestone={(p, ms) => void cycleMilestone(p, ms)}
+              onCreateMilestone={(input) => createMilestone(selectedProject, input)}
+              onRemoveMilestone={(ms) => void removeMilestone(selectedProject, ms)}
               onChangeStatus={(p, s) => void changeStatus(p, s)}
               onRemoveDeliverable={(d) => void removeDeliverable(d)}
               onOpenDialog={(pid, ms) => openDeliverableDialog(pid, ms)}
+              onSecureCreated={reloadAll}
             />
           ) : (
             /* ---------- DAFTAR PROYEK ---------- */
@@ -1294,8 +1510,10 @@ export default function ProductionView({ user }: { user: SessionUser }) {
                                 d={d}
                                 nowMs={nowMs}
                                 canDelete={["OWNER", "MANAGER"].includes(user.role) || d.uploadedByName === user.name}
+                                canShareSecure={canShareSecure}
                                 busy={busyDelKey === d.id}
                                 onRemove={(x) => void removeDeliverable(x)}
+                                onShareSecure={openSecureDialogFor}
                               />
                             ))}
                           </div>
@@ -1467,6 +1685,9 @@ export default function ProductionView({ user }: { user: SessionUser }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Secure link — satu instance untuk tab File & Google Drive */}
+      <SecureLinkDialog open={secureOpen} onOpenChange={setSecureOpen} target={secureTarget} onCreated={reloadAll} />
     </div>
   );
 }

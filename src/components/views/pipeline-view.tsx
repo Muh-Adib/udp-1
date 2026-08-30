@@ -7,6 +7,7 @@ import {
   Banknote,
   Filter,
   Flame,
+  HelpCircle,
   Inbox,
   Info,
   Loader2,
@@ -44,10 +45,12 @@ import { api } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import {
   BRAND_LABEL,
+  CHANNEL_BASE_SCORE,
   LEAD_STAGES,
   LEAD_STAGE_BADGE,
   LEAD_STAGE_LABEL,
   LOST_REASONS,
+  SCORE_RULES,
   type LeadStage,
   type PipelineLeadDTO,
   type PipelineStats,
@@ -65,6 +68,20 @@ function formatRupiah(value: number): string {
 
 /** Tahapan yang masuk bagan funnel (LOST tampil sebagai catatan terpisah). */
 const FUNNEL_STAGES: LeadStage[] = ["NEW", "QUALIFIED", "PROPOSAL", "NEGOTIATION", "WON"];
+
+/** Label ramah untuk catatan nilai kanal pada dialog penjelasan skor. */
+const CHANNEL_SCORE_LABEL: Record<keyof typeof CHANNEL_BASE_SCORE, string> = {
+  whatsapp: "WhatsApp",
+  instagram: "Instagram",
+  email: "Email",
+  web: "Form Web",
+  manual: "Manual",
+};
+
+/** "WhatsApp 35 · Instagram 30 · Email 25 · Form Web 20 · Manual 15" (dipetakan dari CHANNEL_BASE_SCORE). */
+const CHANNEL_SCORE_NOTE = (Object.keys(CHANNEL_BASE_SCORE) as (keyof typeof CHANNEL_BASE_SCORE)[])
+  .map((k) => `${CHANNEL_SCORE_LABEL[k]} ${CHANNEL_BASE_SCORE[k]}`)
+  .join(" \u00b7 ");
 
 /** Warna aksen per stage (dilarang biru/indigo — sesuai palet proyek). */
 const STAGE_COLOR: Record<LeadStage, string> = {
@@ -352,6 +369,8 @@ export default function PipelineView({ user, onOpenInbox }: { user: SessionUser;
   // Dialog "Atur Nilai"
   const [valueTarget, setValueTarget] = useState<PipelineLeadDTO | null>(null);
   const [valueInput, setValueInput] = useState<string>("");
+  // Dialog penjelasan skor lead
+  const [scoreOpen, setScoreOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -467,10 +486,22 @@ export default function PipelineView({ user, onOpenInbox }: { user: SessionUser;
             Progres prospek dari lead baru hingga menang, lengkap dengan bagan funnel dan kanban per tahap.
           </p>
         </div>
-        <Button variant="outline" size="sm" className="w-fit rounded-xl" onClick={() => void load()} disabled={loading}>
-          <RefreshCw className={cn("size-4", loading && "animate-spin")} />
-          Muat Ulang
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-fit rounded-xl text-slate-600"
+            onClick={() => setScoreOpen(true)}
+            aria-label="Penjelasan cara skor lead terbentuk"
+          >
+            <HelpCircle className="size-4" />
+            Bagaimana skor terbentuk?
+          </Button>
+          <Button variant="outline" size="sm" className="w-fit rounded-xl" onClick={() => void load()} disabled={loading}>
+            <RefreshCw className={cn("size-4", loading && "animate-spin")} />
+            Muat Ulang
+          </Button>
+        </div>
       </div>
 
       {loading ? (
@@ -640,6 +671,39 @@ export default function PipelineView({ user, onOpenInbox }: { user: SessionUser;
           </Dialog>
         </>
       ) : null}
+
+      {/* Dialog: penjelasan cara skor lead terbentuk (independen dari data — selalu tersedia) */}
+      <Dialog open={scoreOpen} onOpenChange={setScoreOpen}>
+        <DialogContent className="max-w-lg rounded-2xl">
+          <DialogHeader>
+            <DialogTitle>Bagaimana Skor Lead Terbentuk?</DialogTitle>
+            <DialogDescription>Skor 0–100 membantu tim memprioritaskan follow-up. Skor naik otomatis:</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            {SCORE_RULES.map((rule) => (
+              <div key={rule.label} className="flex items-start gap-3 rounded-xl bg-slate-50 p-3">
+                <Badge
+                  variant="outline"
+                  className="mt-0.5 shrink-0 border-teal-200 bg-teal-50 font-mono text-[11px] text-teal-800"
+                >
+                  {rule.points}
+                </Badge>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-slate-900">{rule.label}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">{rule.detail}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="flex items-start gap-1.5 rounded-xl border border-teal-100 bg-teal-50/60 p-3 text-xs text-slate-600">
+            <Info className="mt-0.5 size-3.5 shrink-0 text-teal-600" aria-hidden="true" />
+            <span>
+              Nilai kanal awal: {CHANNEL_SCORE_NOTE} — dinilai dari kehangatan kanal: chat personal lebih hangat daripada
+              form pasif.
+            </span>
+          </p>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

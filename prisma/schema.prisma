@@ -244,6 +244,30 @@ model BrandProfile {
   @@index([brand])
 }
 
+// ============ SECURE LINK (DISTRIBUSI DOKUMEN AMAN) ============
+
+model SecureLink {
+  id            String    @id @default(cuid())
+  token         String    @unique // token acak URL-safe (24+ char) — /s/<token>
+  title         String // label dokumen yang tampil ke penerima
+  targetType    String // QUOTATION | BRIEF | DELIVERABLE
+  targetId      String
+  leadId        String? // riwayat kirim per lead
+  projectId     String?
+  brand         String    @default("unimasi") // brand kop dokumen
+  passwordHash  String // scrypt salt:hash — password tidak pernah dikirim ulang oleh server
+  active        Boolean   @default(true) // bisa dicabut kapan saja
+  expiresAt     DateTime? // opsional: kedaluwarsa otomatis
+  accessCount   Int       @default(0) // berapa kali dokumen dibuka penerima
+  lastAccessAt  DateTime?
+  createdById   String?
+  createdByName String?
+  createdAt     DateTime  @default(now())
+
+  @@index([leadId])
+  @@index([targetType, targetId])
+}
+
 // ============ KEUANGAN & PRODUKSI ============
 
 model Quotation {

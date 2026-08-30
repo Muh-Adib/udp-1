@@ -557,3 +557,93 @@ export interface BrandProfileDTO {
 
 /** Jenis dokumen terformat yang bisa dicetak dengan kop brand. */
 export type BrandDocType = "QUOTATION" | "BRIEF";
+
+// ============ SECURE LINK (DISTRIBUSI DOKUMEN AMAN) ============
+
+/** Target dokumen yang bisa dibagikan via tautan aman + password. */
+export type SecureTargetType = "QUOTATION" | "BRIEF" | "DELIVERABLE";
+
+export const SECURE_TARGET_LABEL: Record<SecureTargetType, string> = {
+  QUOTATION: "Surat Penawaran",
+  BRIEF: "Brief Proyek",
+  DELIVERABLE: "File Produksi",
+};
+
+export interface SecureLinkDTO {
+  id: string;
+  token: string;
+  /** Relative URL halaman publik: /s/<token> */
+  url: string;
+  title: string;
+  targetType: SecureTargetType;
+  targetId: string;
+  /** Label pendek target (mis. QT-0004, BRF-0002, nama file). */
+  targetLabel?: string | null;
+  leadId?: string | null;
+  projectId?: string | null;
+  brand: string;
+  active: boolean;
+  expiresAt?: string | null;
+  accessCount: number;
+  lastAccessAt?: string | null;
+  createdByName?: string | null;
+  createdAt: string;
+}
+
+export interface SecureLinkCreateInput {
+  targetType: SecureTargetType;
+  targetId: string;
+  title?: string;
+  leadId?: string;
+  projectId?: string;
+  brand?: string;
+  /** Kosongkan → password dibuat otomatis sistem. */
+  password?: string;
+  /** null/undefined = tanpa kedaluwarsa; angka = hari. */
+  expiresInDays?: number | null;
+}
+
+/** Payload dokumen yang dirender halaman publik /s/<token> setelah password benar. */
+export interface SecureAccessResult {
+  title: string;
+  docLabel: string;
+  docNumber: string;
+  dateIso: string;
+  senderName?: string | null;
+  toName?: string | null;
+  toCompany?: string | null;
+  showBankInfo: boolean;
+  brand: BrandProfileDTO;
+  kind: SecureTargetType;
+  quotation?: QuotationDTO | null;
+  brief?: BriefDTO | null;
+  deliverable?: {
+    name: string;
+    type: DeliverableType;
+    fileName?: string | null;
+    mimeType?: string | null;
+    sizeLabel?: string | null;
+    note?: string | null;
+    /** Untuk FILE: endpoint unduhan aman (perlu cookie grant). */
+    downloadUrl?: string | null;
+    /** Untuk LINK: URL eksternal (Google Drive dsb). */
+    externalUrl?: string | null;
+  } | null;
+}
+
+// ============ ATURAN SKOR LEAD (transparansi funnel) ============
+
+/** Satu aturan skor — dipakai kartu penjelasan "Bagaimana skor terbentuk?". */
+export interface ScoreRule {
+  label: string;
+  detail: string;
+  points: string;
+}
+
+export const SCORE_RULES: ScoreRule[] = [
+  { label: "Basis kanal", detail: "Chat personal dinilai lebih hangat daripada form pasif: WhatsApp 35, Instagram 30, Email 25, Form Web 20, Input Manual 15.", points: "15–35" },
+  { label: "Pesan masuk lanjutan", detail: "Setiap pesan berikutnya dari lead (+5) hingga maksimal +25 — tanda engagement/serius.", points: "+5 / pesan (maks +25)" },
+  { label: "Sales membalas", detail: "Setiap balasan internal dari tim (+5, maks 100) — interaksi dua arah menaikkan kualitas.", points: "+5 / balasan" },
+  { label: "Penawaran disetujui", detail: "Lead Menang (WON) langsung dikunci ke skor 100 dan masuk produksi.", points: "= 100" },
+];
+

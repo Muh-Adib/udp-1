@@ -16,6 +16,7 @@ import {
   Phone,
   Search,
   Send,
+  SendHorizonal,
   StickyNote,
   TriangleAlert,
   Trophy,
@@ -35,6 +36,7 @@ import { CreateBriefFromLeadDialog, CreateQuotationFromLeadDialog } from "@/comp
 import { BriefDocContent, QuotationDocContent } from "@/components/doc-content";
 import { IntakeLeadDialog } from "@/components/intake-lead-dialog";
 import { ContactFormDialog } from "@/components/contact-form-dialog";
+import { SecureLinkDialog } from "@/components/secure-link-dialog";
 import { api } from "@/lib/api-client";
 import { findCountry, formatPhoneDisplay } from "@/lib/countries";
 import { ChannelIcon } from "@/lib/channel-meta";
@@ -287,6 +289,7 @@ function LeadDetailPanel({
   const [showBriefDlg, setShowBriefDlg] = useState(false);
   const [showQuoteDlg, setShowQuoteDlg] = useState(false);
   const [showContactDlg, setShowContactDlg] = useState(false);
+  const [secureOpen, setSecureOpen] = useState(false);
   const [docBrief, setDocBrief] = useState<BriefDTO | null>(null);
   const [docQuotation, setDocQuotation] = useState<QuotationDTO | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -525,6 +528,10 @@ function LeadDetailPanel({
                 </Button>
               </>
             )}
+            {/* Kirim dokumen via Secure Link — tetap tersedia untuk lead LOST/WON (mis. kirim file deliverable) */}
+            <Button size="sm" variant="outline" onClick={() => setSecureOpen(true)} aria-label={`Kirim dokumen untuk lead ${lead.code}`}>
+              <SendHorizonal className="size-3.5" /> Kirim Dokumen
+            </Button>
           </div>
         )}
       </CardContent>
@@ -709,6 +716,17 @@ function LeadDetailPanel({
               onChanged();
               void load();
               setDocQuotation(quotation);
+            }}
+          />
+          {/* Secure Link — pilih dokumen milik lead, atur password & kedaluwarsa, salin pesan berbagi */}
+          <SecureLinkDialog
+            open={secureOpen}
+            onOpenChange={setSecureOpen}
+            lead={{ id: lead.id, code: lead.code, subject: lead.subject, contactName: lead.contact.name }}
+            historyFor={{ leadId: lead.id }}
+            onCreated={() => {
+              onChanged();
+              void load();
             }}
           />
         </>
