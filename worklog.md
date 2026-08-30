@@ -285,3 +285,72 @@ Stage Summary:
 - Alur kerja produksi kini berpusat di DETAIL PROYEK: pilih proyek → lihat brief + milestone → toggle status milestone → tambah file/link per milestone (proyek terkunci, milestone terisi otomatis) → file langsung terlihat di overview & Portal Klien. Tab file tinggal overview lintas proyek dengan jalan pintas "Detail".
 - File berubah: src/components/views/production-view.tsx (satu-satunya; kontrak API/tipe tidak diubah).
 - Saran lanjutan: multi-file upload, preview thumbnail gambar di detail, komentar klien per deliverable di portal.
+
+---
+Task ID: 2-a
+Agent: frontend-styling-expert
+Task: Tambah tombol "Dokumen" (pratinjau dokumen ter-brand/kop surat) di finance-view (per Quotation) & brief-view (per Brief)
+
+Work Log:
+- Baca worklog + komponen kontrak src/components/brand-document.tsx (BrandDocDialog, fmtDocRupiah, fmtDocDate) & src/components/doc-content.tsx (QuotationDocContent, BriefDocContent) — tidak diubah, hanya dipakai.
+- Baca kedua view: finance-view.tsx (tabel penawaran dgn aksi Kirim/Setujui/Tolak di tab Penawaran) & brief-view.tsx (BriefCard dgn aksi Kirim untuk Estimasi/Buat Estimasi di footer kartu).
+- finance-view.tsx: import FileText (lucide-react), BrandDocDialog, QuotationDocContent; tambah state `docQuotation: QuotationDTO | null`; tambah tombol "Dokumen" (size sm, variant outline, ikon FileText, aria-label `Buka dokumen ${q.number}`) di kolom Aksi tiap baris penawaran, berdampingan dgn aksi existing; hapus fallback "—" + variabel `canAct` (kini kolom aksi selalu berisi tombol Dokumen minimal); render SATU BrandDocDialog di akhir komponen (docLabel="SURAT PENAWARAN", showBankInfo, signatureName=user.name, children=<QuotationDocContent q={docQuotation}/>).
+- brief-view.tsx: import BrandDocDialog, BriefDocContent (FileText sudah ada); BriefCard dapat prop baru `onOpenDoc(brief)`; tombol "Dokumen" (sm/outline/FileText, aria-label `Buka dokumen ${b.code}`) di footer kartu setelah aksi existing; `hasFooter` dibuat selalu true agar tombol Dokumen tersedia di semua kartu brief tanpa syarat role; BriefView punya state `docBrief: BriefDTO | null` + SATU BrandDocDialog di akhir komponen (docLabel="BRIEF PROYEK", docNumber=b.code, TANPA showBankInfo, signatureName=b.createdByName, children=<BriefDocContent b={b}/>).
+- `estimates` pada data brief dipastikan tersedia (BriefDTO.estimates sudah dipakai view; BriefDocContent membaca estimates[0]).
+- Gaya konsisten slate (tanpa indigo/biru), tanpa perubahan warna baru.
+- Verifikasi: `bunx tsc --noEmit` = 0 error; `bunx eslint src/components/views/finance-view.tsx src/components/views/brief-view.tsx` = bersih (exit 0). Prettier check sengaja tidak dijalankan sebagai gate (file view lain di baseline juga tidak prettier-clean; tidak ada formatting ulang massal).
+
+Stage Summary:
+- Setiap baris penawaran di Keuangan & setiap kartu Brief kini punya tombol "Dokumen" yang membuka pratinjau dokumen A4 ter-brand (kop surat via BrandDocDialog + QuotationDocContent/BriefDocContent) lengkap dgn tombol "Cetak / Simpan PDF".
+- Aksi lama (Kirim/Setujui/Tolak penawaran; Kirim untuk Estimasi/Buat Estimasi brief) tidak digantikan — tombol Dokumen hanya ditambahkan berdampingan.
+- File berubah: src/components/views/finance-view.tsx, src/components/views/brief-view.tsx. Kontrak komponen (brand-document.tsx, doc-content.tsx) tidak diubah.
+
+---
+Task ID: 2-b
+Agent: frontend-styling-expert
+Task: View "Identitas Brand" (brand-view.tsx) + integrasi nav app-shell (kontrak /api/brands)
+
+Work Log:
+- Baca worklog (entri terbawah: Task 13) + kontrak: crm-types.ts (BrandProfileDTO), api-client.ts (api.brands/updateBrand/uploadBrandLogo), brand-document.tsx (pemakai field identitas), app-shell.tsx, channels-view.tsx (pola referensi), ui/input|textarea|dialog|button|badge
+- File BARU src/components/views/brand-view.tsx (default export BrandView({ user }), "use client"):
+  - Header "Identitas Brand" + deskripsi + tombol "Muat Ulang" (Loader2 saat loading); fetch api.brands() saat mount; skeleton animate-pulse 4 kartu; error card rose (AlertTriangle) + tombol "Coba Lagi"
+  - Info box ikon Info (teal): "Identitas ini otomatis dipakai pada dokumen Surat Penawaran & Brief Proyek (kop surat, warna, logo, rekening)."
+  - Grid kartu grid-cols-1 md:grid-cols-2 gap-4 per brand: Badge kode font-mono outline, komponen LetterheadPreview = pratinjau MINI KOP SURAT (logo via <img> dgn eslint-disable-next-line @next/next/no-img-element, fallback monogram huruf pertama bg primaryColor via BrandLogo; nama besar warna primaryColor; tagline uppercase; alamat/telp/email/website baris kecil dgn ikon; letterheadNote italic center; garis tebal warna primary), daftar field (baris legal FileText / footer StickyNote / rekening Landmark) dgn max-h-44 overflow-y-auto + empty "Belum diisi"
+  - Tombol "Edit" (Pencil) hanya OWNER/MANAGER; role lain lihat chip "Hanya Owner/Manajer dapat mengubah"
+  - Dialog Edit (sm:max-w-2xl): pratinjau kop surat LIVE di atas form (mengikuti form.name/tagline/address/primaryColor + logoPreview), field lengkap Label+htmlFor: name, tagline, address(Textarea), phone, email, website, letterheadNote, footerNote, bankInfo(Textarea); primaryColor = input type="color" + Input teks hex TERSINKRONISASI DUA ARAH (validasi ^#[0-9A-Fa-f]{6}$, error inline rose, aria-invalid; tombol Simpan disabled bila hex invalid)
+  - Bagian Logo: logo saat ini + keterangan fallback monogram, input file (accept PNG/JPG/WEBP/SVG) + validasi client tipe & maks 2MB + info amber "Maks 2 MB", tombol "Unggah Logo" → FormData fd.set("file", f) → api.uploadBrandLogo (tanpa Content-Type manual) → toast sukses, pratinjau dgn cache-bust dari logoUrl respons (server juga menyertakan ?v=), list lokal di-update; Loader2 + disabled saat busy
+  - Simpan → api.updateBrand(brand, patch 10 field) → toast "Identitas {nama} tersimpan" → dialog tutup → refetch list; error → toast error
+- app-shell.tsx: ViewKey += "brand"; NAV entri { key:"brand", label:"Identitas Brand", icon: Palette, roles: ALL_ROLES } SETELAH "Pengaturan Kanal" SEBELUM "Kontak"; import default BrandView; render {effectiveView === "brand" && <BrandView user={user} />} setelah channels; bagian lain tidak diubah
+- VERIFIKASI API end-to-end (curl, owner@udp.co.id): GET /api/brands 200 = 4 brand (unimasi,segia,erfo,unicam); PUT patch penuh 200 + echo benar; PUT primaryColor "merah" → 400; login MARKETER → PUT 401 (gating); POST logo PNG 1x1 → 200 + logoUrl "/api/brands/unimasi/logo?v=…" + GET logo served 200; POST logo text/plain → 400 (format ditolak); data uji dipulihkan penuh (restore field + logoPath NULL via prisma db execute + file uji dihapus) → final diff = kosong, logoUrl kembali null
+- INFRA: GET /api/brands awalnya 500 (TypeError db.brandProfile.upsert) — dev server lama (start 07:04) memegang Prisma client STALE (model BrandProfile ditambahkan 14:15); db push (sudah in-sync) + prisma generate, lalu RESTART dev server (proses lama di-kill, `bun run dev` dijalankan ulang persis sama, log tetap dev.log) — server kini sehat dan dibiarkan berjalan untuk agent lain
+- bunx tsc --noEmit: 0 error; bunx eslint brand-view.tsx + app-shell.tsx: 0 error 0 warning
+
+Stage Summary:
+- Menu "Identitas Brand" (Palette) kini ada di sidebar utk SEMUA role internal, view menampilkan 4 kartu brand dgn pratinjau kop surat mini + field legal/footer/rekening; OWNER/MANAGER bisa edit semua field (termasuk warna picker+hex dua arah) & unggah logo ≤2MB; role lain read-only dgn chip penjelas
+- Perubahan identitas langsung memengaruhi kop surat dokumen (BrandDocument) karena membaca field BrandProfileDTO yang sama
+- Temuan penting: server menyertakan cache-bust (?v=) pada logoUrl; client tetap cache-bust ulang dari logoUrl respons sesuai spec
+- Artefak: src/components/views/brand-view.tsx (baru), src/components/app-shell.tsx (nav + render); tidak ada perubahan backend/kontrak; dev server direstart (sehat, port 3000)
+- Saran lanjutan: pratinjau dokumen penuh per brand dari view ini, kompres/resize logo saat upload, tombol hapus logo
+
+---
+Task ID: 1, 3, 4 (main orchestrator)
+Agent: main (orchestrator)
+Task: Dokumen ter-format identitas brand (kop surat) + Buat Brief/Penawaran dari percakapan lead + editor Identitas Brand
+
+Work Log:
+- Permintaan user: (a) di lead (inbox percakapan) bisa langsung buat penawaran & brief, (b) hasilnya dokumen terformat sesuai logo & identitas brand, (c) user bisa edit brand terutama template kop surat.
+- PRISMA: model BrandProfile (brand unique, name, tagline, logoPath, address, phone, email, website, primaryColor hex, letterheadNote, footerNote, bankInfo) + db push. TANPA seed ulang — auto-create default via src/lib/brands.ts (DEFAULT_BRAND_PROFILES utk unimasi emerald/segia teal/erfo amber/unicam violet, getOrCreateBrandProfiles upsert, mapBrandProfile dengan logoUrl cache-bust ?v=updatedAt).
+- API BARU: GET /api/brands (semua role internal; auto-create), PUT /api/brands (OWNER/MANAGER; validasi hex ^#RRGGBB$, name wajib; logAudit), POST/GET /api/brands/[brand]/logo (multipart PNG/JPG/WEBP/SVG maks 2MB → uploads/brand-<key>-<ts>.<ext>; GET menyajikan file utk <img> kop).
+- KONTRAK: crm-types += BrandProfileDTO, BrandDocType; api-client += brands()/updateBrand()/uploadBrandLogo().
+- KOMPONEN BARU src/components/brand-document.tsx: BrandDocument (lembar A4: kop logo/monogram + nama berwarna primary + tagline + kontak + baris legal + garis tebal warna brand, judul dokumen + nomor/tanggal, "Kepada Yth.", children isi, box PEMBAYARAN opsional, blok tanda tangan, footer) + BrandDocDialog (overlay + toolbar no-print "Cetak / Simpan PDF" window.print + brand autofetch by brandKey) + fmtDocRupiah/fmtDocDate. Print CSS di globals.css (@media print: hanya .brand-doc terlihat, .no-print hidden).
+- KOMPONEN BARU src/components/doc-content.tsx: QuotationDocContent (intro + tabel item + subtotal/diskon/PPN/TOTAL + catatan + ketentuan 30 hari) & BriefDocContent (chips permintaan+deadline, Latar & Tujuan, Audiens, Deliverables list, Referensi, tabel Estimasi Produksi dgn total jam/biaya).
+- INBOX (src/components/views/inbox-view.tsx + src/components/lead-doc-dialogs.tsx BARU): LeadDetailPanel dapat prop user; tombol "Buat Brief" & "Buat Penawaran" di header lead (canAct, disembunyikan utk status LOST/WON); dialog brief (judul prefill subjek, tujuan*, audiens, deliverables multiline, referensi, deadline) & dialog penawaran (judul prefill, item dinamis desc/qty/harga + tambah/hapus baris, diskon%, PPN%, ringkasan total live, catatan); setelah sukses → list di-refresh + PRATINJAU DOKUMEN TER-BRAND langsung terbuka. API sudah auto-sync lead (QT → stage PROPOSAL/status QUOTED + notif FINANCE; brief tolak LOST).
+- Task 2-a (subagent): tombol "Dokumen" per baris penawaran di finance-view & per kartu brief di brief-view (aria-label "Buka dokumen …"), masing-masing satu BrandDocDialog (penawaran showBankInfo + signatureName=user.name; brief signatureName=createdByName).
+- Task 2-b (subagent): view BARU brand-view.tsx "Identitas Brand" (kartu 4 brand dgn pratinjau mini kop: logo/monogram, nama berwarna, kontak, baris legal/footer/rekening; dialog Edit lengkap + color picker & hex dua arah + pratinjau kop live + upload logo validasi client; gating OWNER/MANAGER — role lain chip "Hanya Owner/Manajer") + nav app-shell "Identitas Brand" (Palette) utk ALL_ROLES setelah Pengaturan Kanal. Subagent juga fix Prisma client stale dgn restart dev server.
+- E2E browser (owner): Identitas Brand render 4 kartu ✓; edit baris legal Unimasi → tersimpan + kartu update (lalu dipulihkan) ✓; produksi lihat read-only chip ✓; inbox LD-000009 → Buat Penawaran 2 item → QT-0005 + pratinjau SURAT PENAWARAN (kop Segia teal, tabel, TOTAL, rekening) ✓; Buat Brief → BRF-0006 + pratinjau BRIEF PROYEK ✓; status lead otomatis jadi "Penawaran" ✓; Keuangan → Dokumen QT-0004 → kop Erfo amber ✓; Brief → Dokumen BRF-0003 ✓; upload logo SVG Unimasi via UI → toast + preview ✓; QT-0006 dari LD-000001 (Unimasi) → kop memakai LOGO asli hasil unggahan ✓; mobile 390px brand view tanpa overflow ✓.
+- tsc 0 error; bun run lint 0 error (2 warning lama); dev.log tanpa error kompilasi (entry "Unexpected token" di buffer console agent-browser adalah sisa state antara saat subagent menyimpan file — terbukti hilang: touch file → kompilasi sukses, page 200, seluruh alur jalan).
+
+Stage Summary:
+- FITUR BARU UTUH: (1) Buat Brief & Penawaran langsung dari percakapan lead → dokumen ter-brand otomatis terbuka; (2) Semua Penawaran/Brief bisa dicetak jadi PDF dgn kop surat sesuai brand (logo, warna, alamat, rekening, baris legal); (3) Editor Identitas Brand (Owner/Manajer) — logo, warna, kontak, baris legal kop, footer, rekening — perubahan langsung dipakai semua dokumen.
+- Data demo bertambah konsisten: QT-0005/QT-0006 (ld LD-000009 & LD-000001 kini QUOTED), BRF-0006 (DRAFT), logo Unimasi terunggah.
+- Saran lanjutan: kirim dokumen via email/WhatsApp dari dialog (attach), invoice & kwitansi ter-brand, upload logo per brand lengkap 4-4, preview PDF asli (server-side render), histori kirim dokumen.

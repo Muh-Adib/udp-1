@@ -219,6 +219,28 @@ model AppSetting {
   updatedAt DateTime @updatedAt
 }
 
+// ============ IDENTITAS BRAND (KOP SURAT & DOKUMEN) ============
+
+model BrandProfile {
+  id             String   @id @default(cuid())
+  brand          String   @unique // unimasi | segia | erfo | unicam
+  name           String // nama brand tampil di kop surat
+  tagline        String   @default("")
+  logoPath       String?  // path file logo di folder uploads/
+  address        String   @default("")
+  phone          String   @default("")
+  email          String   @default("")
+  website        String   @default("")
+  primaryColor   String   @default("#059669") // warna identitas (hex)
+  letterheadNote String   @default("") // baris legal/izin di bawah kop
+  footerNote     String   @default("") // teks footer dokumen (alamat lengkap dsb)
+  bankInfo       String   @default("") // rekening pembayaran pada penawaran/invoice
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([brand])
+}
+
 // ============ KEUANGAN & PRODUKSI ============
 
 model Quotation {

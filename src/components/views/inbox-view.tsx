@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CheckCircle2,
   ChevronRight,
+  ClipboardList,
+  FileText,
   Filter,
   Inbox as InboxIcon,
   Loader2,
@@ -23,13 +25,18 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { ChannelBadge } from "@/components/channel-badge";
+import { BrandDocDialog } from "@/components/brand-document";
+import { CreateBriefFromLeadDialog, CreateQuotationFromLeadDialog } from "@/components/lead-doc-dialogs";
+import { BriefDocContent, QuotationDocContent } from "@/components/doc-content";
 import { api } from "@/lib/api-client";
 import {
   LEAD_STATUS_BADGE,
   LEAD_STATUS_LABEL,
+  type BriefDTO,
   type LeadDTO,
   type LeadMessageDTO,
   type LeadStatus,
+  type QuotationDTO,
   type SessionUser,
 } from "@/lib/crm-types";
 import { cn } from "@/lib/utils";
@@ -190,7 +197,7 @@ export function InboxView({ user }: { user: SessionUser }) {
 
         {/* Detail */}
         {selectedId ? (
-          <LeadDetailPanel key={selectedId} leadId={selectedId} canAct={canAct} onChanged={() => void load()} />
+          <LeadDetailPanel key={selectedId} leadId={selectedId} user={user} canAct={canAct} onChanged={() => void load()} />
         ) : (
           <Card className="hidden items-center justify-center lg:flex">
             <CardContent className="flex flex-col items-center gap-2 py-16 text-muted-foreground">
@@ -205,7 +212,17 @@ export function InboxView({ user }: { user: SessionUser }) {
   );
 }
 
-function LeadDetailPanel({ leadId, canAct, onChanged }: { leadId: string; canAct: boolean; onChanged: () => void }) {
+function LeadDetailPanel({
+  leadId,
+  user,
+  canAct,
+  onChanged,
+}: {
+  leadId: string;
+  user: SessionUser;
+  canAct: boolean;
+  onChanged: () => void;
+}) {
   const [lead, setLead] = useState<(LeadDTO & { lostReason?: string | null }) | null>(null);
   const [messages, setMessages] = useState<LeadMessageDTO[]>([]);
   const [staff, setStaff] = useState<{ id: string; name: string; role: string }[]>([]);
@@ -214,6 +231,10 @@ function LeadDetailPanel({ leadId, canAct, onChanged }: { leadId: string; canAct
   const [noteMode, setNoteMode] = useState(false);
   const [showLostDialog, setShowLostDialog] = useState(false);
   const [lostReason, setLostReason] = useState(LOST_REASONS[0]);
+  const [showBriefDlg, setShowBriefDlg] = useState(false);
+  const [showQuoteDlg, setShowQuoteDlg] = useState(false);
+  const [docBrief, setDocBrief] = useState<BriefDTO | null>(null);
+  const [docQuotation, setDocQuotation] = useState<QuotationDTO | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
@@ -370,6 +391,16 @@ function LeadDetailPanel({ leadId, canAct, onChanged }: { leadId: string; canAct
                 Alasan: {lead.lostReason}
               </Badge>
             )}
+            {lead.status !== "LOST" && lead.status !== "WON" && (
+              <>
+                <Button size="sm" variant="outline" onClick={() => setShowBriefDlg(true)} aria-label={`Buat brief dari lead ${lead.code}`}>
+                  <ClipboardList className="size-3.5" /> Buat Brief
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setShowQuoteDlg(true)} aria-label={`Buat penawaran dari lead ${lead.code}`}>
+                  <FileText className="size-3.5" /> Buat Penawaran
+                </Button>
+              </>
+            )}
           </div>
         )}
       </CardContent>
@@ -481,6 +512,65 @@ function LeadDetailPanel({ leadId, canAct, onChanged }: { leadId: string; canAct
           </div>
         </div>
       )}
+
+      {/* Dialog buat brief / penawaran dari percakapan */}
+      {lead && (
+        <>
+          <CreateBriefFromLeadDialog
+            open={showBriefDlg}
+            onOpenChange={setShowBriefDlg}
+            lead={{ id: lead.id, code: lead.code, subject: lead.subject, contact: { name: lead.contact.name, company: lead.contact.company ?? null } }}
+            onCreated={(brief) => {
+              onChanged();
+              void load();
+              setDocBrief(brief);
+            }}
+          />
+          <CreateQuotationFromLeadDialog
+            open={showQuoteDlg}
+            onOpenChange={setShowQuoteDlg}
+            lead={{ id: lead.id, code: lead.code, subject: lead.subject, contact: { name: lead.contact.name, company: lead.contact.company ?? null } }}
+            onCreated={(quotation) => {
+              onChanged();
+              void load();
+              setDocQuotation(quotation);
+            }}
+          />
+        </>
+      )}
+
+      {/* Pratinjau dokumen ter-brand hasil pembuatan */}
+      <BrandDocDialog
+        open={Boolean(docBrief)}
+        onOpenChange={(o) => {
+          if (!o) setDocBrief(null);
+        }}
+        brandKey={docBrief?.brand ?? lead?.brand ?? "unimasi"}
+        docLabel="BRIEF PROYEK"
+        docNumber={docBrief?.code ?? ""}
+        dateIso={docBrief?.createdAt ?? new Date().toISOString()}
+        toName={lead?.contact.name ?? null}
+        toCompany={lead?.contact.company ?? null}
+        signatureName={docBrief?.createdByName ?? user.name}
+      >
+        {docBrief ? <BriefDocContent b={docBrief} /> : null}
+      </BrandDocDialog>
+      <BrandDocDialog
+        open={Boolean(docQuotation)}
+        onOpenChange={(o) => {
+          if (!o) setDocQuotation(null);
+        }}
+        brandKey={docQuotation?.brand ?? lead?.brand ?? "unimasi"}
+        docLabel="SURAT PENAWARAN"
+        docNumber={docQuotation?.number ?? ""}
+        dateIso={docQuotation?.createdAt ?? new Date().toISOString()}
+        toName={lead?.contact.name ?? null}
+        toCompany={lead?.contact.company ?? null}
+        showBankInfo
+        signatureName={user.name}
+      >
+        {docQuotation ? <QuotationDocContent q={docQuotation} /> : null}
+      </BrandDocDialog>
     </Card>
   );
 }

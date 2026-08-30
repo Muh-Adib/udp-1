@@ -112,3 +112,30 @@
 *::-webkit-scrollbar-thumb:hover {
   background: oklch(0.75 0.015 258 / 0.9);
 }
+
+/* ==== Cetak dokumen brand (kop surat) ====
+   Saat window.print() hanya lembar .brand-doc yang tampil;
+   toolbar & latar dialog disembunyikan via .no-print / visibility. */
+@media print {
+  body * {
+    visibility: hidden !important;
+  }
+  .brand-doc,
+  .brand-doc * {
+    visibility: visible !important;
+  }
+  .brand-doc {
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+    min-height: auto !important;
+    margin: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    padding: 12mm 14mm !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+}

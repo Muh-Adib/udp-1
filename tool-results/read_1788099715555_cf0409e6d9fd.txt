@@ -1,0 +1,1039 @@
+     1→"use client";
+     2→
+     3→import { Fragment, useCallback, useEffect, useState } from "react";
+     4→import {
+     5→  ArrowRight,
+     6→  Calculator,
+     7→  CalendarDays,
+     8→  CheckCircle2,
+     9→  ChevronDown,
+    10→  ClipboardList,
+    11→  Clock3,
+    12→  FileText,
+    13→  FolderKanban,
+    14→  Hourglass,
+    15→  Link2,
+    16→  Loader2,
+    17→  Plus,
+    18→  RefreshCw,
+    19→  Send,
+    20→  Timer,
+    21→  Trash2,
+    22→  TriangleAlert,
+    23→} from "lucide-react";
+    24→import { toast } from "sonner";
+    25→import { Badge } from "@/components/ui/badge";
+    26→import { Button } from "@/components/ui/button";
+    27→import { Card, CardContent } from "@/components/ui/card";
+    28→import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+    29→import { Input } from "@/components/ui/input";
+    30→import { Label } from "@/components/ui/label";
+    31→import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+    32→import { Textarea } from "@/components/ui/textarea";
+    33→import { api } from "@/lib/api-client";
+    34→import {
+    35→  BRAND_LABEL,
+    36→  BRIEF_STATUS_BADGE,
+    37→  BRIEF_STATUS_LABEL,
+    38→  LEAD_STAGE_BADGE,
+    39→  LEAD_STAGE_LABEL,
+    40→  type BriefDTO,
+    41→  type EstimateItemDTO,
+    42→  type LeadDTO,
+    43→  type LeadStage,
+    44→  type SessionUser,
+    45→} from "@/lib/crm-types";
+    46→import { cn } from "@/lib/utils";
+    47→
+    48→/* ---------------- helper format lokal ---------------- */
+    49→
+    50→const numberFmt = new Intl.NumberFormat("id-ID", { maximumFractionDigits: 0 });
+    51→
+    52→function formatRupiah(n: number): string {
+    53→  return `Rp ${numberFmt.format(Number.isFinite(n) ? Math.round(n) : 0)}`;
+    54→}
+    55→
+    56→function formatDate(iso?: string | null): string {
+    57→  if (!iso) return "—";
+    58→  return new Date(iso).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
+    59→}
+    60→
+    61→/** Lewat deadline = tanggal deadline sebelum hari ini & brief belum ditawarkan. */
+    62→function isOverdue(deadline: string, status: BriefDTO["status"], nowTs: number | null): boolean {
+    63→  if (!nowTs || status === "QUOTED") return false;
+    64→  const startOfToday = new Date(nowTs);
+    65→  startOfToday.setHours(0, 0, 0, 0);
+    66→  return new Date(deadline).getTime() < startOfToday.getTime();
+    67→}
+    68→
+    69→const UNITS = ["jam", "hari", "unit", "paket", "orang"] as const;
+    70→
+    71→type EstimateRow = { task: string; qty: string; unit: string; hours: string; cost: string };
+    72→const emptyEstimateRow = (): EstimateRow => ({ task: "", qty: "1", unit: "jam", hours: "0", cost: "" });
+    73→
+    74→/* ---------------- flow strip (alur 4 langkah) ---------------- */
+    75→
+    76→const FLOW_TONES = {
+    77→  slate: { card: "border-slate-200 bg-slate-50", chip: "bg-slate-200 text-slate-700" },
+    78→  amber: { card: "border-amber-200 bg-amber-50", chip: "bg-amber-100 text-amber-800" },
+    79→  teal: { card: "border-teal-200 bg-teal-50", chip: "bg-teal-100 text-teal-800" },
+    80→  emerald: { card: "border-emerald-200 bg-emerald-50", chip: "bg-emerald-100 text-emerald-800" },
+    81→} as const;
+    82→
+    83→type FlowTone = keyof typeof FLOW_TONES;
+    84→
+    85→/* ---------------- kartu brief ---------------- */
+    86→
+    87→function BriefCard({
+    88→  brief,
+    89→  nowTs,
+    90→  canSubmit,
+    91→  canEstimate,
+    92→  openEstimateId,
+    93→  onToggleEstimate,
+    94→  onAskSubmit,
+    95→  onOpenEstimate,
+    96→}: {
+    97→  brief: BriefDTO;
+    98→  nowTs: number | null;
+    99→  canSubmit: boolean;
+   100→  canEstimate: boolean;
+   101→  openEstimateId: string | null;
+   102→  onToggleEstimate: (estimateId: string) => void;
+   103→  onAskSubmit: (brief: BriefDTO) => void;
+   104→  onOpenEstimate: (brief: BriefDTO) => void;
+   105→}) {
+   106→  const lead = brief.lead;
+   107→  const overdue = brief.deadline ? isOverdue(brief.deadline, brief.status, nowTs) : false;
+   108→
+   109→  const deliverableLines = brief.deliverables.split("\n").map((s) => s.trim()).filter(Boolean);
+   110→  const shownDeliverables = deliverableLines.slice(0, 3);
+   111→  const restDeliverables = deliverableLines.length - shownDeliverables.length;
+   112→
+   113→  const refLines = (brief.references ?? "").split("\n").map((s) => s.trim()).filter(Boolean);
+   114→  const isUrl = (s: string) => /^https?:\/\//i.test(s) || /^www\./i.test(s);
+   115→
+   116→  const showSubmit = brief.status === "DRAFT" && canSubmit;
+   117→  const showEstimate = brief.status !== "QUOTED" && canEstimate;
+   118→  const showHint = brief.status === "ESTIMATED" && canSubmit;
+   119→  const hasFooter = Boolean(brief.projectCode) || showSubmit || showEstimate || showHint;
+   120→
+   121→  return (
+   122→    <Card className="flex flex-col rounded-2xl transition-shadow hover:shadow-md">
+   123→      <CardContent className="flex flex-1 flex-col gap-2.5 pt-5">
+   124→        {/* kode + status + brand */}
+   125→        <div className="flex flex-wrap items-center gap-1.5">
+   126→          <span className="font-mono text-xs font-semibold text-slate-500">{brief.code}</span>
+   127→          <Badge variant="outline" className={BRIEF_STATUS_BADGE[brief.status]}>
+   128→            {BRIEF_STATUS_LABEL[brief.status]}
+   129→          </Badge>
+   130→          <Badge variant="outline" className="ml-auto border-stone-200 bg-stone-100 text-stone-700">
+   131→            {BRAND_LABEL[brief.brand] ?? brief.brand}
+   132→          </Badge>
+   133→        </div>
+   134→
+   135→        {/* judul */}
+   136→        <p className="text-sm font-bold leading-snug text-slate-900">{brief.title}</p>
+   137→
+   138→        {/* info lead */}
+   139→        {lead && (
+   140→          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-muted-foreground">
+   141→            <span className="font-mono">{lead.code}</span>
+   142→            <span aria-hidden="true">·</span>
+   143→            <span className="font-medium text-slate-700">{lead.contactName}</span>
+   144→            {lead.companyName && (
+   145→              <>
+   146→                <span aria-hidden="true">·</span>
+   147→                <span className="truncate">{lead.companyName}</span>
+   148→              </>
+   149→            )}
+   150→            {lead.stage && (
+   151→              <Badge variant="outline" className={cn("px-1.5 py-0 text-[10px]", LEAD_STAGE_BADGE[lead.stage as LeadStage])}>
+   152→                {LEAD_STAGE_LABEL[lead.stage as LeadStage]}
+   153→              </Badge>
+   154→            )}
+   155→          </div>
+   156→        )}
+   157→
+   158→        {/* tujuan */}
+   159→        <p className="line-clamp-2 text-xs leading-relaxed text-slate-600">
+   160→          <span className="font-semibold text-slate-800">Tujuan: </span>
+   161→          {brief.objective}
+   162→        </p>
+   163→
+   164→        {/* deadline */}
+   165→        {brief.deadline && (
+   166→          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+   167→            <span className="inline-flex items-center gap-1">
+   168→              <CalendarDays className="size-3.5" /> Deadline {formatDate(brief.deadline)}
+   169→            </span>
+   170→            {overdue && <Badge className="border-rose-200 bg-rose-100 text-rose-700">Lewat deadline</Badge>}
+   171→          </div>
+   172→        )}
+   173→
+   174→        {/* deliverables (maks 3 baris) */}
+   175→        {shownDeliverables.length > 0 && (
+   176→          <ul className="space-y-1">
+   177→            {shownDeliverables.map((d, i) => (
+   178→              <li key={i} className="flex items-start gap-1.5 text-xs text-slate-600">
+   179→                <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-emerald-600" aria-hidden="true" />
+   180→                <span className="min-w-0">{d}</span>
+   181→              </li>
+   182→            ))}
+   183→            {restDeliverables > 0 && (
+   184→              <li className="pl-5 text-xs text-muted-foreground">+{restDeliverables} lainnya</li>
+   185→            )}
+   186→          </ul>
+   187→        )}
+   188→
+   189→        {/* referensi */}
+   190→        {refLines.length > 0 && (
+   191→          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+   192→            {refLines.map((ref, i) =>
+   193→              isUrl(ref) ? (
+   194→                <a
+   195→                  key={i}
+   196→                  href={ref.startsWith("www.") ? `https://${ref}` : ref}
+   197→                  target="_blank"
+   198→                  rel="noopener noreferrer"
+   199→                  className="inline-flex items-center gap-1 text-xs font-medium text-teal-700 hover:underline"
+   200→                >
+   201→                  <Link2 className="size-3" aria-hidden="true" /> Referensi{refLines.length > 1 ? ` ${i + 1}` : ""}
+   202→                </a>
+   203→              ) : (
+   204→                <span key={i} className="inline-flex items-center gap-1 truncate text-xs text-muted-foreground">
+   205→                  <Link2 className="size-3 shrink-0" aria-hidden="true" /> {ref}
+   206→                </span>
+   207→              )
+   208→            )}
+   209→          </div>
+   210→        )}
+   211→
+   212→        {/* estimasi produksi (accordion) */}
+   213→        {brief.estimates.map((est) => {
+   214→          const open = openEstimateId === est.id;
+   215→          return (
+   216→            <div key={est.id} className="rounded-xl border border-teal-200 bg-teal-50/70 p-3">
+   217→              <button
+   218→                type="button"
+   219→                onClick={() => onToggleEstimate(est.id)}
+   220→                aria-expanded={open}
+   221→                className="flex w-full items-center gap-2 text-left"
+   222→              >
+   223→                <Clock3 className="size-4 shrink-0 text-teal-600" aria-hidden="true" />
+   224→                <span className="text-sm font-semibold text-teal-900">
+   225→                  Estimasi: {est.totalHours} jam · {formatRupiah(est.totalCost)}
+   226→                </span>
+   227→                <ChevronDown
+   228→                  className={cn("ml-auto size-4 shrink-0 text-teal-600 transition-transform", open && "rotate-180")}
+   229→                  aria-hidden="true"
+   230→                />
+   231→              </button>
+   232→              {est.createdByName && <p className="mt-0.5 pl-6 text-[11px] text-teal-700">Dihitung oleh {est.createdByName}</p>}
+   233→              {open && (
+   234→                <div className="mt-2.5 space-y-1.5 border-t border-teal-200/80 pt-2.5">
+   235→                  {est.items.map((item, i) => (
+   236→                    <div key={i} className="flex items-baseline justify-between gap-2 text-xs">
+   237→                      <span className="min-w-0 flex-1 truncate text-slate-700" title={item.task}>
+   238→                        {item.task}
+   239→                      </span>
+   240→                      <span className="shrink-0 whitespace-nowrap text-muted-foreground">
+   241→                        {item.qty} {item.unit} · {item.hours} jam
+   242→                      </span>
+   243→                      <span className="w-24 shrink-0 text-right font-medium text-teal-900">
+   244→                        {formatRupiah(item.qty * item.cost)}
+   245→                      </span>
+   246→                    </div>
+   247→                  ))}
+   248→                  {est.notes && <p className="pt-1 text-xs italic text-teal-800/80">{est.notes}</p>}
+   249→                </div>
+   250→              )}
+   251→            </div>
+   252→          );
+   253→        })}
+   254→
+   255→        {/* aksi per role */}
+   256→        {hasFooter && (
+   257→          <div className="mt-auto flex flex-wrap items-center gap-2 border-t border-border/60 pt-3">
+   258→            {brief.projectCode && (
+   259→              <Badge className="border-emerald-200 bg-emerald-100 text-emerald-800">
+   260→                <FolderKanban className="size-3" aria-hidden="true" /> Proyek: {brief.projectCode}
+   261→              </Badge>
+   262→            )}
+   263→            {showSubmit && (
+   264→              <Button size="sm" variant="outline" onClick={() => onAskSubmit(brief)}>
+   265→                <Send className="size-3.5" /> Kirim untuk Estimasi
+   266→              </Button>
+   267→            )}
+   268→            {showEstimate && (
+   269→              <Button size="sm" onClick={() => onOpenEstimate(brief)}>
+   270→                <Calculator className="size-3.5" /> Buat Estimasi
+   271→              </Button>
+   272→            )}
+   273→            {showHint && (
+   274→              <span className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs font-medium text-emerald-800">
+   275→                <CheckCircle2 className="size-3.5" aria-hidden="true" /> Siap dibuatkan penawaran di menu Keuangan
+   276→              </span>
+   277→            )}
+   278→          </div>
+   279→        )}
+   280→      </CardContent>
+   281→    </Card>
+   282→  );
+   283→}
+   284→
+   285→/* ---------------- view utama ---------------- */
+   286→
+   287→export default function BriefView({ user }: { user: SessionUser }) {
+   288→  const [briefs, setBriefs] = useState<BriefDTO[] | null>(null);
+   289→  const [loading, setLoading] = useState(true);
+   290→  const [error, setError] = useState<string | null>(null);
+   291→  const [busy, setBusy] = useState<string | null>(null);
+   292→
+   293→  // "sekarang" dihitung di effect agar aman dari aturan purity saat render
+   294→  const [nowTs, setNowTs] = useState<number | null>(null);
+   295→  useEffect(() => {
+   296→    setNowTs(Date.now());
+   297→  }, []);
+   298→
+   299→  // accordion estimasi
+   300→  const [openEstimateId, setOpenEstimateId] = useState<string | null>(null);
+   301→
+   302→  // dialog buat brief
+   303→  const [createOpen, setCreateOpen] = useState(false);
+   304→  const [leadsCache, setLeadsCache] = useState<LeadDTO[] | null>(null);
+   305→  const [leadsLoading, setLeadsLoading] = useState(false);
+   306→  const [formLeadId, setFormLeadId] = useState("");
+   307→  const [formTitle, setFormTitle] = useState("");
+   308→  const [formObjective, setFormObjective] = useState("");
+   309→  const [formAudience, setFormAudience] = useState("");
+   310→  const [formDeliverables, setFormDeliverables] = useState("");
+   311→  const [formReferences, setFormReferences] = useState("");
+   312→  const [formDeadline, setFormDeadline] = useState("");
+   313→  const [formNotes, setFormNotes] = useState("");
+   314→
+   315→  // dialog kirim untuk estimasi
+   316→  const [submitTarget, setSubmitTarget] = useState<BriefDTO | null>(null);
+   317→  const [submitNote, setSubmitNote] = useState("");
+   318→
+   319→  // dialog buat estimasi
+   320→  const [estimateTarget, setEstimateTarget] = useState<BriefDTO | null>(null);
+   321→  const [estRows, setEstRows] = useState<EstimateRow[]>([emptyEstimateRow()]);
+   322→  const [estNotes, setEstNotes] = useState("");
+   323→
+   324→  const role = user.role;
+   325→  const canCreateBrief = role === "OWNER" || role === "MANAGER" || role === "MARKETER";
+   326→  const canSubmit = canCreateBrief;
+   327→  const canEstimate = role === "PRODUCTION" || role === "OWNER" || role === "MANAGER";
+   328→
+   329→  /* ---------- load ---------- */
+   330→
+   331→  const load = useCallback(async () => {
+   332→    setLoading(true);
+   333→    setError(null);
+   334→    try {
+   335→      const { briefs: data } = await api.briefs();
+   336→      setBriefs(data);
+   337→    } catch (e) {
+   338→      const msg = (e as Error).message || "Gagal memuat data brief";
+   339→      setError(msg);
+   340→      if (briefs) toast.error(msg);
+   341→    } finally {
+   342→      setLoading(false);
+   343→    }
+   344→    // eslint-disable-next-line react-hooks/exhaustive-deps
+   345→  }, []);
+   346→
+   347→  useEffect(() => {
+   348→    void load();
+   349→  }, [load]);
+   350→
+   351→  const refreshData = useCallback(async () => {
+   352→    try {
+   353→      const { briefs: data } = await api.briefs();
+   354→      setBriefs(data);
+   355→    } catch (e) {
+   356→      toast.error((e as Error).message || "Gagal memuat ulang data");
+   357→    }
+   358→  }, []);
+   359→
+   360→  /* ---------- aksi kirim brief ---------- */
+   361→
+   362→  async function submitBrief() {
+   363→    if (!submitTarget) return;
+   364→    setBusy("submit");
+   365→    try {
+   366→      await api.updateBrief(submitTarget.id, "submit", submitNote.trim() || undefined);
+   367→      toast.success(`Brief ${submitTarget.code} dikirim ke tim Produksi untuk estimasi`);
+   368→      setSubmitTarget(null);
+   369→      setSubmitNote("");
+   370→      await refreshData();
+   371→    } catch (e) {
+   372→      toast.error((e as Error).message);
+   373→    } finally {
+   374→      setBusy(null);
+   375→    }
+   376→  }
+   377→
+   378→  /* ---------- dialog buat brief ---------- */
+   379→
+   380→  function openCreate() {
+   381→    setCreateOpen(true);
+   382→    if (leadsCache === null) {
+   383→      setLeadsLoading(true);
+   384→      api
+   385→        .leads()
+   386→        .then(({ leads }) => setLeadsCache(leads))
+   387→        .catch((e) => toast.error((e as Error).message))
+   388→        .finally(() => setLeadsLoading(false));
+   389→    }
+   390→  }
+   391→
+   392→  function resetCreateForm() {
+   393→    setFormLeadId("");
+   394→    setFormTitle("");
+   395→    setFormObjective("");
+   396→    setFormAudience("");
+   397→    setFormDeliverables("");
+   398→    setFormReferences("");
+   399→    setFormDeadline("");
+   400→    setFormNotes("");
+   401→  }
+   402→
+   403→  // lead yang bisa dibuatkan brief: bukan LOST & bukan WON
+   404→  const eligibleLeads = (leadsCache ?? []).filter(
+   405→    (l) => l.stage !== "LOST" && l.stage !== "WON" && l.status !== "LOST" && l.status !== "WON"
+   406→  );
+   407→
+   408→  async function submitCreate() {
+   409→    if (!formLeadId) {
+   410→      toast.error("Pilih lead terlebih dahulu");
+   411→      return;
+   412→    }
+   413→    const title = formTitle.trim();
+   414→    if (!title) {
+   415→      toast.error("Judul brief wajib diisi");
+   416→      return;
+   417→    }
+   418→    const objective = formObjective.trim();
+   419→    if (!objective) {
+   420→      toast.error("Tujuan brief wajib diisi");
+   421→      return;
+   422→    }
+   423→    setBusy("create");
+   424→    try {
+   425→      const { brief } = await api.createBrief({
+   426→        leadId: formLeadId,
+   427→        title,
+   428→        objective,
+   429→        audience: formAudience.trim() || undefined,
+   430→        deliverables: formDeliverables.trim() || undefined,
+   431→        references: formReferences.trim() || undefined,
+   432→        deadline: formDeadline ? new Date(formDeadline).toISOString() : undefined,
+   433→        notes: formNotes.trim() || undefined,
+   434→      });
+   435→      toast.success(`Brief ${brief.code} dibuat — siap dikirim ke tim Produksi`);
+   436→      setCreateOpen(false);
+   437→      resetCreateForm();
+   438→      await refreshData();
+   439→    } catch (e) {
+   440→      toast.error((e as Error).message);
+   441→    } finally {
+   442→      setBusy(null);
+   443→    }
+   444→  }
+   445→
+   446→  /* ---------- dialog buat estimasi ---------- */
+   447→
+   448→  function openEstimate(brief: BriefDTO) {
+   449→    setEstimateTarget(brief);
+   450→    setEstRows([emptyEstimateRow()]);
+   451→    setEstNotes("");
+   452→  }
+   453→
+   454→  const liveHours = estRows.reduce((s, r) => s + (Number(r.hours) || 0), 0);
+   455→  const liveCost = estRows.reduce((s, r) => s + (Number(r.qty) || 0) * (Number(r.cost) || 0), 0);
+   456→
+   457→  async function submitEstimate() {
+   458→    const target = estimateTarget;
+   459→    if (!target) return;
+   460→    const items: EstimateItemDTO[] = estRows
+   461→      .map((r) => ({
+   462→        task: r.task.trim(),
+   463→        qty: Math.max(0, Math.round(Number(r.qty) || 0)),
+   464→        unit: r.unit,
+   465→        hours: Math.max(0, Math.round(Number(r.hours) || 0)),
+   466→        cost: Math.max(0, Math.round(Number(r.cost) || 0)),
+   467→      }))
+   468→      .filter((it) => it.task && it.qty > 0);
+   469→    if (items.length === 0) {
+   470→      toast.error("Minimal satu baris pekerjaan valid (nama pekerjaan + qty > 0)");
+   471→      return;
+   472→    }
+   473→    setBusy("estimate");
+   474→    try {
+   475→      const { estimate } = await api.createEstimate({
+   476→        briefId: target.id,
+   477→        items,
+   478→        notes: estNotes.trim() || undefined,
+   479→      });
+   480→      toast.success(
+   481→        `Estimasi ${target.code} tersimpan — ${estimate.totalHours} jam · ${formatRupiah(estimate.totalCost)}`
+   482→      );
+   483→      setEstimateTarget(null);
+   484→      await refreshData();
+   485→    } catch (e) {
+   486→      toast.error((e as Error).message);
+   487→    } finally {
+   488→      setBusy(null);
+   489→    }
+   490→  }
+   491→
+   492→  /* ---------- render: error ---------- */
+   493→
+   494→  if (error && !briefs) {
+   495→    return (
+   496→      <Card className="mx-auto max-w-md border-rose-200">
+   497→        <CardContent className="flex flex-col items-center gap-3 py-10 text-center">
+   498→          <span className="flex size-12 items-center justify-center rounded-2xl bg-rose-100 text-rose-600">
+   499→            <TriangleAlert className="size-6" />
+   500→          </span>
+   501→          <div>
+   502→            <p className="font-semibold">Gagal memuat data brief</p>
+   503→            <p className="text-sm text-muted-foreground">{error}</p>
+   504→          </div>
+   505→          <Button onClick={() => void load()}>
+   506→            <RefreshCw className="size-4" /> Coba Lagi
+   507→          </Button>
+   508→        </CardContent>
+   509→      </Card>
+   510→    );
+   511→  }
+   512→
+   513→  /* ---------- render: skeleton ---------- */
+   514→
+   515→  if (loading || !briefs) {
+   516→    return (
+   517→      <div className="space-y-5">
+   518→        <Card>
+   519→          <CardContent className="animate-pulse space-y-3 pt-5">
+   520→            <div className="h-6 w-56 rounded bg-muted" />
+   521→            <div className="h-3 w-80 max-w-full rounded bg-muted" />
+   522→          </CardContent>
+   523→        </Card>
+   524→        <div className="grid grid-cols-2 gap-2 sm:flex">
+   525→          {[0, 1, 2, 3].map((i) => (
+   526→            <div key={i} className="h-[62px] animate-pulse rounded-xl bg-muted sm:flex-1" />
+   527→          ))}
+   528→        </div>
+   529→        <div className="grid gap-3 sm:grid-cols-3">
+   530→          {[0, 1, 2].map((i) => (
+   531→            <Card key={i}>
+   532→              <CardContent className="animate-pulse space-y-3 pt-5">
+   533→                <div className="h-3 w-24 rounded bg-muted" />
+   534→                <div className="h-7 w-20 rounded bg-muted" />
+   535→              </CardContent>
+   536→            </Card>
+   537→          ))}
+   538→        </div>
+   539→        <div className="grid gap-3 md:grid-cols-2">
+   540→          {[0, 1, 2, 3].map((i) => (
+   541→            <Card key={i}>
+   542→              <CardContent className="animate-pulse space-y-2.5 pt-5">
+   543→                <div className="h-3 w-36 rounded bg-muted" />
+   544→                <div className="h-4 w-3/4 rounded bg-muted" />
+   545→                <div className="h-3 w-1/2 rounded bg-muted" />
+   546→                <div className="h-16 rounded-xl bg-muted" />
+   547→              </CardContent>
+   548→            </Card>
+   549→          ))}
+   550→        </div>
+   551→      </div>
+   552→    );
+   553→  }
+   554→
+   555→  /* ---------- data siap ---------- */
+   556→
+   557→  const briefAktifCount = briefs.filter((b) => b.status !== "QUOTED").length; // DRAFT + SUBMITTED + ESTIMATED
+   558→  const menungguEstimasiCount = briefs.filter((b) => b.status === "SUBMITTED").length;
+   559→  const totalJam = briefs.reduce((s, b) => s + b.estimates.reduce((t, e) => t + e.totalHours, 0), 0);
+   560→  const estimatedCount = briefs.filter((b) => b.status === "ESTIMATED").length;
+   561→  const readyToQuoteCount = estimatedCount; // ESTIMATED = belum QUOTED
+   562→
+   563→  const flowSteps: { n: number; label: string; count: number; tone: FlowTone }[] = [
+   564→    { n: 1, label: "Lead Terpilih", count: briefs.length, tone: "slate" },
+   565→    { n: 2, label: "Brief", count: briefs.length, tone: "amber" },
+   566→    { n: 3, label: "Estimasi Produksi", count: estimatedCount, tone: "teal" },
+   567→    { n: 4, label: "Siap Ditawarkan", count: readyToQuoteCount, tone: "emerald" },
+   568→  ];
+   569→
+   570→  const kpis = [
+   571→    {
+   572→      key: "aktif",
+   573→      label: "Brief Aktif",
+   574→      value: String(briefAktifCount),
+   575→      sub: "Draf + dikirim + ters estimasi",
+   576→      icon: FileText,
+   577→      iconClass: "bg-slate-100 text-slate-700",
+   578→    },
+   579→    {
+   580→      key: "menunggu",
+   581→      label: "Menunggu Estimasi",
+   582→      value: String(menungguEstimasiCount),
+   583→      sub: menungguEstimasiCount > 0 ? "Segera dihitung tim Produksi" : "Tidak ada antrean estimasi",
+   584→      icon: Hourglass,
+   585→      iconClass: "bg-amber-100 text-amber-700",
+   586→    },
+   587→    {
+   588→      key: "jam",
+   589→      label: "Total Jam Ters Estimasi",
+   590→      value: numberFmt.format(totalJam),
+   591→      sub: "Akumulasi seluruh estimasi produksi",
+   592→      icon: Timer,
+   593→      iconClass: "bg-teal-100 text-teal-700",
+   594→    },
+   595→  ];
+   596→
+   597→  return (
+   598→    <div className="space-y-5">
+   599→      {/* Header card */}
+   600→      <Card className="rounded-2xl">
+   601→        <CardContent className="flex flex-col gap-3 pt-5 sm:flex-row sm:items-center sm:justify-between">
+   602→          <div className="space-y-1">
+   603→            <h2 className="text-xl font-bold tracking-tight">Brief &amp; Estimasi Produksi</h2>
+   604→            <p className="text-sm text-muted-foreground">
+   605→              Lead terpilih → dibuat Brief → tim Produksi menghitung Estimasi → lalu jadi dasar Penawaran.
+   606→            </p>
+   607→          </div>
+   608→          <div className="flex shrink-0 flex-wrap items-center gap-2">
+   609→            {canCreateBrief && (
+   610→              <Button size="sm" onClick={openCreate}>
+   611→                <Plus className="size-4" /> Buat Brief dari Lead
+   612→              </Button>
+   613→            )}
+   614→            <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
+   615→              <RefreshCw className={cn("size-4", loading && "animate-spin")} /> Muat Ulang
+   616→            </Button>
+   617→          </div>
+   618→        </CardContent>
+   619→      </Card>
+   620→
+   621→      {/* Alur strip */}
+   622→      <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center sm:gap-1.5" aria-label="Alur Brief dan Estimasi">
+   623→        {flowSteps.map((step, i) => (
+   624→          <Fragment key={step.n}>
+   625→            <div className={cn("flex items-center gap-2.5 rounded-xl border p-3 sm:flex-1", FLOW_TONES[step.tone].card)}>
+   626→              <span
+   627→                className={cn(
+   628→                  "flex size-7 shrink-0 items-center justify-center rounded-lg text-xs font-bold",
+   629→                  FLOW_TONES[step.tone].chip
+   630→                )}
+   631→              >
+   632→                {step.n}
+   633→              </span>
+   634→              <div className="min-w-0">
+   635→                <p className="truncate text-xs font-medium text-slate-600">{step.label}</p>
+   636→                <p className="text-lg font-bold leading-tight text-slate-900">{step.count}</p>
+   637→              </div>
+   638→            </div>
+   639→            {i < flowSteps.length - 1 && (
+   640→              <ArrowRight className="hidden size-4 shrink-0 text-slate-400 sm:block" aria-hidden="true" />
+   641→            )}
+   642→          </Fragment>
+   643→        ))}
+   644→      </div>
+   645→
+   646→      {/* KPI ringkas */}
+   647→      <div className="grid gap-3 sm:grid-cols-3">
+   648→        {kpis.map((k) => {
+   649→          const Icon = k.icon;
+   650→          return (
+   651→            <Card key={k.key} className="transition-shadow hover:shadow-md">
+   652→              <CardContent className="flex items-start justify-between gap-3 pt-5">
+   653→                <div className="min-w-0 space-y-1">
+   654→                  <p className="text-sm text-muted-foreground">{k.label}</p>
+   655→                  <p className="truncate text-xl font-bold tracking-tight sm:text-2xl">{k.value}</p>
+   656→                  <p className="text-xs text-muted-foreground">{k.sub}</p>
+   657→                </div>
+   658→                <span className={cn("flex size-10 shrink-0 items-center justify-center rounded-xl", k.iconClass)}>
+   659→                  <Icon className="size-5" aria-hidden="true" />
+   660→                </span>
+   661→              </CardContent>
+   662→            </Card>
+   663→          );
+   664→        })}
+   665→      </div>
+   666→
+   667→      {/* Daftar brief */}
+   668→      <div className="space-y-3">
+   669→        <div className="flex items-baseline justify-between gap-2">
+   670→          <h3 className="text-sm font-semibold text-slate-800">Daftar Brief</h3>
+   671→          <p className="text-xs text-muted-foreground">{briefs.length} brief tercatat</p>
+   672→        </div>
+   673→
+   674→        {briefs.length === 0 ? (
+   675→          <Card>
+   676→            <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
+   677→              <span className="flex size-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-500">
+   678→                <ClipboardList className="size-6" />
+   679→              </span>
+   680→              <div>
+   681→                <p className="font-semibold">Belum ada brief</p>
+   682→                <p className="mx-auto max-w-sm text-sm text-muted-foreground">
+   683→                  Buat brief dari lead yang sudah terkualifikasi untuk menghubungkan Marketing → Produksi → Keuangan.
+   684→                </p>
+   685→              </div>
+   686→              {canCreateBrief && (
+   687→                <Button size="sm" onClick={openCreate}>
+   688→                  <Plus className="size-4" /> Buat Brief dari Lead
+   689→                </Button>
+   690→              )}
+   691→            </CardContent>
+   692→          </Card>
+   693→        ) : (
+   694→          <div className="max-h-[680px] overflow-y-auto pr-1">
+   695→            <div className="grid gap-3 md:grid-cols-2">
+   696→              {briefs.map((brief) => (
+   697→                <BriefCard
+   698→                  key={brief.id}
+   699→                  brief={brief}
+   700→                  nowTs={nowTs}
+   701→                  canSubmit={canSubmit}
+   702→                  canEstimate={canEstimate}
+   703→                  openEstimateId={openEstimateId}
+   704→                  onToggleEstimate={(id) => setOpenEstimateId((p) => (p === id ? null : id))}
+   705→                  onAskSubmit={(b) => {
+   706→                    setSubmitTarget(b);
+   707→                    setSubmitNote("");
+   708→                  }}
+   709→                  onOpenEstimate={openEstimate}
+   710→                />
+   711→              ))}
+   712→            </div>
+   713→          </div>
+   714→        )}
+   715→      </div>
+   716→
+   717→      {/* Dialog Buat Brief dari Lead */}
+   718→      <Dialog open={createOpen} onOpenChange={(o) => !o && setCreateOpen(false)}>
+   719→        <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
+   720→          <DialogHeader>
+   721→            <DialogTitle>Buat Brief dari Lead</DialogTitle>
+   722→            <DialogDescription>
+   723→              Susun brief produksi dari lead yang sudah terkualifikasi. Brief draf bisa dikirim ke tim Produksi untuk
+   724→              diestimasi.
+   725→            </DialogDescription>
+   726→          </DialogHeader>
+   727→
+   728→          <div className="space-y-4">
+   729→            <div className="space-y-1.5">
+   730→              <Label htmlFor="brf-lead">
+   731→                Lead <span className="text-rose-500">*</span>
+   732→              </Label>
+   733→              <Select value={formLeadId} onValueChange={setFormLeadId} disabled={leadsLoading}>
+   734→                <SelectTrigger id="brf-lead" className="w-full">
+   735→                  <SelectValue placeholder={leadsLoading ? "Memuat daftar lead…" : "Pilih lead…"} />
+   736→                </SelectTrigger>
+   737→                <SelectContent>
+   738→                  {eligibleLeads.map((l) => (
+   739→                    <SelectItem key={l.id} value={l.id}>
+   740→                      {l.code} · {l.subject}
+   741→                    </SelectItem>
+   742→                  ))}
+   743→                </SelectContent>
+   744→              </Select>
+   745→              {!leadsLoading && eligibleLeads.length === 0 && (
+   746→                <p className="text-xs text-muted-foreground">
+   747→                  Belum ada lead yang bisa dibuatkan brief (lead LOST/WON dikecualikan).
+   748→                </p>
+   749→              )}
+   750→            </div>
+   751→
+   752→            <div className="space-y-1.5">
+   753→              <Label htmlFor="brf-title">
+   754→                Judul Brief <span className="text-rose-500">*</span>
+   755→              </Label>
+   756→              <Input
+   757→                id="brf-title"
+   758→                placeholder="mis. Redesign Website Corporate Sinar Jaya"
+   759→                value={formTitle}
+   760→                onChange={(e) => setFormTitle(e.target.value)}
+   761→              />
+   762→            </div>
+   763→
+   764→            <div className="space-y-1.5">
+   765→              <Label htmlFor="brf-objective">
+   766→                Tujuan Brief <span className="text-rose-500">*</span>
+   767→              </Label>
+   768→              <Textarea
+   769→                id="brf-objective"
+   770→                placeholder="Apa yang ingin dicapai dari pekerjaan ini?"
+   771→                value={formObjective}
+   772→                onChange={(e) => setFormObjective(e.target.value)}
+   773→              />
+   774→            </div>
+   775→
+   776→            <div className="space-y-1.5">
+   777→              <Label htmlFor="brf-audience">Audiens (opsional)</Label>
+   778→              <Input
+   779→                id="brf-audience"
+   780→                placeholder="mis. Procurement & manajemen B2B"
+   781→                value={formAudience}
+   782→                onChange={(e) => setFormAudience(e.target.value)}
+   783→              />
+   784→            </div>
+   785→
+   786→            <div className="space-y-1.5">
+   787→              <Label htmlFor="brf-deliverables">Deliverables (opsional — satu baris per item)</Label>
+   788→              <Textarea
+   789→                id="brf-deliverables"
+   790→                placeholder={"Desain UI 12 halaman\nDevelopment WordPress custom\nCopywriting"}
+   791→                value={formDeliverables}
+   792→                onChange={(e) => setFormDeliverables(e.target.value)}
+   793→              />
+   794→            </div>
+   795→
+   796→            <div className="grid gap-3 sm:grid-cols-2">
+   797→              <div className="space-y-1.5">
+   798→                <Label htmlFor="brf-references">Referensi (opsional)</Label>
+   799→                <Input
+   800→                  id="brf-references"
+   801→                  type="url"
+   802→                  placeholder="https://drive.google.com/…"
+   803→                  value={formReferences}
+   804→                  onChange={(e) => setFormReferences(e.target.value)}
+   805→                />
+   806→              </div>
+   807→              <div className="space-y-1.5">
+   808→                <Label htmlFor="brf-deadline">Deadline (opsional)</Label>
+   809→                <Input
+   810→                  id="brf-deadline"
+   811→                  type="date"
+   812→                  value={formDeadline}
+   813→                  onChange={(e) => setFormDeadline(e.target.value)}
+   814→                />
+   815→              </div>
+   816→            </div>
+   817→
+   818→            <div className="space-y-1.5">
+   819→              <Label htmlFor="brf-notes">Catatan (opsional)</Label>
+   820→              <Textarea
+   821→                id="brf-notes"
+   822→                placeholder="Konteks tambahan untuk tim produksi"
+   823→                value={formNotes}
+   824→                onChange={(e) => setFormNotes(e.target.value)}
+   825→              />
+   826→            </div>
+   827→          </div>
+   828→
+   829→          <DialogFooter>
+   830→            <Button variant="outline" onClick={() => setCreateOpen(false)}>
+   831→              Batal
+   832→            </Button>
+   833→            <Button onClick={() => void submitCreate()} disabled={busy === "create"}>
+   834→              {busy === "create" && <Loader2 className="size-4 animate-spin" />} Simpan Brief
+   835→            </Button>
+   836→          </DialogFooter>
+   837→        </DialogContent>
+   838→      </Dialog>
+   839→
+   840→      {/* Dialog konfirmasi Kirim untuk Estimasi */}
+   841→      <Dialog open={!!submitTarget} onOpenChange={(o) => !o && setSubmitTarget(null)}>
+   842→        <DialogContent className="max-w-md">
+   843→          <DialogHeader>
+   844→            <DialogTitle>Kirim untuk Estimasi</DialogTitle>
+   845→            <DialogDescription>
+   846→              Brief {submitTarget?.code} — {submitTarget?.title} akan dikirim ke tim Produksi untuk dihitung estimasi
+   847→              pengerjaannya.
+   848→            </DialogDescription>
+   849→          </DialogHeader>
+   850→          <div className="space-y-1.5">
+   851→            <Label htmlFor="submit-note">Catatan untuk tim produksi (opsional)</Label>
+   852→            <Textarea
+   853→              id="submit-note"
+   854→              placeholder="mis. Prioritaskan halaman utama, klien minta review minggu depan"
+   855→              value={submitNote}
+   856→              onChange={(e) => setSubmitNote(e.target.value)}
+   857→            />
+   858→          </div>
+   859→          <DialogFooter>
+   860→            <Button variant="outline" onClick={() => setSubmitTarget(null)}>
+   861→              Batal
+   862→            </Button>
+   863→            <Button onClick={() => void submitBrief()} disabled={busy === "submit"}>
+   864→              {busy === "submit" ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />} Kirim ke
+   865→              Produksi
+   866→            </Button>
+   867→          </DialogFooter>
+   868→        </DialogContent>
+   869→      </Dialog>
+   870→
+   871→      {/* Dialog Buat Estimasi */}
+   872→      <Dialog open={!!estimateTarget} onOpenChange={(o) => !o && setEstimateTarget(null)}>
+   873→        <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
+   874→          <DialogHeader>
+   875→            <DialogTitle>Buat Estimasi Pengerjaan</DialogTitle>
+   876→            <DialogDescription>
+   877→              {estimateTarget?.code} — {estimateTarget?.title}
+   878→            </DialogDescription>
+   879→          </DialogHeader>
+   880→
+   881→          {estimateTarget && (
+   882→            <div className="space-y-1 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+   883→              <p className="font-semibold text-slate-800">
+   884→                {BRAND_LABEL[estimateTarget.brand] ?? estimateTarget.brand}
+   885→                {estimateTarget.lead ? ` · ${estimateTarget.lead.code} · ${estimateTarget.lead.contactName}` : ""}
+   886→              </p>
+   887→              <p className="line-clamp-2">
+   888→                <span className="font-medium">Tujuan: </span>
+   889→                {estimateTarget.objective}
+   890→              </p>
+   891→              {estimateTarget.deadline && (
+   892→                <p>
+   893→                  <span className="font-medium">Deadline: </span>
+   894→                  {formatDate(estimateTarget.deadline)}
+   895→                </p>
+   896→              )}
+   897→            </div>
+   898→          )}
+   899→
+   900→          <div className="space-y-2">
+   901→            <Label>Baris Pekerjaan</Label>
+   902→            <div className="hidden grid-cols-[1fr_62px_100px_66px_120px_36px] gap-2 px-0.5 text-xs text-muted-foreground sm:grid">
+   903→              <span>Pekerjaan</span>
+   904→              <span>Qty</span>
+   905→              <span>Satuan</span>
+   906→              <span>Jam</span>
+   907→              <span>Biaya/Unit (Rp)</span>
+   908→              <span />
+   909→            </div>
+   910→            {estRows.map((row, idx) => (
+   911→              <div
+   912→                key={idx}
+   913→                className="space-y-2 rounded-xl border border-border/70 bg-slate-50/60 p-3 sm:grid sm:grid-cols-[1fr_62px_100px_66px_120px_36px] sm:items-center sm:gap-2 sm:space-y-0 sm:border-0 sm:bg-transparent sm:p-0"
+   914→              >
+   915→                <Input
+   916→                  placeholder={`Pekerjaan ${idx + 1} — mis. Desain UI 12 halaman`}
+   917→                  value={row.task}
+   918→                  onChange={(e) =>
+   919→                    setEstRows((p) => p.map((r, i) => (i === idx ? { ...r, task: e.target.value } : r)))
+   920→                  }
+   921→                />
+   922→                <div className="grid grid-cols-3 gap-2 sm:contents">
+   923→                  <Input
+   924→                    type="number"
+   925→                    min={1}
+   926→                    value={row.qty}
+   927→                    onChange={(e) =>
+   928→                      setEstRows((p) => p.map((r, i) => (i === idx ? { ...r, qty: e.target.value } : r)))
+   929→                    }
+   930→                    aria-label="Qty"
+   931→                  />
+   932→                  <Select
+   933→                    value={row.unit}
+   934→                    onValueChange={(v) => setEstRows((p) => p.map((r, i) => (i === idx ? { ...r, unit: v } : r)))}
+   935→                  >
+   936→                    <SelectTrigger aria-label="Satuan" className="w-full">
+   937→                      <SelectValue />
+   938→                    </SelectTrigger>
+   939→                    <SelectContent>
+   940→                      {UNITS.map((u) => (
+   941→                        <SelectItem key={u} value={u}>
+   942→                          {u}
+   943→                        </SelectItem>
+   944→                      ))}
+   945→                    </SelectContent>
+   946→                  </Select>
+   947→                  <Input
+   948→                    type="number"
+   949→                    min={0}
+   950→                    value={row.hours}
+   951→                    onChange={(e) =>
+   952→                      setEstRows((p) => p.map((r, i) => (i === idx ? { ...r, hours: e.target.value } : r)))
+   953→                    }
+   954→                    aria-label="Jam kerja"
+   955→                  />
+   956→                </div>
+   957→                <div className="flex items-center gap-2 sm:contents">
+   958→                  <Input
+   959→                    type="number"
+   960→                    min={0}
+   961→                    step={1000}
+   962→                    placeholder="0"
+   963→                    value={row.cost}
+   964→                    onChange={(e) =>
+   965→                      setEstRows((p) => p.map((r, i) => (i === idx ? { ...r, cost: e.target.value } : r)))
+   966→                    }
+   967→                    aria-label="Biaya per unit"
+   968→                  />
+   969→                  <Button
+   970→                    type="button"
+   971→                    variant="ghost"
+   972→                    size="icon-sm"
+   973→                    className="sm:hidden"
+   974→                    disabled={estRows.length <= 1}
+   975→                    onClick={() => setEstRows((p) => p.filter((_, i) => i !== idx))}
+   976→                    aria-label="Hapus baris"
+   977→                  >
+   978→                    <Trash2 className="size-4 text-rose-500" />
+   979→                  </Button>
+   980→                </div>
+   981→                <Button
+   982→                  type="button"
+   983→                  variant="ghost"
+   984→                  size="icon-sm"
+   985→                  className="hidden sm:inline-flex"
+   986→                  disabled={estRows.length <= 1}
+   987→                  onClick={() => setEstRows((p) => p.filter((_, i) => i !== idx))}
+   988→                  aria-label="Hapus baris"
+   989→                >
+   990→                  <Trash2 className="size-4 text-rose-500" />
+   991→                </Button>
+   992→              </div>
+   993→            ))}
+   994→            <Button
+   995→              type="button"
+   996→              variant="outline"
+   997→              size="sm"
+   998→              onClick={() => setEstRows((p) => [...p, emptyEstimateRow()])}
+   999→            >
+  1000→              <Plus className="size-3.5" /> Tambah Baris
+  1001→            </Button>
+  1002→          </div>
+  1003→
+  1004→          <div className="space-y-1.5">
+  1005→            <Label htmlFor="est-notes">Catatan (opsional)</Label>
+  1006→            <Textarea
+  1007→              id="est-notes"
+  1008→              placeholder="mis. Butuh 1 desainer + 1 programmer, durasi 3 minggu"
+  1009→              value={estNotes}
+  1010→              onChange={(e) => setEstNotes(e.target.value)}
+  1011→            />
+  1012→          </div>
+  1013→
+  1014→          {/* Total live */}
+  1015→          <div className="space-y-1 rounded-xl border border-teal-200 bg-teal-50 p-3 text-sm">
+  1016→            <div className="flex justify-between">
+  1017→              <span className="text-muted-foreground">Total Jam Kerja</span>
+  1018→              <span className="font-semibold text-teal-900">{numberFmt.format(liveHours)} jam</span>
+  1019→            </div>
+  1020→            <div className="flex justify-between border-t border-teal-200 pt-2">
+  1021→              <span className="font-semibold">Total Biaya Produksi</span>
+  1022→              <span className="font-bold text-teal-900">{formatRupiah(liveCost)}</span>
+  1023→            </div>
+  1024→          </div>
+  1025→
+  1026→          <DialogFooter>
+  1027→            <Button variant="outline" onClick={() => setEstimateTarget(null)}>
+  1028→              Batal
+  1029→            </Button>
+  1030→            <Button onClick={() => void submitEstimate()} disabled={busy === "estimate"}>
+  1031→              {busy === "estimate" && <Loader2 className="size-4 animate-spin" />} Simpan Estimasi
+  1032→            </Button>
+  1033→          </DialogFooter>
+  1034→        </DialogContent>
+  1035→      </Dialog>
+  1036→    </div>
+  1037→  );
+  1038→}
+  1039→

@@ -2,6 +2,7 @@
 
 import type {
   BriefDTO,
+  BrandProfileDTO,
   ChannelConfigDTO,
   ContactDTO,
   DashboardStats,
@@ -144,6 +145,26 @@ export const api = {
   uploadDeliverableFile: (form: FormData) =>
     request<{ deliverable: DeliverableDTO }>("/api/deliverables", { method: "POST", body: form }),
   deleteDeliverable: (id: string) => request<{ ok: true }>(`/api/deliverables/${id}`, { method: "DELETE" }),
+
+  // ---------- identitas brand ----------
+  brands: () => request<{ brands: BrandProfileDTO[] }>("/api/brands"),
+  updateBrand: (
+    brand: string,
+    patch: {
+      name?: string;
+      tagline?: string;
+      address?: string;
+      phone?: string;
+      email?: string;
+      website?: string;
+      primaryColor?: string;
+      letterheadNote?: string;
+      footerNote?: string;
+      bankInfo?: string;
+    }
+  ) => request<{ brand: BrandProfileDTO }>("/api/brands", { method: "PUT", body: JSON.stringify({ brand, ...patch }) }),
+  uploadBrandLogo: (brand: string, form: FormData) =>
+    request<{ brand: BrandProfileDTO }>(`/api/brands/${brand}/logo`, { method: "POST", body: form }),
 
   // ---------- portal klien ----------
   portalSummary: () => request<PortalSummaryDTO>("/api/portal"),

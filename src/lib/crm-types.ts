@@ -472,3 +472,24 @@ export const CHANNEL_BASE_SCORE: Record<ChannelType | "manual", number> = {
   web: 20,
   manual: 15,
 };
+
+// ============ IDENTITAS BRAND & DOKUMEN ============
+
+/** Profil identitas brand — dipakai kop surat dokumen (penawaran, brief, invoice). */
+export interface BrandProfileDTO {
+  brand: string; // unimasi | segia | erfo | unicam
+  name: string;
+  tagline: string;
+  logoUrl: string | null; // null = belum ada logo (fallback monogram)
+  address: string;
+  phone: string;
+  email: string;
+  website: string;
+  primaryColor: string; // hex
+  letterheadNote: string; // baris legal di bawah kop
+  footerNote: string; // teks footer dokumen
+  bankInfo: string; // rekening pembayaran
+}
+
+/** Jenis dokumen terformat yang bisa dicetak dengan kop brand. */
+export type BrandDocType = "QUOTATION" | "BRIEF";

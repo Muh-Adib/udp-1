@@ -6,6 +6,7 @@ import {
   Banknote,
   CheckCircle2,
   ClipboardList,
+  FileText,
   Loader2,
   Plus,
   RefreshCw,
@@ -25,6 +26,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { BrandDocDialog } from "@/components/brand-document";
+import { QuotationDocContent } from "@/components/doc-content";
 import { api } from "@/lib/api-client";
 import {
   BRAND_LABEL,
@@ -82,6 +85,9 @@ export default function FinanceView({ user }: { user: SessionUser }) {
   // dialog tolak penawaran
   const [rejectTarget, setRejectTarget] = useState<QuotationDTO | null>(null);
   const [rejectNote, setRejectNote] = useState("");
+
+  // pratinjau dokumen penawaran (kop surat brand)
+  const [docQuotation, setDocQuotation] = useState<QuotationDTO | null>(null);
 
   // dialog buat penawaran
   const [createOpen, setCreateOpen] = useState(false);
@@ -592,7 +598,6 @@ export default function FinanceView({ user }: { user: SessionUser }) {
                       </TableRow>
                     )}
                     {quotations.map((q) => {
-                      const canAct = (canSend && q.status === "DRAFT") || (canDecide && (q.status === "DRAFT" || q.status === "SENT"));
                       return (
                         <TableRow key={q.id}>
                           <TableCell className="whitespace-nowrap font-mono text-xs">{q.number}</TableCell>
@@ -664,7 +669,14 @@ export default function FinanceView({ user }: { user: SessionUser }) {
                                   Tolak
                                 </Button>
                               )}
-                              {!canAct && <span className="text-xs text-muted-foreground">—</span>}
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => setDocQuotation(q)}
+                                aria-label={`Buka dokumen ${q.number}`}
+                              >
+                                <FileText className="size-3.5" /> Dokumen
+                              </Button>
                             </div>
                           </TableCell>
                         </TableRow>
@@ -1050,6 +1062,22 @@ export default function FinanceView({ user }: { user: SessionUser }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Pratinjau Dokumen Penawaran (kop surat brand) */}
+      <BrandDocDialog
+        open={!!docQuotation}
+        onOpenChange={(o) => !o && setDocQuotation(null)}
+        brandKey={docQuotation?.brand ?? "unimasi"}
+        docLabel="SURAT PENAWARAN"
+        docNumber={docQuotation?.number ?? ""}
+        dateIso={docQuotation?.createdAt ?? new Date().toISOString()}
+        toName={docQuotation?.lead?.contactName}
+        toCompany={docQuotation?.lead?.companyName}
+        showBankInfo
+        signatureName={user.name}
+      >
+        {docQuotation ? <QuotationDocContent q={docQuotation} /> : null}
+      </BrandDocDialog>
     </div>
   );
 }

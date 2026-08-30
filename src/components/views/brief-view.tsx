@@ -30,6 +30,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { BrandDocDialog } from "@/components/brand-document";
+import { BriefDocContent } from "@/components/doc-content";
 import { api } from "@/lib/api-client";
 import {
   BRAND_LABEL,
@@ -93,6 +95,7 @@ function BriefCard({
   onToggleEstimate,
   onAskSubmit,
   onOpenEstimate,
+  onOpenDoc,
 }: {
   brief: BriefDTO;
   nowTs: number | null;
@@ -102,6 +105,7 @@ function BriefCard({
   onToggleEstimate: (estimateId: string) => void;
   onAskSubmit: (brief: BriefDTO) => void;
   onOpenEstimate: (brief: BriefDTO) => void;
+  onOpenDoc: (brief: BriefDTO) => void;
 }) {
   const lead = brief.lead;
   const overdue = brief.deadline ? isOverdue(brief.deadline, brief.status, nowTs) : false;
@@ -116,7 +120,7 @@ function BriefCard({
   const showSubmit = brief.status === "DRAFT" && canSubmit;
   const showEstimate = brief.status !== "QUOTED" && canEstimate;
   const showHint = brief.status === "ESTIMATED" && canSubmit;
-  const hasFooter = Boolean(brief.projectCode) || showSubmit || showEstimate || showHint;
+  const hasFooter = true; // tombol Dokumen selalu tersedia
 
   return (
     <Card className="flex flex-col rounded-2xl transition-shadow hover:shadow-md">
@@ -275,6 +279,14 @@ function BriefCard({
                 <CheckCircle2 className="size-3.5" aria-hidden="true" /> Siap dibuatkan penawaran di menu Keuangan
               </span>
             )}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => onOpenDoc(brief)}
+              aria-label={`Buka dokumen ${brief.code}`}
+            >
+              <FileText className="size-3.5" /> Dokumen
+            </Button>
           </div>
         )}
       </CardContent>
@@ -320,6 +332,9 @@ export default function BriefView({ user }: { user: SessionUser }) {
   const [estimateTarget, setEstimateTarget] = useState<BriefDTO | null>(null);
   const [estRows, setEstRows] = useState<EstimateRow[]>([emptyEstimateRow()]);
   const [estNotes, setEstNotes] = useState("");
+
+  // pratinjau dokumen brief (kop surat brand)
+  const [docBrief, setDocBrief] = useState<BriefDTO | null>(null);
 
   const role = user.role;
   const canCreateBrief = role === "OWNER" || role === "MANAGER" || role === "MARKETER";
@@ -707,6 +722,7 @@ export default function BriefView({ user }: { user: SessionUser }) {
                     setSubmitNote("");
                   }}
                   onOpenEstimate={openEstimate}
+                  onOpenDoc={setDocBrief}
                 />
               ))}
             </div>
@@ -1033,6 +1049,21 @@ export default function BriefView({ user }: { user: SessionUser }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Pratinjau Dokumen Brief (kop surat brand) */}
+      <BrandDocDialog
+        open={!!docBrief}
+        onOpenChange={(o) => !o && setDocBrief(null)}
+        brandKey={docBrief?.brand ?? "unimasi"}
+        docLabel="BRIEF PROYEK"
+        docNumber={docBrief?.code ?? ""}
+        dateIso={docBrief?.createdAt ?? new Date().toISOString()}
+        toName={docBrief?.lead?.contactName}
+        toCompany={docBrief?.lead?.companyName}
+        signatureName={docBrief?.createdByName}
+      >
+        {docBrief ? <BriefDocContent b={docBrief} /> : null}
+      </BrandDocDialog>
     </div>
   );
 }

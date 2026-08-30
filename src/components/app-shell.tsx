@@ -13,6 +13,7 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
+  Palette,
   Radio,
   RefreshCw,
   Users,
@@ -39,12 +40,13 @@ import PipelineView from "@/components/views/pipeline-view";
 import FinanceView from "@/components/views/finance-view";
 import ProductionView from "@/components/views/production-view";
 import BriefView from "@/components/views/brief-view";
+import BrandView from "@/components/views/brand-view";
 import GuideView from "@/components/views/guide-view";
 import { api } from "@/lib/api-client";
 import { ROLE_LABEL, type NotificationDTO, type SessionUser } from "@/lib/crm-types";
 import { cn } from "@/lib/utils";
 
-type ViewKey = "dashboard" | "inbox" | "pipeline" | "brief" | "finance" | "production" | "channels" | "contacts" | "guide" | "portal";
+type ViewKey = "dashboard" | "inbox" | "pipeline" | "brief" | "finance" | "production" | "channels" | "brand" | "contacts" | "guide" | "portal";
 
 const ALL_ROLES = ["OWNER", "MANAGER", "MARKETER", "PRODUCTION", "FINANCE"];
 const SALES_ROLES = ["OWNER", "MANAGER", "MARKETER", "FINANCE"];
@@ -57,6 +59,7 @@ const NAV: { key: ViewKey; label: string; icon: typeof LayoutDashboard; roles: s
   { key: "finance", label: "Keuangan", icon: Banknote, roles: ["OWNER", "MANAGER", "FINANCE"] },
   { key: "production", label: "Produksi", icon: Factory, roles: ALL_ROLES },
   { key: "channels", label: "Pengaturan Kanal", icon: Radio, roles: ["OWNER", "MANAGER", "MARKETER"] },
+  { key: "brand", label: "Identitas Brand", icon: Palette, roles: ALL_ROLES },
   { key: "contacts", label: "Kontak", icon: Users, roles: SALES_ROLES },
   { key: "portal", label: "Portal Klien", icon: Building2, roles: ["CLIENT"] },
   { key: "guide", label: "Petunjuk", icon: BookOpen, roles: [...ALL_ROLES, "CLIENT"] },
@@ -247,6 +250,7 @@ export function AppShell() {
             {effectiveView === "finance" && <FinanceView user={user} />}
             {effectiveView === "production" && <ProductionView user={user} />}
             {effectiveView === "channels" && <ChannelsView user={user} />}
+            {effectiveView === "brand" && <BrandView user={user} />}
             {effectiveView === "contacts" && <ContactsView user={user} />}
             {effectiveView === "guide" && <GuideView user={user} />}
             {effectiveView === "portal" && <ClientPortalView user={user} />}
