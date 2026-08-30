@@ -73,6 +73,14 @@ export function AppShell() {
   const [notifs, setNotifs] = useState<NotificationDTO[]>([]);
   const [unread, setUnread] = useState(0);
   const [notifOpen, setNotifOpen] = useState(false);
+  // Deep-link internal: buka lead tertentu di Inbox (dari pipeline / notifikasi)
+  const [inboxLeadId, setInboxLeadId] = useState<string | null>(null);
+
+  const openLeadInInbox = useCallback((leadId: string) => {
+    setInboxLeadId(leadId);
+    setView("inbox");
+    setSidebarOpen(false);
+  }, []);
 
   useEffect(() => {
     api
@@ -200,7 +208,17 @@ export function AppShell() {
           UDP CRM
         </span>
         <div className="ml-auto flex items-center gap-1">
-          {user.role !== "CLIENT" && <NotifBell unread={unread} notifs={notifs} open={notifOpen} setOpen={setNotifOpen} onMarkAll={() => void loadNotifs(true)} onOpenChange={() => void loadNotifs()} />}
+          {user.role !== "CLIENT" && (
+            <NotifBell
+              unread={unread}
+              notifs={notifs}
+              open={notifOpen}
+              setOpen={setNotifOpen}
+              onMarkAll={() => void loadNotifs(true)}
+              onOpenChange={() => void loadNotifs()}
+              onOpenLead={openLeadInInbox}
+            />
+          )}
           <Avatar className="size-8">
             <AvatarFallback className="bg-slate-900 text-[10px] text-white">{initials}</AvatarFallback>
           </Avatar>
@@ -235,7 +253,15 @@ export function AppShell() {
               </div>
               {user.role !== "CLIENT" && (
                 <div className="flex items-center gap-2">
-                  <NotifBell unread={unread} notifs={notifs} open={notifOpen} setOpen={setNotifOpen} onMarkAll={() => void loadNotifs(true)} onOpenChange={() => void loadNotifs()} />
+                  <NotifBell
+                    unread={unread}
+                    notifs={notifs}
+                    open={notifOpen}
+                    setOpen={setNotifOpen}
+                    onMarkAll={() => void loadNotifs(true)}
+                    onOpenChange={() => void loadNotifs()}
+                    onOpenLead={openLeadInInbox}
+                  />
                   <Avatar className="size-8">
                     <AvatarFallback className="bg-slate-900 text-[10px] text-white">{initials}</AvatarFallback>
                   </Avatar>
@@ -243,9 +269,9 @@ export function AppShell() {
               )}
             </div>
 
-            {effectiveView === "dashboard" && <DashboardView user={user} />}
-            {effectiveView === "inbox" && <InboxView user={user} />}
-            {effectiveView === "pipeline" && <PipelineView user={user} />}
+            {effectiveView === "dashboard" && <DashboardView user={user} onOpenLead={openLeadInInbox} />}
+            {effectiveView === "inbox" && <InboxView user={user} initialLeadId={inboxLeadId} />}
+            {effectiveView === "pipeline" && <PipelineView user={user} onOpenInbox={openLeadInInbox} />}
             {effectiveView === "brief" && <BriefView user={user} />}
             {effectiveView === "finance" && <FinanceView user={user} />}
             {effectiveView === "production" && <ProductionView user={user} />}
@@ -280,6 +306,7 @@ function NotifBell({
   setOpen,
   onMarkAll,
   onOpenChange,
+  onOpenLead,
 }: {
   unread: number;
   notifs: NotificationDTO[];
@@ -287,6 +314,8 @@ function NotifBell({
   setOpen: (o: boolean) => void;
   onMarkAll: () => void;
   onOpenChange: () => void;
+  /** Notifikasi lead bisa diklik → langsung buka percakapannya di Inbox. */
+  onOpenLead?: (leadId: string) => void;
 }) {
   return (
     <DropdownMenu
@@ -320,16 +349,30 @@ function NotifBell({
           {notifs.length === 0 ? (
             <p className="px-3 py-6 text-center text-xs text-muted-foreground">Belum ada notifikasi</p>
           ) : (
-            notifs.map((n) => (
-              <div key={n.id} className={cn("flex gap-2.5 rounded-lg px-2.5 py-2", !n.read && "bg-emerald-50/70")}>
-                <span className={cn("mt-1 size-2 shrink-0 rounded-full", n.type === "NEW_LEAD" ? "bg-emerald-500" : "bg-stone-400", !n.read && "animate-pulse")} />
-                <div className="min-w-0">
-                  <p className="truncate text-xs font-semibold">{n.title}</p>
-                  <p className="line-clamp-2 text-xs text-muted-foreground">{n.body}</p>
-                  <p className="mt-0.5 text-[10px] text-muted-foreground/70">{new Date(n.createdAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}</p>
+            notifs.map((n) => {
+              const leadMatch = n.link?.match(/[?&]lead=([A-Za-z0-9_-]+)/);
+              const clickable = Boolean(leadMatch && onOpenLead);
+              return (
+                <div
+                  key={n.id}
+                  role={clickable ? "button" : undefined}
+                  tabIndex={clickable ? 0 : undefined}
+                  onClick={clickable ? () => { setOpen(false); onOpenLead?.(leadMatch![1]); } : undefined}
+                  onKeyDown={clickable ? (e) => { if (e.key === "Enter" || e.key === " ") { setOpen(false); onOpenLead?.(leadMatch![1]); } } : undefined}
+                  className={cn("flex gap-2.5 rounded-lg px-2.5 py-2", !n.read && "bg-emerald-50/70", clickable && "cursor-pointer transition-colors hover:bg-accent")}
+                >
+                  <span className={cn("mt-1 size-2 shrink-0 rounded-full", n.type === "NEW_LEAD" ? "bg-emerald-500" : "bg-stone-400", !n.read && "animate-pulse")} />
+                  <div className="min-w-0">
+                    <p className="truncate text-xs font-semibold">{n.title}</p>
+                    <p className="line-clamp-2 text-xs text-muted-foreground">{n.body}</p>
+                    <p className="mt-0.5 text-[10px] text-muted-foreground/70">
+                      {new Date(n.createdAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}
+                      {clickable ? " · klik untuk buka di Inbox" : ""}
+                    </p>
+                  </div>
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       </DropdownMenuContent>

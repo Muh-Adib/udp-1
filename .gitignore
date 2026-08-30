@@ -4,4 +4,6 @@ db/*.db
 db/*.db-journal
 dev.log
 *.log
+.env
 .env.local
+*.tsbuildinfo

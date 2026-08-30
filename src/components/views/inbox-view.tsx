@@ -104,14 +104,19 @@ function timeAgo(iso: string): string {
   return `${Math.floor(h / 24)}h`;
 }
 
-export function InboxView({ user }: { user: SessionUser }) {
+export function InboxView({ user, initialLeadId }: { user: SessionUser; initialLeadId?: string | null }) {
   const [leads, setLeads] = useState<LeadDTO[] | null>(null);
-  const [status, setStatus] = useState("OPEN");
+  // Deep-link dari pipeline/notifikasi: filter dilonggarkan ke Semua agar lead tujuan pasti tampil
+  const [status, setStatus] = useState(initialLeadId ? "ALL" : "OPEN");
   const [channel, setChannel] = useState("ALL");
   const [q, setQ] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showIntake, setShowIntake] = useState(false);
   const canAct = ["OWNER", "MANAGER", "MARKETER"].includes(user.role);
+
+  useEffect(() => {
+    if (initialLeadId) setSelectedId(initialLeadId);
+  }, [initialLeadId]);
 
   const load = useCallback(async () => {
     try {

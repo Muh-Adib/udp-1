@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { ChannelBadge } from "@/components/channel-badge";
 import { toast } from "@/components/ui/sonner";
 import { api } from "@/lib/api-client";
+import { cn } from "@/lib/utils";
 import {
   CHANNEL_LABEL,
   LEAD_STAGES,
@@ -83,7 +84,7 @@ function DashboardSkeleton() {
   );
 }
 
-export default function DashboardView({ user }: { user: SessionUser }) {
+export default function DashboardView({ user, onOpenLead }: { user: SessionUser; onOpenLead?: (leadId: string) => void }) {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [pipeline, setPipeline] = useState<PipelineStats | null>(null);
   const [overview, setOverview] = useState<OverviewStats | null>(null);
@@ -363,7 +364,9 @@ export default function DashboardView({ user }: { user: SessionUser }) {
         <Card className="rounded-2xl">
           <CardHeader>
             <CardTitle className="text-base">Lead Terbaru</CardTitle>
-            <CardDescription>8 lead terakhir yang masuk dari semua kanal.</CardDescription>
+            <CardDescription>
+              8 lead terakhir dari semua kanal{onOpenLead ? " — klik lead untuk follow up di Inbox." : "."}
+            </CardDescription>
           </CardHeader>
           <CardContent className="px-5 pb-5">
             {stats.recentLeads.length === 0 ? (
@@ -374,7 +377,15 @@ export default function DashboardView({ user }: { user: SessionUser }) {
             ) : (
               <div className="max-h-96 space-y-1 overflow-y-auto pr-1">
                 {stats.recentLeads.slice(0, 8).map((lead) => (
-                  <div key={lead.id} className="flex items-start gap-3 rounded-xl px-2 py-2.5 hover:bg-slate-50">
+                  <div
+                    key={lead.id}
+                    role={onOpenLead ? "button" : undefined}
+                    tabIndex={onOpenLead ? 0 : undefined}
+                    onClick={onOpenLead ? () => onOpenLead(lead.id) : undefined}
+                    onKeyDown={onOpenLead ? (e) => { if (e.key === "Enter" || e.key === " ") onOpenLead(lead.id); } : undefined}
+                    className={cn("flex items-start gap-3 rounded-xl px-2 py-2.5", onOpenLead && "cursor-pointer transition-colors hover:bg-slate-100 focus-visible:bg-slate-100")}
+                    title={onOpenLead ? `Buka percakapan ${lead.code} di Inbox Lead` : undefined}
+                  >
                     <div className="min-w-0 flex-1 space-y-1">
                       <div className="flex items-center gap-2">
                         <p className="truncate text-sm font-medium text-slate-900">{lead.contact.name}</p>

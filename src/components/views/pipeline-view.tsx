@@ -10,6 +10,7 @@ import {
   Inbox,
   Info,
   Loader2,
+  MessageSquare,
   Percent,
   RefreshCw,
   Tag,
@@ -176,11 +177,13 @@ function LeadCard({
   busy,
   onPickStage,
   onOpenValue,
+  onOpenInbox,
 }: {
   lead: PipelineLeadDTO;
   busy: boolean;
   onPickStage: (lead: PipelineLeadDTO, stage: LeadStage) => void;
   onOpenValue: (lead: PipelineLeadDTO) => void;
+  onOpenInbox?: (leadId: string) => void;
 }) {
   const hot = lead.score >= 80;
   return (
@@ -208,7 +211,7 @@ function LeadCard({
         </Badge>
       </div>
       <p className="text-sm font-bold text-slate-900">{formatRupiah(lead.estValue)}</p>
-      <div className="flex items-center gap-1.5 border-t border-slate-100 pt-2">
+      <div className="flex flex-wrap items-center gap-1.5 border-t border-slate-100 pt-2">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
@@ -243,6 +246,19 @@ function LeadCard({
           <Tag className="size-3.5" />
           Nilai
         </Button>
+        {onOpenInbox && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="ml-auto h-7 gap-1.5 rounded-lg px-2 text-xs text-emerald-700 hover:bg-emerald-50"
+            onClick={() => onOpenInbox(lead.id)}
+            aria-label={`Follow up lead ${lead.code} di Inbox`}
+            title="Buka percakapan lead ini di Inbox Lead"
+          >
+            <MessageSquare className="size-3.5" />
+            Follow Up
+          </Button>
+        )}
       </div>
     </Card>
   );
@@ -256,12 +272,14 @@ function KanbanColumn({
   busyId,
   onPickStage,
   onOpenValue,
+  onOpenInbox,
 }: {
   stage: LeadStage;
   leads: PipelineLeadDTO[];
   busyId: string | null;
   onPickStage: (lead: PipelineLeadDTO, stage: LeadStage) => void;
   onOpenValue: (lead: PipelineLeadDTO) => void;
+  onOpenInbox?: (leadId: string) => void;
 }) {
   return (
     <section className="flex min-w-[240px] shrink-0 flex-col rounded-2xl border border-slate-200 bg-slate-50/70 lg:min-w-[260px]" aria-label={`Kolom ${LEAD_STAGE_LABEL[stage]}`}>
@@ -288,6 +306,7 @@ function KanbanColumn({
               busy={busyId === lead.id}
               onPickStage={onPickStage}
               onOpenValue={onOpenValue}
+              onOpenInbox={onOpenInbox}
             />
           ))
         )}
@@ -318,7 +337,7 @@ function PipelineSkeleton() {
 
 // ---------- View utama ----------
 
-export default function PipelineView({ user }: { user: SessionUser }) {
+export default function PipelineView({ user, onOpenInbox }: { user: SessionUser; onOpenInbox?: (leadId: string) => void }) {
   void user; // view internal (OWNER/MANAGER/MARKETER/FINANCE); data tidak bergantung role
 
   const [data, setData] = useState<PipelineData | null>(null);
@@ -520,7 +539,8 @@ export default function PipelineView({ user }: { user: SessionUser }) {
             <CardHeader>
               <CardTitle className="text-base">Kanban Lead per Tahap</CardTitle>
               <CardDescription>
-                Geser horizontal untuk melihat semua tahap. Gunakan tombol &quot;Pindah&quot; atau &quot;Nilai&quot; pada kartu lead.
+                Geser horizontal untuk melihat semua tahap. Gunakan tombol &quot;Follow Up&quot; pada kartu untuk membuka
+                percakapan lead di Inbox Lead, atau &quot;Pindah&quot; / &quot;Nilai&quot; untuk memperbarui pipeline.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -534,6 +554,7 @@ export default function PipelineView({ user }: { user: SessionUser }) {
                       busyId={busyId}
                       onPickStage={handlePickStage}
                       onOpenValue={openValueDialog}
+                      onOpenInbox={onOpenInbox}
                     />
                   ))}
                 </div>
