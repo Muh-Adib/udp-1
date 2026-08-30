@@ -1,0 +1,146 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         String // OWNER | MANAGER | MARKETER | FINANCE | CLIENT
+  companyId    String? // hanya untuk role CLIENT
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  company  Company? @relation(fields: [companyId], references: [id])
+  leads    Lead[]   @relation("AssigneeLeads")
+  messages LeadMessage[] @relation("SenderMessages")
+}
+
+model Company {
+  id        String   @id @default(cuid())
+  name      String
+  email     String?
+  phone     String?
+  createdAt DateTime @default(now())
+
+  users    User[]
+  contacts Contact[]
+  leads    Lead[]
+}
+
+model Contact {
+  id         String   @id @default(cuid())
+  name       String
+  email      String?
+  phone      String?
+  igUsername String?
+  source     String   @default("manual") // kanal pertama kali dikenal: whatsapp | email | instagram | web | manual
+  companyId  String?
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  company Company? @relation(fields: [companyId], references: [id])
+  leads   Lead[]
+
+  @@index([phone])
+  @@index([email])
+  @@index([igUsername])
+}
+
+model Lead {
+  id         String   @id @default(cuid())
+  code       String   @unique // LD-XXXXXX
+  subject    String
+  brand      String // unimasi | segia | erfo | unicam
+  channel    String // whatsapp | email | instagram | web | manual
+  status     String   @default("NEW") // NEW | FOLLOW_UP | QUOTED | WON | LOST
+  score      Int      @default(0)
+  contactId  String
+  companyId  String?
+  assigneeId String?
+  sourceRef  String? // campaign / halaman web / nomor / alamat email
+  lostReason String?
+  firstInAt  DateTime? // pesan masuk pertama
+  firstOutAt DateTime? // balasan pertama (SLA)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  contact  Contact  @relation(fields: [contactId], references: [id])
+  company  Company? @relation(fields: [companyId], references: [id])
+  assignee User?    @relation("AssigneeLeads", fields: [assigneeId], references: [id])
+  messages LeadMessage[]
+
+  @@index([status])
+  @@index([channel])
+  @@index([createdAt])
+}
+
+model LeadMessage {
+  id         String   @id @default(cuid())
+  leadId     String
+  direction  String // IN | OUT | NOTE
+  channel    String // whatsapp | email | instagram | web | internal
+  body       String
+  externalId String?  @unique // id pesan dari provider (dedupe webhook)
+  senderId   String?
+  senderName String
+  createdAt  DateTime @default(now())
+
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  sender User?  @relation("SenderMessages", fields: [senderId], references: [id])
+
+  @@index([leadId])
+}
+
+model ChannelConfig {
+  id            String    @id @default(cuid())
+  type          String    @unique // whatsapp | email | instagram | web
+  name          String
+  enabled       Boolean   @default(false)
+  configJson    String    @default("{}") // kredensial & opsi per kanal (disimpan terenkripsi ringan)
+  apiKey        String?   @unique // untuk kanal web & auth webhook
+  webhookSecret String? // verifikasi webhook (verify token / signature)
+  lastEventAt   DateTime?
+  eventCount    Int       @default(0)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  role      String? // broadcast ke role (OWNER/MANAGER/MARKETER); null = semua staff
+  userId    String? // notifikasi personal
+  title     String
+  body      String
+  type      String   @default("INFO") // NEW_LEAD | SLA | SYSTEM
+  link      String?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([read])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorName String
+  action    String
+  entity    String
+  entityId  String?
+  detail    String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+model AppSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
