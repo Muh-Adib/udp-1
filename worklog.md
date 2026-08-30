@@ -385,3 +385,28 @@ Stage Summary:
 - ROUTING BALASAN DIJAMIN: balasan WA hanya bisa ke kontak yang punya nomor, DM hanya ke yang punya IG, dst — kanal tanpa tujuan ditolak di UI (disabled + alasan) DAN server (400); tujuan tampil eksplisit sebelum & sesudah kirim; lead lintas kanal (IG → WA) otomatis menyatu satu profil kontak.
 - LEAD MANCANEGARA DIDUKUNG: negara + dial code 30 negara, normalisasi nomor internasional, bendera di UI.
 - Saran lanjutan: merge kontak manual (2 profil orang sama), deteksi duplikat berbasis nama mirip saat intake, lampiran gambar pada pesan inbox, status kirim nyata per kanal (queued/delivered/read) saat kredensial kanal live diisi.
+
+---
+Task ID: 15 (main orchestrator)
+Agent: main (orchestrator)
+Task: Pipeline funnel → lompat ke Inbox Lead (follow-up cepat) + push project ke GitHub
+
+Work Log:
+- Permintaan user: (a) di pipeline funnel harus bisa menuju inbox lead yang dimaksud untuk mempermudah follow up, (b) push repo ke github.com/Muh-Adib/udp-1.
+- NAVIGASI DEEP-LINK internal (tanpa route baru, AppShell tetap satu state view):
+  - app-shell.tsx: state inboxLeadId + openLeadInInbox(leadId) → set id + pindah view "inbox"; dipass ke PipelineView (onOpenInbox), InboxView (initialLeadId), DashboardView (onOpenLead), dan NotifBell (onOpenLead).
+  - pipeline-view.tsx: tiap kartu kanban dapat tombol "Follow Up" (MessageSquare, emerald, ml-auto; aria-label "Follow up lead <kode> di Inbox") → membuka Inbox pada lead tsb; deskripsi card kanban diperbarui.
+  - inbox-view.tsx: prop initialLeadId; saat terisi, filter status awal = "ALL" (agar lead tujuan pasti muncul walau statusnya LOST/WON) + effect setSelectedId(initialLeadId).
+  - NotifBell: notifikasi dengan link /inbox?lead=<id> kini bisa diklik (role=button, keyboard accessible) → langsung buka percakapan lead di Inbox; hint "klik untuk buka di Inbox".
+  - Dashboard "Lead Terbaru": baris lead bisa diklik untuk follow up di Inbox (hover state + title).
+- E2E browser (marketing): Pipeline → Follow Up LD-000003 → Inbox terbuka, filter "Semua", detail panel menampilkan "Rebranding brand skincare" (LD-000003) ✓; notifikasi "Lead baru dari Instagram Emma Laurent" diklik → Inbox membuka LD-000013 (detail "Stand vitrine …") ✓; tsc 0 error; eslint 0 error (2 warning lama); console bersih (warning Fast Refresh hanya efek hot reload saat file diedit).
+- Catatan tooling: klik elemen div role=button di dalam dropdown Radix butuh element.click() NATIVE (dispatch synthetic pointer/mouse sequence tidak selalu memicu handler React pada kasus ini) — pelengkap catatan sebelumnya.
+- PUSH GITHUB: repo https://github.com/Muh-Adib/udp-1.git (sebelumnya kosong).
+  - HOUSEKEEPING SEBELUM PUSH: .env ternyata TERLACAK git → untrack (git rm --cached .env) + .gitignore diperbarui (.env, *.tsbuildinfo, dsb); tsconfig.tsbuildinfo ikut di-untrack. Verifikasi: .env TIDAK ikut terpush. uploads/ sengaja tetap dilacak (berisi logo brand + file demo yang direferensikan seed).
+  - Commit 88b0a2f "feat: navigasi follow-up pipeline/notifikasi ke Inbox Lead + housekeeping repo" → push main → remote HEAD = 88b0a2f ✓; upstream main→origin/main diset.
+  - PAT user dipakai via URL push (tidak ikut tercommit). CATATAN KEAMANAN: PAT diketahui via chat — disarankan user rotate/revoke setelah pakai bila ingin aman; remote origin disimpan TANPA token (push berikutnya butuh kredensial).
+
+Stage Summary:
+- Alur follow-up kini tanpa gesekan: Pipeline kanban → tombol "Follow Up" → Inbox Lead terbuka tepat pada percakapan lead tersebut (juga dari notifikasi & dashboard). Klien mancanegara/lintas kanal tetap satu profil kontak.
+- Project terpush ke GitHub: https://github.com/Muh-Adib/udp-1 (branch main, commit 88b0a2f) dengan .env & artefak build di luar repo.
+- Saran lanjutan: workflow GitHub Actions untuk lint otomatis, badge build di README, merge kontak manual, lampiran gambar pada pesan inbox.
