@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { requireAuth } from "@/lib/auth";
-import { nextLeadCode } from "@/lib/lead-ingest";
+import { ingestChannelMessage } from "@/lib/lead-ingest";
 import { logAudit } from "@/lib/audit";
 import type { LeadDTO, LeadStage, LeadStatus } from "@/lib/crm-types";
 
@@ -48,7 +48,7 @@ export async function GET(req: Request) {
   const dtos: LeadDTO[] = leads
     .filter((l) => {
       if (!q) return true;
-      const hay = `${l.code} ${l.subject} ${l.contact.name} ${l.contact.email ?? ""} ${l.contact.phone ?? ""} ${l.contact.igUsername ?? ""}`.toLowerCase();
+      const hay = `${l.code} ${l.subject} ${l.contact.name} ${l.contact.position ?? ""} ${l.contact.companyName ?? ""} ${l.company?.name ?? ""} ${l.contact.country} ${l.contact.email ?? ""} ${l.contact.phone ?? ""} ${l.contact.igUsername ?? ""}`.toLowerCase();
       return hay.includes(q);
     })
     .map((l) => ({
@@ -69,10 +69,14 @@ export async function GET(req: Request) {
       contact: {
         id: l.contact.id,
         name: l.contact.name,
+        position: l.contact.position,
+        companyName: l.contact.companyName,
+        country: l.contact.country,
         email: l.contact.email,
         phone: l.contact.phone,
         igUsername: l.contact.igUsername,
-        company: l.company?.name ?? null,
+        company: l.contact.companyName ?? l.company?.name ?? null,
+        notes: l.contact.notes,
       },
       assignee: l.assignee ? { id: l.assignee.id, name: l.assignee.name } : null,
       lastMessage: l.messages[0]
@@ -93,35 +97,21 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Nama kontak dan subjek wajib diisi" }, { status: 400 });
   }
 
-  const phone = body.phone?.trim() || null;
-  const email = body.email?.trim().toLowerCase() || null;
-  let contact = phone
-    ? await db.contact.findFirst({ where: { phone: phone.replace(/[^0-9]/g, "") } })
-    : email
-      ? await db.contact.findFirst({ where: { email } })
-      : null;
-  if (!contact) {
-    contact = await db.contact.create({ data: { name: body.contactName, email, phone, source: "manual" } });
-  }
-
-  const lead = await db.lead.create({
-    data: {
-      code: await nextLeadCode(),
-      subject: body.subject,
-      brand: body.brand ?? "unimasi",
-      channel: "manual",
-      status: "NEW",
-      stage: "NEW",
-      estValue: Math.max(0, Math.round(Number(body.estValue) || 0)),
-      score: 15,
-      contactId: contact.id,
-      firstInAt: new Date(),
-    },
+  // Masuk lewat pipeline ingest yang sama dengan kanal nyata → dedupe kontak + lead konsisten
+  const result = await ingestChannelMessage({
+    channel: "manual",
+    name: body.contactName,
+    phone: body.phone ?? null,
+    email: body.email ?? null,
+    igUsername: body.igUsername ?? null,
+    company: body.company ?? null,
+    position: body.position ?? null,
+    country: body.country ?? null,
+    body: body.subject,
+    subject: body.subject,
+    brand: body.brand ?? null,
   });
-  await db.leadMessage.create({
-    data: { leadId: lead.id, direction: "IN", channel: "internal", body: body.subject, senderName: body.contactName },
-  });
-  await logAudit({ actorName: user.name, action: "LEAD_CREATED", entity: "Lead", entityId: lead.id, detail: "Input manual" });
+  await logAudit({ actorName: user.name, action: "LEAD_CREATED", entity: "Lead", entityId: result.leadId, detail: "Input manual" });
 
-  return NextResponse.json({ lead: { id: lead.id, code: lead.code } }, { status: 201 });
+  return NextResponse.json({ lead: { id: result.leadId, code: result.leadCode } }, { status: 201 });
 }

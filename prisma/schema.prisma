@@ -37,16 +37,19 @@ model Company {
 }
 
 model Contact {
-  id         String   @id @default(cuid())
-  name       String
-  email      String?
-  phone      String?
-  igUsername String?
-  source     String   @default("manual") // kanal pertama kali dikenal: whatsapp | email | instagram | web | manual
-  companyId  String?
-  notes      String?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id          String   @id @default(cuid())
+  name        String
+  position    String? // jabatan (mis. Purchasing Manager)
+  companyName String? // nama perusahaan teks bebas (lead mancanegara belum tentu punya record Company)
+  country     String   @default("Indonesia")
+  email       String?
+  phone       String? // format internasional tanpa tanda + (mis. 628123…, 442079…)
+  igUsername  String?
+  source      String   @default("manual") // kanal pertama kali dikenal: whatsapp | email | instagram | web | manual
+  companyId   String?
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   company Company? @relation(fields: [companyId], references: [id])
   leads   Lead[]

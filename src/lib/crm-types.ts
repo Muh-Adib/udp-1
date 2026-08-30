@@ -254,6 +254,55 @@ export interface LeadMessageDTO {
   body: string;
   senderName: string;
   createdAt: string;
+  /** Untuk pesan OUT: tujuan nyata balasan (nomor WA / email / @handle). */
+  destination?: string | null;
+}
+
+/** Kanal balasan keluar — balasan WA harus ke nomor WA, DM ke IG, dsb. */
+export type ReplyChannel = ChannelType | "internal";
+
+export const REPLY_CHANNEL_LABEL: Record<ReplyChannel, string> = {
+  whatsapp: "WhatsApp",
+  email: "Email",
+  instagram: "Instagram DM",
+  web: "Form Web",
+  internal: "Catatan internal",
+};
+
+/** Kanal mana yang benar-benar bisa dipakai membalas, berdasarkan data kontak yang tersedia. */
+export interface ChannelAvailability {
+  channel: ChannelType;
+  available: boolean;
+  destination?: string | null; // nomor / email / handle yang dipakai
+  missingLabel?: string | null; // "nomor WhatsApp" bila tidak tersedia
+}
+
+/** Input form "Lead Masuk" — pintu masuk real (bukan dummy) dengan dedupe kontak. */
+export interface IntakeLeadInput {
+  channel: ChannelType | "manual";
+  name: string;
+  company?: string;
+  position?: string;
+  country?: string;
+  phone?: string;
+  email?: string;
+  igUsername?: string;
+  subject: string;
+  body: string;
+  brand?: string;
+  sourceRef?: string;
+  contactNotes?: string;
+}
+
+export interface IntakeLeadResult {
+  leadId: string;
+  leadCode: string;
+  isNewLead: boolean;
+  contactId: string;
+  contactName: string;
+  newContact: boolean;
+  /** Field yang mencocokkan kontak existing (dedupe): phone | email | instagram | null */
+  matchedBy: "phone" | "email" | "instagram" | null;
 }
 
 export interface LeadDTO {
@@ -271,7 +320,18 @@ export interface LeadDTO {
   createdAt: string;
   updatedAt: string;
   slaOverdue?: boolean;
-  contact: { id: string; name: string; email?: string | null; phone?: string | null; igUsername?: string | null; company?: string | null };
+  contact: {
+    id: string;
+    name: string;
+    position?: string | null;
+    companyName?: string | null;
+    country?: string;
+    email?: string | null;
+    phone?: string | null;
+    igUsername?: string | null;
+    company?: string | null;
+    notes?: string | null;
+  };
   assignee?: { id: string; name: string } | null;
   lastMessage?: { body: string; direction: string; createdAt: string; channel: string } | null;
   messageCount?: number;
@@ -323,11 +383,15 @@ export interface NotificationDTO {
 export interface ContactDTO {
   id: string;
   name: string;
+  position?: string | null;
+  companyName?: string | null;
+  country: string;
   email?: string | null;
   phone?: string | null;
   igUsername?: string | null;
   source: string;
-  company?: string | null;
+  company?: string | null; // nama tampil: companyName ?? perusahaan terhubung
+  notes?: string | null;
   createdAt: string;
   leadCount: number;
 }

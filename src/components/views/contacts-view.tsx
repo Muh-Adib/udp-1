@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, Search, UserRound } from "lucide-react";
+import { Loader2, Pencil, Search, UserRound, UserRoundPlus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
@@ -14,8 +15,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ChannelBadge } from "@/components/channel-badge";
+import { ContactFormDialog } from "@/components/contact-form-dialog";
 import { toast } from "@/components/ui/sonner";
 import { api } from "@/lib/api-client";
+import { findCountry, formatPhoneDisplay } from "@/lib/countries";
 import { CHANNELS, type ChannelType, type ContactDTO, type SessionUser } from "@/lib/crm-types";
 
 const shortDateFmt = new Intl.DateTimeFormat("id-ID", { day: "numeric", month: "short", year: "numeric" });
@@ -26,11 +29,14 @@ function TextCell({ value }: { value?: string | null }) {
 }
 
 export default function ContactsView({ user }: { user: SessionUser }) {
-  void user; // dipakai kontrak props; tampilan kontak sama untuk semua role internal
+  void user; // dipakai kontrak props; gating aksi via role di bawah
   const [query, setQuery] = useState("");
   const [debounced, setDebounced] = useState("");
   const [contacts, setContacts] = useState<ContactDTO[] | null>(null);
   const [loading, setLoading] = useState(true);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<ContactDTO | null>(null);
+  const canManage = ["OWNER", "MANAGER", "MARKETER"].includes(user.role);
 
   // Debounce input pencarian 300ms
   useEffect(() => {
@@ -62,11 +68,25 @@ export default function ContactsView({ user }: { user: SessionUser }) {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900">Kontak</h1>
-        <p className="text-sm text-muted-foreground">
-          Basis data kontak gabungan dari semua kanal (WhatsApp, Email, Instagram, Web, dan input manual).
-        </p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Kontak</h1>
+          <p className="text-sm text-muted-foreground">
+            Basis data kontak gabungan dari semua kanal — dedupe otomatis mencegah data ganda, identitas lengkap menentukan kanal
+            balasan.
+          </p>
+        </div>
+        {canManage && (
+          <Button
+            onClick={() => {
+              setEditing(null);
+              setFormOpen(true);
+            }}
+            aria-label="Tambah kontak baru"
+          >
+            <UserRoundPlus className="size-4" /> Tambah Kontak
+          </Button>
+        )}
       </div>
 
       <Card className="rounded-2xl">
@@ -82,7 +102,7 @@ export default function ContactsView({ user }: { user: SessionUser }) {
               <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
               <Input
                 type="search"
-                placeholder="Cari nama, email, telepon…"
+                placeholder="Cari nama, email, telepon, jabatan…"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 className="rounded-xl pl-9 pr-9"
@@ -94,24 +114,26 @@ export default function ContactsView({ user }: { user: SessionUser }) {
           </div>
         </CardHeader>
         <CardContent className="px-0 pb-2 sm:pb-4">
-          <Table className="min-w-[720px]">
+          <Table className="min-w-[860px]">
             <TableHeader>
               <TableRow className="hover:bg-transparent">
-                <TableHead className="pl-5 sm:pl-6">Nama</TableHead>
+                <TableHead className="pl-5 sm:pl-6">Nama &amp; Jabatan</TableHead>
+                <TableHead>WhatsApp</TableHead>
                 <TableHead>Email</TableHead>
-                <TableHead>Telepon</TableHead>
                 <TableHead className="hidden md:table-cell">Instagram</TableHead>
+                <TableHead className="hidden lg:table-cell">Negara</TableHead>
                 <TableHead>Sumber</TableHead>
                 <TableHead className="hidden md:table-cell">Perusahaan</TableHead>
                 <TableHead>Lead</TableHead>
                 <TableHead className="pr-5 sm:pr-6">Bergabung</TableHead>
+                {canManage && <TableHead className="pr-5 sm:pr-6"><span className="sr-only">Aksi</span></TableHead>}
               </TableRow>
             </TableHeader>
             <TableBody>
               {loading && contacts === null
                 ? Array.from({ length: 5 }).map((_, i) => (
                     <TableRow key={i}>
-                      {Array.from({ length: 8 }).map((_, j) => (
+                      {Array.from({ length: canManage ? 10 : 9 }).map((_, j) => (
                         <TableCell key={j} className={j === 0 ? "pl-5 sm:pl-6" : ""}>
                           <div className="h-4 w-full max-w-28 animate-pulse rounded-md bg-slate-200/70" />
                         </TableCell>
@@ -121,15 +143,25 @@ export default function ContactsView({ user }: { user: SessionUser }) {
                 : contacts && contacts.length > 0
                   ? contacts.map((c) => (
                       <TableRow key={c.id}>
-                        <TableCell className="pl-5 font-medium text-slate-900 sm:pl-6">{c.name}</TableCell>
+                        <TableCell className="pl-5 sm:pl-6">
+                          <div className="min-w-0">
+                            <p className="font-medium text-slate-900">{c.name}</p>
+                            {c.position ? <p className="text-xs text-muted-foreground">{c.position}</p> : null}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <TextCell value={c.phone ? formatPhoneDisplay(c.phone) : null} />
+                        </TableCell>
                         <TableCell>
                           <TextCell value={c.email} />
                         </TableCell>
-                        <TableCell>
-                          <TextCell value={c.phone} />
-                        </TableCell>
                         <TableCell className="hidden md:table-cell">
                           <TextCell value={c.igUsername} />
+                        </TableCell>
+                        <TableCell className="hidden lg:table-cell">
+                          <span className="whitespace-nowrap text-slate-700">
+                            <span aria-hidden>{findCountry(c.country).flag}</span> {c.country}
+                          </span>
                         </TableCell>
                         <TableCell>
                           {(CHANNELS as readonly string[]).includes(c.source) ? (
@@ -146,19 +178,37 @@ export default function ContactsView({ user }: { user: SessionUser }) {
                         <TableCell>
                           <span className="text-slate-700">{c.leadCount} lead</span>
                         </TableCell>
-                        <TableCell className="pr-5 text-muted-foreground sm:pr-6">
+                        <TableCell className="text-muted-foreground">
                           {shortDateFmt.format(new Date(c.createdAt))}
                         </TableCell>
+                        {canManage && (
+                          <TableCell className="pr-5 sm:pr-6">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-8 px-2 text-xs"
+                              aria-label={`Edit kontak ${c.name}`}
+                              onClick={() => {
+                                setEditing(c);
+                                setFormOpen(true);
+                              }}
+                            >
+                              <Pencil className="size-3.5" /> Edit
+                            </Button>
+                          </TableCell>
+                        )}
                       </TableRow>
                     ))
                   : (
                       <TableRow className="hover:bg-transparent">
-                        <TableCell colSpan={8} className="px-5 py-12 text-center">
+                        <TableCell colSpan={canManage ? 10 : 9} className="px-5 py-12 text-center">
                           <div className="flex flex-col items-center gap-2">
                             <UserRound className="size-10 text-slate-300" />
                             <p className="text-sm font-medium text-slate-700">Belum ada kontak yang cocok</p>
                             <p className="text-xs text-muted-foreground">
-                              Coba kata kunci lain atau tambah kontak lewat lead baru.
+                              {canManage
+                                ? "Coba kata kunci lain atau tambahkan kontak baru."
+                                : "Coba kata kunci lain."}
                             </p>
                           </div>
                         </TableCell>
@@ -168,6 +218,20 @@ export default function ContactsView({ user }: { user: SessionUser }) {
           </Table>
         </CardContent>
       </Card>
+
+      <ContactFormDialog
+        open={formOpen}
+        onOpenChange={setFormOpen}
+        contact={editing}
+        onSaved={() => {
+          setLoading(true);
+          api
+            .contacts(debounced || undefined)
+            .then((res) => setContacts(res.contacts))
+            .catch(() => undefined)
+            .finally(() => setLoading(false));
+        }}
+      />
     </div>
   );
 }

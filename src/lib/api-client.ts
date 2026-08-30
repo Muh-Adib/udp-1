@@ -9,6 +9,8 @@ import type {
   DeliverableDTO,
   EstimateItemDTO,
   FinanceStats,
+  IntakeLeadInput,
+  IntakeLeadResult,
   InvoiceDTO,
   LeadDTO,
   LeadMessageDTO,
@@ -24,6 +26,18 @@ import type {
   SessionUser,
   WorkEstimateDTO,
 } from "@/lib/crm-types";
+
+export interface ContactDuplicateInfo {
+  id: string;
+  name: string;
+  email?: string | null;
+  phone?: string | null;
+  igUsername?: string | null;
+}
+
+export type CreateContactResult =
+  | { ok: true; contactId: string }
+  | { ok: false; error: string; existing?: ContactDuplicateInfo };
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   // FormData (upload file) tidak boleh diberi Content-Type manual — biarkan browser set multipart boundary
@@ -59,10 +73,25 @@ export const api = {
     request<{ lead: LeadDTO & { lostReason?: string | null }; messages: LeadMessageDTO[] }>(`/api/leads/${id}`),
   updateLead: (id: string, patch: { status?: string; assigneeId?: string | null; brand?: string; lostReason?: string }) =>
     request<{ ok: true }>(`/api/leads/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
-  sendLeadMessage: (id: string, body: string, direction: "OUT" | "NOTE") =>
-    request<{ message: LeadMessageDTO }>(`/api/leads/${id}/messages`, { method: "POST", body: JSON.stringify({ body, direction }) }),
-  createLead: (input: { contactName: string; subject: string; email?: string; phone?: string; brand?: string }) =>
-    request<{ lead: { id: string; code: string } }>("/api/leads", { method: "POST", body: JSON.stringify(input) }),
+  sendLeadMessage: (id: string, body: string, direction: "OUT" | "NOTE", channel?: string) =>
+    request<{ message: LeadMessageDTO }>(`/api/leads/${id}/messages`, {
+      method: "POST",
+      body: JSON.stringify({ body, direction, ...(direction === "OUT" && channel ? { channel } : {}) }),
+    }),
+  /** Pintu masuk lead REAL (bukan dummy): identitas kontak lengkap + dedupe otomatis. */
+  intakeLead: (input: IntakeLeadInput) =>
+    request<IntakeLeadResult>("/api/leads/intake", { method: "POST", body: JSON.stringify(input) }),
+  createLead: (input: {
+    contactName: string;
+    subject: string;
+    email?: string;
+    phone?: string;
+    igUsername?: string;
+    company?: string;
+    position?: string;
+    country?: string;
+    brand?: string;
+  }) => request<{ lead: { id: string; code: string } }>("/api/leads", { method: "POST", body: JSON.stringify(input) }),
 
   // ---------- kanal ----------
   channels: () => request<{ channels: ChannelConfigDTO[] }>("/api/channels"),
@@ -82,6 +111,40 @@ export const api = {
 
   // ---------- kontak ----------
   contacts: (q?: string) => request<{ contacts: ContactDTO[] }>(`/api/contacts${q ? `?q=${encodeURIComponent(q)}` : ""}`),
+  /** Tambah kontak nyata dgn dedupe — hasil 409 berisi kontak existing agar UI menawarkan merge. */
+  createContact: async (input: {
+    name: string;
+    position?: string;
+    companyName?: string;
+    country?: string;
+    phone?: string;
+    email?: string;
+    igUsername?: string;
+    notes?: string;
+  }): Promise<CreateContactResult> => {
+    const res = await fetch("/api/contacts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    const data = (await res.json().catch(() => ({}))) as { contact?: { id: string }; error?: string; existing?: ContactDuplicateInfo };
+    if (res.ok && data.contact) return { ok: true, contactId: data.contact.id };
+    return { ok: false, error: data.error ?? "Permintaan gagal", existing: data.existing };
+  },
+  /** Edit kontak (identitas, jabatan, perusahaan, negara, kanal). */
+  updateContact: (
+    id: string,
+    patch: {
+      name?: string;
+      position?: string | null;
+      companyName?: string | null;
+      country?: string;
+      phone?: string | null;
+      email?: string | null;
+      igUsername?: string | null;
+      notes?: string | null;
+    },
+  ) => request<{ contact: { id: string } }>("/api/contacts", { method: "PUT", body: JSON.stringify({ id, ...patch }) }),
 
   // ---------- pengaturan ----------
   getSettings: () => request<{ firstResponseSlaHours: number }>("/api/settings"),

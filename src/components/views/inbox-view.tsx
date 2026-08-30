@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  AtSign,
   CheckCircle2,
   ChevronRight,
   ClipboardList,
@@ -9,10 +10,14 @@ import {
   Filter,
   Inbox as InboxIcon,
   Loader2,
+  Mail,
   MessageSquarePlus,
+  Pencil,
+  Phone,
   Search,
   Send,
   StickyNote,
+  TriangleAlert,
   Trophy,
   UserRound,
   XCircle,
@@ -28,15 +33,24 @@ import { ChannelBadge } from "@/components/channel-badge";
 import { BrandDocDialog } from "@/components/brand-document";
 import { CreateBriefFromLeadDialog, CreateQuotationFromLeadDialog } from "@/components/lead-doc-dialogs";
 import { BriefDocContent, QuotationDocContent } from "@/components/doc-content";
+import { IntakeLeadDialog } from "@/components/intake-lead-dialog";
+import { ContactFormDialog } from "@/components/contact-form-dialog";
 import { api } from "@/lib/api-client";
+import { findCountry, formatPhoneDisplay } from "@/lib/countries";
+import { ChannelIcon } from "@/lib/channel-meta";
 import {
   LEAD_STATUS_BADGE,
   LEAD_STATUS_LABEL,
+  REPLY_CHANNEL_LABEL,
   type BriefDTO,
+  type ChannelAvailability,
+  type ChannelType,
+  type ContactDTO,
   type LeadDTO,
   type LeadMessageDTO,
   type LeadStatus,
   type QuotationDTO,
+  type ReplyChannel,
   type SessionUser,
 } from "@/lib/crm-types";
 import { cn } from "@/lib/utils";
@@ -62,6 +76,24 @@ const CHANNEL_FILTERS: { key: string; label: string }[] = [
 
 const LOST_REASONS = ["Harga", "Kompetitor", "Budget tidak ada", "Timing", "Tidak ada balasan", "Lainnya"];
 
+/** Kanal keluar yang ditawarkan di komposer (form web bersifat pasif — tidak ada kotak masuk dua arah). */
+const OUT_CHANNELS: ChannelType[] = ["whatsapp", "email", "instagram"];
+
+/** Kanal mana yang benar-benar bisa dipakai membalas, berdasarkan handle kontak yang tersedia. */
+function computeAvailability(contact: LeadDTO["contact"]): ChannelAvailability[] {
+  const defs: { channel: ChannelType; destination: string | null; missingLabel: string }[] = [
+    { channel: "whatsapp", destination: contact.phone ? formatPhoneDisplay(contact.phone) : null, missingLabel: "belum ada nomor WhatsApp" },
+    { channel: "email", destination: contact.email ?? null, missingLabel: "belum ada email" },
+    { channel: "instagram", destination: contact.igUsername ? `@${contact.igUsername}` : null, missingLabel: "belum ada username Instagram" },
+  ];
+  return defs.map((d) => ({
+    channel: d.channel,
+    available: Boolean(d.destination),
+    destination: d.destination,
+    missingLabel: d.destination ? null : d.missingLabel,
+  }));
+}
+
 function timeAgo(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
   const m = Math.floor(diff / 60000);
@@ -78,6 +110,7 @@ export function InboxView({ user }: { user: SessionUser }) {
   const [channel, setChannel] = useState("ALL");
   const [q, setQ] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [showIntake, setShowIntake] = useState(false);
   const canAct = ["OWNER", "MANAGER", "MARKETER"].includes(user.role);
 
   const load = useCallback(async () => {
@@ -95,26 +128,23 @@ export function InboxView({ user }: { user: SessionUser }) {
     return () => clearTimeout(t);
   }, [load, q]);
 
-  const counts = useMemo(() => {
-    const map: Record<string, number> = {};
-    for (const l of leads ?? []) map[l.status] = (map[l.status] ?? 0) + 1;
-    return map;
-  }, [leads]);
-
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-xl font-bold tracking-tight">Inbox Lead</h2>
-          <p className="text-sm text-muted-foreground">Semua pesan masuk dari WhatsApp, Email, Instagram, dan Form Web dalam satu antrean.</p>
+          <p className="text-sm text-muted-foreground">
+            Semua percakapan masuk dari WhatsApp, Email, Instagram, dan Form Web dalam satu antrean — catat lead baru lewat
+            &quot;Lead Masuk&quot;.
+          </p>
         </div>
         <div className="flex items-center gap-2">
-          <div className="relative w-full sm:w-64">
+          <div className="relative w-full sm:w-60">
             <Search className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Cari nama, email, kode…" className="pl-8" />
           </div>
           <Select value={channel} onValueChange={setChannel}>
-            <SelectTrigger className="w-[150px]" aria-label="Filter kanal">
+            <SelectTrigger className="w-[140px]" aria-label="Filter kanal">
               <Filter className="size-3.5 shrink-0 text-muted-foreground" />
               <SelectValue />
             </SelectTrigger>
@@ -126,6 +156,11 @@ export function InboxView({ user }: { user: SessionUser }) {
               ))}
             </SelectContent>
           </Select>
+          {canAct && (
+            <Button onClick={() => setShowIntake(true)} aria-label="Catat lead masuk baru">
+              <MessageSquarePlus className="size-4" /> Lead Masuk
+            </Button>
+          )}
         </div>
       </div>
 
@@ -158,6 +193,11 @@ export function InboxView({ user }: { user: SessionUser }) {
                 <div className="flex flex-col items-center gap-2 py-10 text-muted-foreground">
                   <InboxIcon className="size-8 opacity-40" />
                   <p className="text-sm">Belum ada lead pada filter ini</p>
+                  {canAct && (
+                    <Button size="sm" variant="outline" onClick={() => setShowIntake(true)}>
+                      <MessageSquarePlus className="size-3.5" /> Catat Lead Masuk
+                    </Button>
+                  )}
                 </div>
               ) : (
                 leads.map((l) => (
@@ -207,7 +247,15 @@ export function InboxView({ user }: { user: SessionUser }) {
           </Card>
         )}
       </div>
-      {leads && counts["NEW"] === undefined ? null : null}
+
+      <IntakeLeadDialog
+        open={showIntake}
+        onOpenChange={setShowIntake}
+        onCreated={(result) => {
+          void load();
+          if (result.leadId) setSelectedId(result.leadId);
+        }}
+      />
     </div>
   );
 }
@@ -228,11 +276,12 @@ function LeadDetailPanel({
   const [staff, setStaff] = useState<{ id: string; name: string; role: string }[]>([]);
   const [reply, setReply] = useState("");
   const [sending, setSending] = useState(false);
-  const [noteMode, setNoteMode] = useState(false);
+  const [replyChannel, setReplyChannel] = useState<ReplyChannel>("internal");
   const [showLostDialog, setShowLostDialog] = useState(false);
   const [lostReason, setLostReason] = useState(LOST_REASONS[0]);
   const [showBriefDlg, setShowBriefDlg] = useState(false);
   const [showQuoteDlg, setShowQuoteDlg] = useState(false);
+  const [showContactDlg, setShowContactDlg] = useState(false);
   const [docBrief, setDocBrief] = useState<BriefDTO | null>(null);
   const [docQuotation, setDocQuotation] = useState<QuotationDTO | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -259,15 +308,30 @@ function LeadDetailPanel({
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length]);
 
-  async function send(direction: "OUT" | "NOTE") {
-    if (!reply.trim()) return;
+  // Default kanal balasan: kanal asal lead bila kontak punya handle-nya; kalau tidak, kanal pertama yang tersedia.
+  useEffect(() => {
+    if (!lead) return;
+    const avail = computeAvailability(lead.contact);
+    const originOk = avail.some((a) => a.channel === lead.channel && a.available);
+    setReplyChannel(originOk ? (lead.channel as ChannelType) : avail.find((a) => a.available)?.channel ?? "internal");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lead?.id, lead?.contact.phone, lead?.contact.email, lead?.contact.igUsername]);
+
+  const availability = useMemo(() => (lead ? computeAvailability(lead.contact) : []), [lead]);
+
+  async function send() {
+    if (!reply.trim() || !lead) return;
     setSending(true);
     try {
-      const { message } = await api.sendLeadMessage(leadId, reply, direction);
+      const isNote = replyChannel === "internal";
+      const { message } = await api.sendLeadMessage(leadId, reply, isNote ? "NOTE" : "OUT", isNote ? undefined : replyChannel);
       setMessages((p) => [...p, message]);
       setReply("");
-      if (direction === "OUT") toast.success("Balasan terkirim");
-      else toast.success("Catatan internal ditambahkan");
+      toast.success(
+        isNote
+          ? "Catatan internal ditambahkan"
+          : `Balasan terkirim via ${REPLY_CHANNEL_LABEL[replyChannel]}${message.destination ? ` ke ${message.destination}` : ""}`,
+      );
       onChanged();
       void load();
     } catch (e) {
@@ -315,6 +379,26 @@ function LeadDetailPanel({
     }
   }
 
+  function contactAsDTO(): ContactDTO | null {
+    if (!lead) return null;
+    const c = lead.contact;
+    return {
+      id: c.id,
+      name: c.name,
+      position: c.position ?? null,
+      companyName: c.companyName ?? null,
+      country: c.country ?? "Indonesia",
+      email: c.email ?? null,
+      phone: c.phone ?? null,
+      igUsername: c.igUsername ?? null,
+      source: lead.channel,
+      company: c.company ?? null,
+      notes: c.notes ?? null,
+      createdAt: lead.createdAt,
+      leadCount: 0,
+    };
+  }
+
   if (!lead) {
     return (
       <Card>
@@ -325,7 +409,11 @@ function LeadDetailPanel({
     );
   }
 
-  const contactLine = [lead.contact.email, lead.contact.phone, lead.contact.igUsername ? `@${lead.contact.igUsername}` : null].filter(Boolean).join(" · ");
+  const c = lead.contact;
+  const countryInfo = findCountry(c.country);
+  const activeDest = availability.find((a) => a.channel === replyChannel)?.destination ?? null;
+  const originChannelBlocked =
+    OUT_CHANNELS.includes(lead.channel as ChannelType) && !availability.some((a) => a.channel === lead.channel && a.available);
 
   return (
     <Card className="flex flex-col overflow-hidden">
@@ -345,8 +433,10 @@ function LeadDetailPanel({
             </div>
             <h3 className="mt-1.5 truncate text-base font-bold">{lead.subject}</h3>
             <p className="text-sm text-muted-foreground">
-              <span className="font-medium text-foreground">{lead.contact.name}</span>
-              {contactLine ? ` — ${contactLine}` : ""}
+              <span className="font-medium text-foreground">{c.name}</span>
+              {c.position ? ` — ${c.position}` : ""}
+              {c.company ? ` · ${c.company}` : ""}
+              {` — ${countryInfo.flag} ${c.country ?? "Indonesia"}`}
             </p>
           </div>
           <div className="flex items-center gap-1.5 rounded-xl bg-card px-3 py-2 shadow-sm">
@@ -356,6 +446,35 @@ function LeadDetailPanel({
               <p className="text-sm font-bold leading-none">{lead.score}/100</p>
             </div>
           </div>
+        </div>
+
+        {/* Identitas kontak & kanal yang tersedia untuk balasan */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          {c.phone && (
+            <Badge variant="outline" className="gap-1 border-emerald-200 bg-emerald-50 text-emerald-800">
+              <Phone className="size-3" aria-hidden /> {formatPhoneDisplay(c.phone)}
+            </Badge>
+          )}
+          {c.email && (
+            <Badge variant="outline" className="gap-1 border-amber-200 bg-amber-50 text-amber-800">
+              <Mail className="size-3" aria-hidden /> {c.email}
+            </Badge>
+          )}
+          {c.igUsername && (
+            <Badge variant="outline" className="gap-1 border-rose-200 bg-rose-50 text-rose-800">
+              <AtSign className="size-3" aria-hidden /> {c.igUsername}
+            </Badge>
+          )}
+          {!c.phone && !c.email && !c.igUsername && (
+            <Badge variant="outline" className="border-dashed text-muted-foreground">
+              Kontak belum punya kanal balasan
+            </Badge>
+          )}
+          {canAct && (
+            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setShowContactDlg(true)} aria-label="Edit kontak lead">
+              <Pencil className="size-3" /> Edit Kontak
+            </Button>
+          )}
         </div>
 
         {canAct && (
@@ -410,6 +529,7 @@ function LeadDetailPanel({
         {messages.map((m) => {
           const isIn = m.direction === "IN";
           const isNote = m.direction === "NOTE";
+          const Icon = Object.prototype.hasOwnProperty.call(ChannelIcon, m.channel) ? ChannelIcon[m.channel as ChannelType] : null;
           return (
             <div key={m.id} className={cn("flex", isNote ? "justify-center" : isIn ? "justify-start" : "justify-end")}>
               {isNote ? (
@@ -430,9 +550,12 @@ function LeadDetailPanel({
                   )}
                 >
                   <p className="whitespace-pre-wrap">{m.body}</p>
-                  <p className={cn("mt-1 text-[10px]", isIn ? "text-muted-foreground" : "text-slate-400")}>
-                    {m.senderName} · {timeAgo(m.createdAt)}
-                    {isIn ? ` · via ${m.channel}` : ""}
+                  <p className={cn("mt-1 flex flex-wrap items-center gap-1 text-[10px]", isIn ? "text-muted-foreground" : "text-slate-400")}>
+                    {Icon && <Icon className="size-3" aria-hidden />}
+                    <span>
+                      {m.senderName} · {timeAgo(m.createdAt)} · {isIn ? `masuk via ${m.channel}` : `dikirim via ${m.channel}`}
+                      {!isIn && m.destination ? ` → ${m.destination}` : ""}
+                    </span>
                   </p>
                 </div>
               )}
@@ -442,16 +565,48 @@ function LeadDetailPanel({
         <div ref={bottomRef} />
       </CardContent>
 
-      {/* Komposer */}
+      {/* Komposer — routing kanal tervalidasi */}
       {canAct && lead.status !== "WON" && lead.status !== "LOST" ? (
         <CardContent className="space-y-2 border-t bg-muted/30 p-3">
-          <div className="flex items-center gap-2">
-            <Button size="sm" variant={noteMode ? "secondary" : "default"} onClick={() => setNoteMode(false)}>
-              <Send className="size-3.5" /> Balas via {lead.channel === "manual" ? "catatan" : lead.channel}
-            </Button>
-            <Button size="sm" variant={noteMode ? "default" : "ghost"} onClick={() => setNoteMode(true)}>
-              <StickyNote className="size-3.5" /> Catatan internal
-            </Button>
+          {originChannelBlocked && (
+            <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900" role="alert">
+              <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+              <p>
+                Lead ini masuk via <strong>{REPLY_CHANNEL_LABEL[lead.channel as ChannelType] ?? lead.channel}</strong>, tetapi kontak belum
+                punya kanal tersebut. Lengkapi dengan <button type="button" className="font-semibold underline cursor-pointer" onClick={() => setShowContactDlg(true)}>Edit Kontak</button>, atau balas lewat kanal yang tersedia.
+              </p>
+            </div>
+          )}
+          <div className="flex flex-wrap items-center gap-2">
+            <Select
+              value={replyChannel}
+              onValueChange={(v) => setReplyChannel(v as ReplyChannel)}
+            >
+              <SelectTrigger className="h-8 w-[200px]" aria-label="Kanal balasan">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {availability.map((a) => {
+                  const Icon = ChannelIcon[a.channel];
+                  return (
+                    <SelectItem key={a.channel} value={a.channel} disabled={!a.available}>
+                      <span className="flex items-center gap-1.5">
+                        <Icon className="size-3.5" aria-hidden />
+                        <span>{REPLY_CHANNEL_LABEL[a.channel]}</span>
+                        <span className={cn("text-[10px]", a.available ? "text-muted-foreground" : "text-rose-600")}>
+                          {a.available ? `→ ${a.destination}` : a.missingLabel}
+                        </span>
+                      </span>
+                    </SelectItem>
+                  );
+                })}
+                <SelectItem value="internal">
+                  <span className="flex items-center gap-1.5">
+                    <StickyNote className="size-3.5" aria-hidden /> Catatan internal
+                  </span>
+                </SelectItem>
+              </SelectContent>
+            </Select>
             <Button size="sm" variant="ghost" className="text-emerald-700" onClick={() => void setStatus("WON")}>
               <CheckCircle2 className="size-3.5" /> Tandai Menang
             </Button>
@@ -463,21 +618,36 @@ function LeadDetailPanel({
             <Textarea
               value={reply}
               onChange={(e) => setReply(e.target.value)}
-              placeholder={noteMode ? "Tulis catatan internal (tidak terlihat klien)…" : `Tulis balasan yang dikirim via ${lead.channel === "manual" ? "catatan" : lead.channel}…`}
+              placeholder={
+                replyChannel === "internal"
+                  ? "Tulis catatan internal (tidak terlihat klien)…"
+                  : `Tulis balasan — dikirim ke ${activeDest ?? ""} via ${REPLY_CHANNEL_LABEL[replyChannel]}…`
+              }
               className="min-h-11 resize-none"
               onKeyDown={(e) => {
-                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void send(noteMode ? "NOTE" : "OUT");
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void send();
               }}
             />
-            <Button onClick={() => void send(noteMode ? "NOTE" : "OUT")} disabled={sending || !reply.trim()} className="self-end">
-              {sending ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
-              <span className="sr-only">Kirim</span>
+            <Button onClick={() => void send()} disabled={sending || !reply.trim()} className="self-end">
+              {sending ? <Loader2 className="size-4 animate-spin" /> : replyChannel === "internal" ? <StickyNote className="size-4" /> : <Send className="size-4" />}
+              <span className="sr-only">{replyChannel === "internal" ? "Simpan catatan" : "Kirim balasan"}</span>
             </Button>
           </div>
+          <p className="text-[11px] text-muted-foreground">
+            {replyChannel === "internal" ? (
+              "Catatan hanya terlihat oleh tim internal."
+            ) : (
+              <>
+                Balasan diarahkan ke <strong>{activeDest}</strong> via <strong>{REPLY_CHANNEL_LABEL[replyChannel]}</strong> — sesuai kanal
+                tempat lead berkomunikasi.
+              </>
+            )}
+          </p>
         </CardContent>
       ) : (
         <CardContent className="border-t bg-muted/30 p-3 text-center text-xs text-muted-foreground">
-          Percakapan ini sudah ditutup ({LEAD_STATUS_LABEL[lead.status]}{lead.lostReason ? ` — ${lead.lostReason}` : ""}).
+          Percakapan ini sudah ditutup ({LEAD_STATUS_LABEL[lead.status]}
+          {lead.lostReason ? ` — ${lead.lostReason}` : ""}).
         </CardContent>
       )}
 
@@ -538,6 +708,21 @@ function LeadDetailPanel({
           />
         </>
       )}
+
+      {/* Edit kontak dari detail lead */}
+      <ContactFormDialog
+        open={showContactDlg}
+        onOpenChange={setShowContactDlg}
+        contact={contactAsDTO()}
+        onSaved={() => {
+          onChanged();
+          void load();
+        }}
+        onUseExisting={(existingId) => {
+          toast.info("Kontak sudah terdaftar — data existing tetap dipakai");
+          void existingId;
+        }}
+      />
 
       {/* Pratinjau dokumen ter-brand hasil pembuatan */}
       <BrandDocDialog

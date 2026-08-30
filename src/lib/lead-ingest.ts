@@ -1,15 +1,19 @@
 import { db } from "@/lib/db";
 import { CHANNEL_BASE_SCORE, type ChannelType } from "@/lib/crm-types";
+import { DEFAULT_COUNTRY, normalizePhoneGlobal } from "@/lib/countries";
 import { logAudit, notifyRoles } from "@/lib/audit";
 
 export interface IngestInput {
-  channel: ChannelType;
-  /** Identitas pengirim — minimal salah satu terisi. */
+  channel: ChannelType | "manual";
+  /** Identitas pengirim — minimal salah satu kontak terisi. */
   name: string;
   phone?: string | null;
   email?: string | null;
   igUsername?: string | null;
-  company?: string | null;
+  company?: string | null; // nama perusahaan teks bebas
+  position?: string | null; // jabatan
+  country?: string | null; // negara (lead mancanegara)
+  contactNotes?: string | null;
   body: string;
   subject?: string | null;
   brand?: string | null;
@@ -23,15 +27,14 @@ export interface IngestResult {
   leadCode: string;
   isNewLead: boolean;
   contactId: string;
+  contactName: string;
+  newContact: boolean;
+  /** Field yang mencocokkan kontak existing (dedupe): phone | email | instagram | null */
+  matchedBy: "phone" | "email" | "instagram" | null;
 }
 
 function normalizePhone(p?: string | null): string | null {
-  if (!p) return null;
-  const digits = p.replace(/[^0-9]/g, "");
-  if (!digits) return null;
-  if (digits.startsWith("62")) return digits;
-  if (digits.startsWith("0")) return `62${digits.slice(1)}`;
-  return digits;
+  return normalizePhoneGlobal(p);
 }
 
 function normalizeIg(u?: string | null): string | null {
@@ -44,8 +47,8 @@ const OPEN_STATUSES = ["NEW", "FOLLOW_UP", "QUOTED"];
 const DEDUPE_WINDOW_DAYS = 14;
 
 /**
- * Memasukkan satu pesan masuk dari kanal eksternal (WhatsApp/Email/Instagram/Web).
- * - Upsert kontak (dedupe by phone/email/ig)
+ * Memasukkan satu pesan masuk dari kanal eksternal (WhatsApp/Email/Instagram/Web) atau input manual.
+ * - Upsert kontak (dedupe by phone → email → ig; field kosong otomatis diperkaya)
  * - Dedupe lead terbuka pada kanal yang sama (window 14 hari) → append pesan
  * - Lead baru → kode LD-XXXXXX, skor awal per kanal, notifikasi staff, audit
  */
@@ -57,19 +60,40 @@ export async function ingestChannelMessage(input: IngestInput): Promise<IngestRe
     const dupe = await db.leadMessage.findUnique({ where: { externalId: input.externalId } });
     if (dupe) {
       const lead = await db.lead.findUnique({ where: { id: dupe.leadId } });
-      return { leadId: dupe.leadId, leadCode: lead?.code ?? "", isNewLead: false, contactId: lead?.contactId ?? "" };
+      return {
+        leadId: dupe.leadId,
+        leadCode: lead?.code ?? "",
+        isNewLead: false,
+        contactId: lead?.contactId ?? "",
+        contactName: "",
+        newContact: false,
+        matchedBy: null,
+      };
     }
   }
 
-  // 2. Upsert kontak
+  // 2. Upsert kontak — dedupe berurutan: phone → email → instagram
   const phone = normalizePhone(input.phone);
   const email = input.email?.trim().toLowerCase() || null;
   const ig = normalizeIg(input.igUsername);
+  const companyName = input.company?.trim() || null;
+  const position = input.position?.trim() || null;
+  const country = input.country?.trim() || DEFAULT_COUNTRY;
 
   let contact = null as null | Awaited<ReturnType<typeof db.contact.findFirst>>;
-  if (phone) contact = await db.contact.findFirst({ where: { phone } });
-  if (!contact && email) contact = await db.contact.findFirst({ where: { email } });
-  if (!contact && ig) contact = await db.contact.findFirst({ where: { igUsername: ig } });
+  let matchedBy: IngestResult["matchedBy"] = null;
+  if (phone) {
+    contact = await db.contact.findFirst({ where: { phone } });
+    if (contact) matchedBy = "phone";
+  }
+  if (!contact && email) {
+    contact = await db.contact.findFirst({ where: { email } });
+    if (contact) matchedBy = "email";
+  }
+  if (!contact && ig) {
+    contact = await db.contact.findFirst({ where: { igUsername: ig } });
+    if (contact) matchedBy = "instagram";
+  }
 
   const displayName = input.name?.trim() || email?.split("@")[0] || ig || phone || "Pengunjung Web";
 
@@ -77,20 +101,28 @@ export async function ingestChannelMessage(input: IngestInput): Promise<IngestRe
     contact = await db.contact.create({
       data: {
         name: displayName,
+        position,
+        companyName,
+        country,
         email,
         phone,
         igUsername: ig,
+        notes: input.contactNotes ?? null,
         source: input.channel,
       },
     });
   } else {
-    // Perkaya identitas kontak jika field masih kosong
+    // Perkaya identitas kontak jika field masih kosong (lead bisa pindah kanal, mis. IG → WhatsApp)
     await db.contact.update({
       where: { id: contact.id },
       data: {
         phone: contact.phone ?? phone,
         email: contact.email ?? email,
         igUsername: contact.igUsername ?? ig,
+        position: contact.position ?? position,
+        companyName: contact.companyName ?? companyName,
+        country: contact.country || country,
+        notes: contact.notes ?? input.contactNotes ?? null,
         name: contact.name === "Pengunjung Web" ? displayName : contact.name,
       },
     });
@@ -171,11 +203,13 @@ export async function ingestChannelMessage(input: IngestInput): Promise<IngestRe
     data: { score: newScore, firstInAt: lead.firstInAt ?? receivedAt, updatedAt: new Date() },
   });
 
-  // 6. Statistik kanal + notifikasi + audit (hanya saat lead benar-benar baru)
-  await db.channelConfig.update({
-    where: { type: input.channel },
-    data: { lastEventAt: receivedAt, eventCount: { increment: 1 } },
-  });
+  // 6. Statistik kanal (hanya kanal nyata, bukan manual) + notifikasi + audit (hanya saat lead baru)
+  if (input.channel !== "manual") {
+    await db.channelConfig.update({
+      where: { type: input.channel },
+      data: { lastEventAt: receivedAt, eventCount: { increment: 1 } },
+    });
+  }
 
   if (isNewLead) {
     const label = BRAND_LABEL_FALLBACK(normalizeBrand(input.brand));
@@ -194,7 +228,7 @@ export async function ingestChannelMessage(input: IngestInput): Promise<IngestRe
     });
   }
 
-  return { leadId: lead.id, leadCode: lead.code, isNewLead, contactId: contact.id };
+  return { leadId: lead.id, leadCode: lead.code, isNewLead, contactId: contact.id, contactName: contact.name, newContact: matchedBy === null, matchedBy };
 }
 
 function normalizeBrand(b?: string | null): string {
@@ -202,8 +236,8 @@ function normalizeBrand(b?: string | null): string {
   return ["unimasi", "segia", "erfo", "unicam"].includes(v) ? v : "unimasi";
 }
 
-function channelLabel(c: ChannelType): string {
-  return { whatsapp: "WhatsApp", email: "Email", instagram: "Instagram", web: "Form Web" }[c];
+function channelLabel(c: ChannelType | "manual"): string {
+  return { whatsapp: "WhatsApp", email: "Email", instagram: "Instagram", web: "Form Web", manual: "Input Manual" }[c];
 }
 
 function BRAND_LABEL_FALLBACK(brand: string): string {
