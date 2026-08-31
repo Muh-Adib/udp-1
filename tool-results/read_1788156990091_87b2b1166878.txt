@@ -1,0 +1,480 @@
+     1→     1→/* ============ Brands View — konfigurasi multi-brand + pengaturan (R15) ============ */
+     2→     2→'use client'
+     3→     3→
+     4→     4→import React, { useCallback, useEffect, useMemo, useState } from 'react'
+     5→     5→import { crmApi } from './api-client'
+     6→     6→import { useCrmStore } from './crm-store'
+     7→     7→import { useToast } from '@/hooks/use-toast'
+     8→     8→import { LoadingRows, RefreshButton, SectionHeader, UserAvatar } from './shared'
+     9→     9→import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+    10→    10→import { Badge } from '@/components/ui/badge'
+    11→    11→import { Button } from '@/components/ui/button'
+    12→    12→import {
+    13→    13→  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+    14→    14→} from '@/components/ui/dialog'
+    15→    15→import { Input } from '@/components/ui/input'
+    16→    16→import { Label } from '@/components/ui/label'
+    17→    17→import {
+    18→    18→  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+    19→    19→} from '@/components/ui/select'
+    20→    20→import { Switch } from '@/components/ui/switch'
+    21→    21→import { Textarea } from '@/components/ui/textarea'
+    22→    22→import { Progress } from '@/components/ui/progress'
+    23→    23→import { WORKFLOW_MILESTONES, formatMoney } from '@/lib/crm-constants'
+    24→    24→import type { BrandDTO, OpportunityDTO, UserDTO } from '@/lib/crm-types'
+    25→    25→import { cn } from '@/lib/utils'
+    26→    26→import {
+    27→    27→  Building2, Globe, Info, Loader2, Mail, MapPin, Instagram, Phone, Save, Settings2,
+    28→    28→  Timer, Users2, Workflow,
+    29→    29→} from 'lucide-react'
+    30→    30→
+    31→    31→const WORKFLOW_LABELS: Record<string, string> = {
+    32→    32→  website: 'Website', video: 'Video', animation: 'Animasi', livestream: 'Live Streaming', generic: 'Umum',
+    33→    33→}
+    34→    34→
+    35→    35→const CURRENCIES = ['IDR', 'SGD', 'USD'] as const
+    36→    36→const WORKFLOWS = ['website', 'video', 'animation', 'livestream', 'generic'] as const
+    37→    37→
+    38→    38→const COLOR_PRESETS = ['#10b981', '#0d9488', '#d97706', '#7c3aed', '#e11d48', '#0284c7', '#65a30d', '#57534e']
+    39→    39→
+    40→    40→interface BrandFormState {
+    41→    41→  tagline: string
+    42→    42→  description: string
+    43→    43→  website: string
+    44→    44→  email: string
+    45→    45→  phone: string
+    46→    46→  instagram: string
+    47→    47→  address: string
+    48→    48→  color: string
+    49→    49→  slaHours: string
+    50→    50→  primaryCurrency: string
+    51→    51→  invoicePrefix: string
+    52→    52→  quotationPrefix: string
+    53→    53→  workflowType: string
+    54→    54→  isActive: boolean
+    55→    55→}
+    56→    56→
+    57→    57→const toForm = (b: BrandDTO): BrandFormState => ({
+    58→    58→  tagline: b.tagline ?? '',
+    59→    59→  description: b.description ?? '',
+    60→    60→  website: (b.website ?? '').replace(/^https?:\/\//, ''),
+    61→    61→  email: b.email ?? '',
+    62→    62→  phone: b.phone ?? '',
+    63→    63→  instagram: b.instagram ?? '',
+    64→    64→  address: b.address ?? '',
+    65→    65→  color: b.color,
+    66→    66→  slaHours: String(b.slaHours),
+    67→    67→  primaryCurrency: b.primaryCurrency,
+    68→    68→  invoicePrefix: b.invoicePrefix,
+    69→    69→  quotationPrefix: b.quotationPrefix,
+    70→    70→  workflowType: b.workflowType,
+    71→    71→  isActive: true,
+    72→    72→})
+    73→    73→
+    74→    74→export default function BrandsView() {
+    75→    75→  const brands = useCrmStore((s) => s.brands)
+    76→    76→  const setBrands = useCrmStore((s) => s.setBrands)
+    77→    77→  const user = useCrmStore((s) => s.user)
+    78→    78→  const { toast } = useToast()
+    79→    79→  const [users, setUsers] = useState<UserDTO[]>([])
+    80→    80→  const [opps, setOpps] = useState<OpportunityDTO[]>([])
+    81→    81→  const [loading, setLoading] = useState(true)
+    82→    82→
+    83→    83→  /* Pengaturan brand — hanya SUPER_ADMIN & DIREKTUR (selaras gate API) */
+    84→    84→  const canManage = user?.role === 'SUPER_ADMIN' || user?.role === 'DIREKTUR'
+    85→    85→  const [editing, setEditing] = useState<BrandDTO | null>(null)
+    86→    86→  const [form, setForm] = useState<BrandFormState | null>(null)
+    87→    87→  const [saving, setSaving] = useState(false)
+    88→    88→
+    89→    89→  const load = useCallback(async () => {
+    90→    90→    setLoading(true)
+    91→    91→    try {
+    92→    92→      const [u, o] = await Promise.all([crmApi.users(), crmApi.opportunities()])
+    93→    93→      setUsers(u); setOpps(o)
+    94→    94→    } catch (e) {
+    95→    95→      toast({ title: 'Gagal memuat konfigurasi', description: e instanceof Error ? e.message : undefined, variant: 'destructive' })
+    96→    96→    } finally { setLoading(false) }
+    97→    97→  }, [toast])
+    98→    98→
+    99→    99→  useEffect(() => { load() }, [load])
+   100→   100→
+   101→   101→  const openEdit = (b: BrandDTO) => {
+   102→   102→    setEditing(b)
+   103→   103→    setForm(toForm(b))
+   104→   104→  }
+   105→   105→
+   106→   106→  const set = <K extends keyof BrandFormState>(key: K, value: BrandFormState[K]) =>
+   107→   107→    setForm((f) => (f ? { ...f, [key]: value } : f))
+   108→   108→
+   109→   109→  /* Dirty check — bandingkan form dengan brand asal */
+   110→   110→  const dirty = useMemo(() => {
+   111→   111→    if (!editing || !form) return false
+   112→   112→    const orig = toForm(editing)
+   113→   113→    return (Object.keys(orig) as (keyof BrandFormState)[]).some((k) => orig[k] !== form[k])
+   114→   114→  }, [editing, form])
+   115→   115→
+   116→   116→  const formErrors = useMemo(() => {
+   117→   117→    if (!form) return {} as Record<string, string>
+   118→   118→    const e: Record<string, string> = {}
+   119→   119→    if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) e.email = 'Format email tidak valid'
+   120→   120→    if (form.color && !/^#[0-9a-fA-F]{6}$/.test(form.color)) e.color = 'Gunakan kode hex #rrggbb'
+   121→   121→    const sla = Number(form.slaHours)
+   122→   122→    if (!Number.isFinite(sla) || sla < 1 || sla > 168) e.slaHours = 'SLA 1–168 jam'
+   123→   123→    for (const k of ['invoicePrefix', 'quotationPrefix'] as const) {
+   124→   124→      if (!/^[A-Z]{2,6}$/.test(form[k])) e[k] = '2–6 huruf kapital'
+   125→   125→    }
+   126→   126→    return e
+   127→   127→  }, [form])
+   128→   128→
+   129→   129→  const hasErrors = Object.keys(formErrors).length > 0
+   130→   130→
+   131→   131→  const handleSave = async () => {
+   132→   132→    if (!editing || !form || !dirty || hasErrors) return
+   133→   133→    setSaving(true)
+   134→   134→    try {
+   135→   135→      const updated = await crmApi.updateBrand(editing.id, {
+   136→   136→        tagline: form.tagline,
+   137→   137→        description: form.description,
+   138→   138→        website: form.website,
+   139→   139→        email: form.email,
+   140→   140→        phone: form.phone,
+   141→   141→        instagram: form.instagram,
+   142→   142→        address: form.address,
+   143→   143→        color: form.color,
+   144→   144→        slaHours: Number(form.slaHours),
+   145→   145→        primaryCurrency: form.primaryCurrency,
+   146→   146→        invoicePrefix: form.invoicePrefix,
+   147→   147→        quotationPrefix: form.quotationPrefix,
+   148→   148→        workflowType: form.workflowType,
+   149→   149→        isActive: form.isActive,
+   150→   150→      })
+   151→   151→      setBrands(brands.map((b) => (b.id === updated.id ? updated : b)))
+   152→   152→      toast({ title: 'Pengaturan brand tersimpan', description: `${updated.name} diperbarui — kop dokumen & identifikasi kanal ikut berubah.` })
+   153→   153→      setEditing(null)
+   154→   154→      setForm(null)
+   155→   155→    } catch (e) {
+   156→   156→      toast({ title: 'Gagal menyimpan pengaturan', description: e instanceof Error ? e.message : undefined, variant: 'destructive' })
+   157→   157→    } finally { setSaving(false) }
+   158→   158→  }
+   159→   159→
+   160→   160→  const maxCount = Math.max(1, ...brands.map(b => opps.filter(o => o.executingBrandId === b.id && !['WON', 'LOST'].includes(o.stage)).length))
+   161→   161→
+   162→   162→  return (
+   163→   163→    <div className="space-y-5">
+   164→   164→      <div className="flex items-start justify-between gap-3">
+   165→   165→        <SectionHeader title="Struktur Multi-Brand" description="Satu database perusahaan — identitas, layanan, SLA, workflow, dan tim per brand" action={<RefreshButton onClick={load} loading={loading} />} />
+   166→   166→      </div>
+   167→   167→
+   168→   168→      <Card className="border-teal-100 bg-teal-50/60">
+   169→   169→        <CardContent className="flex items-start gap-3 p-4">
+   170→   170→          <Info className="mt-0.5 h-4 w-4 shrink-0 text-teal-600" />
+   171→   171→          <p className="text-xs leading-relaxed text-teal-900">
+   172→   172→            <b>Architecture note:</b> keempat brand berbagi satu database company/contact. Menambah brand kelima cukup dengan konfigurasi baru (nama, warna, layanan, SLA, workflow, template) — tanpa mengubah source code maupun menduplikasi data klien.
+   173→   173→            {canManage && <> Klik <b>Pengaturan</b> pada kartu brand untuk memperbarui identitas kontak, warna, SLA, dan prefix dokumen.</>}
+   174→   174→          </p>
+   175→   175→        </CardContent>
+   176→   176→      </Card>
+   177→   177→
+   178→   178→      {loading ? <LoadingRows rows={4} /> : (
+   179→   179→        <div className="grid gap-4 lg:grid-cols-2">
+   180→   180→          {brands.map(b => {
+   181→   181→            const brandOpps = opps.filter(o => o.executingBrandId === b.id)
+   182→   182→            const open = brandOpps.filter(o => !['WON', 'LOST'].includes(o.stage))
+   183→   183→            const openValue = open.reduce((a, o) => a + o.estimatedValue, 0)
+   184→   184→            const wonValue = brandOpps.filter(o => o.stage === 'WON').reduce((a, o) => a + o.estimatedValue, 0)
+   185→   185→            const team = users.filter(u => u.brandIds.includes(b.id))
+   186→   186→            const byCategory = b.services.reduce<Record<string, string[]>>((acc, s) => {
+   187→   187→              (acc[s.category] ??= []).push(s.name); return acc
+   188→   188→            }, {})
+   189→   189→            const contacts: { icon: React.ReactNode; text: string }[] = [
+   190→   190→              ...(b.email ? [{ icon: <Mail className="h-3 w-3" />, text: b.email }] : []),
+   191→   191→              ...(b.phone ? [{ icon: <Phone className="h-3 w-3" />, text: b.phone }] : []),
+   192→   192→              ...(b.instagram ? [{ icon: <Instagram className="h-3 w-3" />, text: b.instagram }] : []),
+   193→   193→              ...(b.address ? [{ icon: <MapPin className="h-3 w-3" />, text: b.address }] : []),
+   194→   194→            ]
+   195→   195→
+   196→   196→            return (
+   197→   197→              <Card key={b.id} className="card-hover overflow-hidden rounded-xl hover:border-slate-300">
+   198→   198→                <div className="h-1.5 w-full" style={{ backgroundColor: b.color }} />
+   199→   199→                <CardHeader className="pb-2">
+   200→   200→                  <div className="flex flex-wrap items-start justify-between gap-2">
+   201→   201→                    <div className="min-w-0">
+   202→   202→                      <CardTitle className="flex items-center gap-2 text-base">
+   203→   203→                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white shadow-sm" style={{ backgroundColor: b.color }}>
+   204→   204→                          <Building2 className="h-4 w-4" />
+   205→   205→                        </span>
+   206→   206→                        {b.name}
+   207→   207→                      </CardTitle>
+   208→   208→                      <p className="mt-1 text-xs text-slate-500">{b.tagline}</p>
+   209→   209→                    </div>
+   210→   210→                    <div className="flex shrink-0 items-center gap-1">
+   211→   211→                      <a href={b.website ? (b.website.startsWith('http') ? b.website : `https://${b.website}`) : '#'} target="_blank" rel="noreferrer" className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-medium text-slate-400 transition-colors hover:bg-slate-100 hover:text-teal-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400">
+   212→   212→                        <span className="h-2 w-2 rounded-full" style={{ backgroundColor: b.color }} aria-hidden />
+   213→   213→                        <Globe className="h-3.5 w-3.5" /> {b.website?.replace(/^https?:\/\//, '')}
+   214→   214→                      </a>
+   215→   215→                      {canManage && (
+   216→   216→                        <Button
+   217→   217→                          variant="outline"
+   218→   218→                          size="sm"
+   219→   219→                          onClick={() => openEdit(b)}
+   220→   220→                          className="h-8 gap-1.5 px-2.5 text-xs"
+   221→   221→                          aria-label={`Pengaturan ${b.name}`}
+   222→   222→                        >
+   223→   223→                          <Settings2 className="h-3.5 w-3.5" /> Pengaturan
+   224→   224→                        </Button>
+   225→   225→                      )}
+   226→   226→                    </div>
+   227→   227→                  </div>
+   228→   228→                </CardHeader>
+   229→   229→                <CardContent className="space-y-4">
+   230→   230→                  <div className="flex flex-wrap gap-1.5">
+   231→   231→                    <Badge variant="secondary" className="gap-1 border-0 bg-slate-100 text-[10px] text-slate-600"><Timer className="h-3 w-3" /> SLA {b.slaHours} jam</Badge>
+   232→   232→                    <Badge variant="secondary" className="gap-1 border-0 bg-slate-100 text-[10px] tabular-nums text-slate-600">💰 {b.primaryCurrency}</Badge>
+   233→   233→                    <Badge variant="secondary" className="gap-1 border-0 bg-slate-100 text-[10px] tabular-nums text-slate-600">Invoice: {b.invoicePrefix}-YYYY-####</Badge>
+   234→   234→                    <Badge variant="secondary" className="gap-1 border-0 bg-slate-100 text-[10px] tabular-nums text-slate-600">Quotation: {b.quotationPrefix}-YYYY-####</Badge>
+   235→   235→                    <Badge variant="secondary" className="gap-1 border-0 bg-slate-100 text-[10px] text-slate-600"><Workflow className="h-3 w-3" /> {WORKFLOW_LABELS[b.workflowType] ?? b.workflowType}</Badge>
+   236→   236→                  </div>
+   237→   237→
+   238→   238→                  {contacts.length > 0 && (
+   239→   239→                    <div className="grid gap-x-4 gap-y-1.5 rounded-lg border border-slate-100 bg-slate-50/70 p-2.5 sm:grid-cols-2">
+   240→   240→                      {contacts.map((c, i) => (
+   241→   241→                        <span key={i} className="flex min-w-0 items-center gap-1.5 text-[11px] text-slate-600">
+   242→   242→                          <span className="shrink-0 text-slate-400">{c.icon}</span>
+   243→   243→                          <span className="truncate" title={c.text}>{c.text}</span>
+   244→   244→                        </span>
+   245→   245→                      ))}
+   246→   246→                    </div>
+   247→   247→                  )}
+   248→   248→
+   249→   249→                  <div>
+   250→   250→                    <div className="mb-1 flex items-center justify-between text-[11px]">
+   251→   251→                      <span className="font-medium text-slate-600">Pipeline aktif · {open.length} opportunity</span>
+   252→   252→                      <span className="font-bold tabular-nums text-slate-800">{formatMoney(openValue, 'IDR', true)}</span>
+   253→   253→                    </div>
+   254→   254→                    {/* Warna bar mengikuti brand via CSS var — indicator Progress memakai bg-[var(--brand-c)] */}
+   255→   255→                    <Progress value={(open.length / maxCount) * 100} className="h-2 [&>div]:bg-[var(--brand-c)]" style={{ ['--brand-c' as string]: b.color }} />
+   256→   256→                    <p className="mt-1 text-[11px] text-slate-500">Total Won: <span className="font-semibold tabular-nums text-emerald-700">{formatMoney(wonValue, 'IDR', true)}</span></p>
+   257→   257→                  </div>
+   258→   258→
+   259→   259→                  <div>
+   260→   260→                    <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Layanan ({b.services.length})</p>
+   261→   261→                    <div className="space-y-2">
+   262→   262→                      {Object.entries(byCategory).map(([cat, list]) => (
+   263→   263→                        <div key={cat}>
+   264→   264→                          <p className="text-[11px] font-medium text-slate-500">{cat}</p>
+   265→   265→                          <div className="mt-1 flex flex-wrap gap-1">
+   266→   266→                            {list.map(s => (
+   267→   267→                              <span key={s} className="rounded-md px-1.5 py-0.5 text-[10px] font-medium" style={{ backgroundColor: `${b.color}10`, color: b.color }}>{s}</span>
+   268→   268→                            ))}
+   269→   269→                          </div>
+   270→   270→                        </div>
+   271→   271→                      ))}
+   272→   272→                    </div>
+   273→   273→                  </div>
+   274→   274→
+   275→   275→                  <div>
+   276→   276→                    <p className="mb-1.5 flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400"><Users2 className="h-3 w-3" /> Tim ({team.length})</p>
+   277→   277→                    <div className="flex flex-wrap gap-1.5">
+   278→   278→                      {team.map(u => (
+   279→   279→                        <span key={u.id} className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white py-0.5 pl-0.5 pr-2 text-[11px] text-slate-600">
+   280→   280→                          <UserAvatar name={u.name} color={u.avatarColor} size={18} /> {u.name}
+   281→   281→                        </span>
+   282→   282→                      ))}
+   283→   283→                    </div>
+   284→   284→                  </div>
+   285→   285→
+   286→   286→                  <details className="rounded-lg bg-slate-50 p-2.5">
+   287→   287→                    <summary className="flex min-h-[44px] cursor-pointer select-none items-center gap-1 rounded text-[11px] font-medium text-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400">Workflow produksi standar</summary>
+   288→   288→                    <p className="mt-1.5 text-[11px] text-slate-500">{(WORKFLOW_MILESTONES[b.workflowType] ?? []).join(' → ')}</p>
+   289→   289→                  </details>
+   290→   290→                </CardContent>
+   291→   291→              </Card>
+   292→   292→            )
+   293→   293→          })}
+   294→   294→        </div>
+   295→   295→      )}
+   296→   296→
+   297→   297→      {/* ===== Dialog Pengaturan Brand (live preview kop dokumen) ===== */}
+   298→   298→      <Dialog open={!!editing && !!form} onOpenChange={(v) => { if (!v) { setEditing(null); setForm(null) } }}>
+   299→   299→        <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-2xl">
+   300→   300→          <DialogHeader>
+   301→   301→            <DialogTitle className="flex items-center gap-2">
+   302→   302→              <span className="flex h-7 w-7 items-center justify-center rounded-md text-white" style={{ backgroundColor: editing?.color }}>
+   303→   303→                <Building2 className="h-3.5 w-3.5" />
+   304→   304→              </span>
+   305→   305→              Pengaturan · {editing?.name}
+   306→   306→            </DialogTitle>
+   307→   307→            <DialogDescription>
+   308→   308→              Identitas kontak dipakai di kop dokumen (penawaran/invoice) & membantu identifikasi kanal masuk. Warna dipakai konsisten di seluruh aplikasi.
+   309→   309→            </DialogDescription>
+   310→   310→          </DialogHeader>
+   311→   311→
+   312→   312→          {form && editing && (
+   313→   313→            <div className="grid gap-5 md:grid-cols-[1fr_240px]">
+   314→   314→              {/* Kolom form */}
+   315→   315→              <div className="space-y-4">
+   316→   316→                <div className="space-y-3">
+   317→   317→                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Identitas</p>
+   318→   318→                  <div className="grid gap-3 sm:grid-cols-2">
+   319→   319→                    <div className="space-y-1.5">
+   320→   320→                      <Label htmlFor="brand-tagline" className="text-xs">Tagline</Label>
+   321→   321→                      <Input id="brand-tagline" value={form.tagline} onChange={(e) => set('tagline', e.target.value)} placeholder="mis. Video production house" className="h-9" />
+   322→   322→                    </div>
+   323→   323→                    <div className="space-y-1.5">
+   324→   324→                      <Label htmlFor="brand-workflow" className="text-xs">Workflow produksi</Label>
+   325→   325→                      <Select value={form.workflowType} onValueChange={(v) => set('workflowType', v)}>
+   326→   326→                        <SelectTrigger id="brand-workflow" className="h-9"><SelectValue /></SelectTrigger>
+   327→   327→                        <SelectContent>
+   328→   328→                          {WORKFLOWS.map((w) => <SelectItem key={w} value={w}>{WORKFLOW_LABELS[w]}</SelectItem>)}
+   329→   329→                        </SelectContent>
+   330→   330→                      </Select>
+   331→   331→                    </div>
+   332→   332→                  </div>
+   333→   333→                  <div className="space-y-1.5">
+   334→   334→                    <Label htmlFor="brand-desc" className="text-xs">Deskripsi</Label>
+   335→   335→                    <Textarea id="brand-desc" value={form.description} onChange={(e) => set('description', e.target.value)} rows={2} placeholder="Deskripsi singkat brand untuk konteks tim" className="min-h-0 resize-none py-2" />
+   336→   336→                  </div>
+   337→   337→                </div>
+   338→   338→
+   339→   339→                <div className="space-y-3">
+   340→   340→                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Kontak & dokumen</p>
+   341→   341→                  <div className="grid gap-3 sm:grid-cols-2">
+   342→   342→                    <div className="space-y-1.5">
+   343→   343→                      <Label htmlFor="brand-email" className="text-xs">Email</Label>
+   344→   344→                      <Input id="brand-email" type="email" value={form.email} onChange={(e) => set('email', e.target.value)} placeholder="hello@brand.co.id" className="h-9" aria-invalid={!!formErrors.email} />
+   345→   345→                      {formErrors.email && <p className="text-[10px] text-rose-600">{formErrors.email}</p>}
+   346→   346→                    </div>
+   347→   347→                    <div className="space-y-1.5">
+   348→   348→                      <Label htmlFor="brand-phone" className="text-xs">Telepon / WA bisnis</Label>
+   349→   349→                      <Input id="brand-phone" value={form.phone} onChange={(e) => set('phone', e.target.value)} placeholder="+62 812 3456 7890" className="h-9" />
+   350→   350→                    </div>
+   351→   351→                    <div className="space-y-1.5">
+   352→   352→                      <Label htmlFor="brand-ig" className="text-xs">Instagram</Label>
+   353→   353→                      <Input id="brand-ig" value={form.instagram} onChange={(e) => set('instagram', e.target.value)} placeholder="@brand.official" className="h-9" />
+   354→   354→                    </div>
+   355→   355→                    <div className="space-y-1.5">
+   356→   356→                      <Label htmlFor="brand-website" className="text-xs">Website</Label>
+   357→   357→                      <Input id="brand-website" value={form.website} onChange={(e) => set('website', e.target.value)} placeholder="www.brand.co.id" className="h-9" />
+   358→   358→                    </div>
+   359→   359→                  </div>
+   360→   360→                  <div className="space-y-1.5">
+   361→   361→                    <Label htmlFor="brand-address" className="text-xs">Alamat (untuk kop dokumen)</Label>
+   362→   362→                    <Textarea id="brand-address" value={form.address} onChange={(e) => set('address', e.target.value)} rows={2} placeholder="Jl. … No. …, Kota" className="min-h-0 resize-none py-2" />
+   363→   363→                  </div>
+   364→   364→                </div>
+   365→   365→
+   366→   366→                <div className="space-y-3">
+   367→   367→                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Konfigurasi</p>
+   368→   368→                  <div className="grid gap-3 sm:grid-cols-2">
+   369→   369→                    <div className="space-y-1.5">
+   370→   370→                      <Label htmlFor="brand-color" className="text-xs">Warna brand</Label>
+   371→   371→                      <div className="flex items-center gap-2">
+   372→   372→                        <input
+   373→   373→                          id="brand-color"
+   374→   374→                          type="color"
+   375→   375→                          value={/^#[0-9a-fA-F]{6}$/.test(form.color) ? form.color : '#10b981'}
+   376→   376→                          onChange={(e) => set('color', e.target.value)}
+   377→   377→                          className="h-9 w-9 shrink-0 cursor-pointer rounded-md border border-slate-200 bg-white p-0.5"
+   378→   378→                          aria-label="Pilih warna brand"
+   379→   379→                        />
+   380→   380→                        <Input value={form.color} onChange={(e) => set('color', e.target.value)} className="h-9 font-mono text-xs" aria-invalid={!!formErrors.color} />
+   381→   381→                      </div>
+   382→   382→                      <div className="flex flex-wrap gap-1 pt-0.5">
+   383→   383→                        {COLOR_PRESETS.map((c) => (
+   384→   384→                          <button
+   385→   385→                            key={c}
+   386→   386→                            type="button"
+   387→   387→                            onClick={() => set('color', c)}
+   388→   388→                            aria-label={`Warna ${c}`}
+   389→   389→                            className={cn('h-5 w-5 rounded-full border transition-transform hover:scale-110', form.color === c ? 'border-slate-900 ring-2 ring-slate-900/20' : 'border-slate-200')}
+   390→   390→                            style={{ backgroundColor: c }}
+   391→   391→                          />
+   392→   392→                        ))}
+   393→   393→                      </div>
+   394→   394→                      {formErrors.color && <p className="text-[10px] text-rose-600">{formErrors.color}</p>}
+   395→   395→                    </div>
+   396→   396→                    <div className="space-y-1.5">
+   397→   397→                      <Label htmlFor="brand-sla" className="text-xs">SLA balas pertama (jam)</Label>
+   398→   398→                      <Input id="brand-sla" type="number" min={1} max={168} value={form.slaHours} onChange={(e) => set('slaHours', e.target.value)} className="h-9 tabular-nums" aria-invalid={!!formErrors.slaHours} />
+   399→   399→                      {formErrors.slaHours && <p className="text-[10px] text-rose-600">{formErrors.slaHours}</p>}
+   400→   400→                    </div>
+   401→   401→                    <div className="space-y-1.5">
+   402→   402→                      <Label className="text-xs">Mata uang utama</Label>
+   403→   403→                      <Select value={form.primaryCurrency} onValueChange={(v) => set('primaryCurrency', v)}>
+   404→   404→                        <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+   405→   405→                        <SelectContent>
+   406→   406→                          {CURRENCIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+   407→   407→                        </SelectContent>
+   408→   408→                      </Select>
+   409→   409→                    </div>
+   410→   410→                    <div className="grid grid-cols-2 gap-2">
+   411→   411→                      <div className="space-y-1.5">
+   412→   412→                        <Label htmlFor="brand-inv" className="text-xs">Prefix invoice</Label>
+   413→   413→                        <Input id="brand-inv" value={form.invoicePrefix} onChange={(e) => set('invoicePrefix', e.target.value.toUpperCase())} className="h-9 font-mono uppercase" aria-invalid={!!formErrors.invoicePrefix} />
+   414→   414→                        {formErrors.invoicePrefix && <p className="text-[10px] text-rose-600">{formErrors.invoicePrefix}</p>}
+   415→   415→                      </div>
+   416→   416→                      <div className="space-y-1.5">
+   417→   417→                        <Label htmlFor="brand-quo" className="text-xs">Prefix quotation</Label>
+   418→   418→                        <Input id="brand-quo" value={form.quotationPrefix} onChange={(e) => set('quotationPrefix', e.target.value.toUpperCase())} className="h-9 font-mono uppercase" aria-invalid={!!formErrors.quotationPrefix} />
+   419→   419→                        {formErrors.quotationPrefix && <p className="text-[10px] text-rose-600">{formErrors.quotationPrefix}</p>}
+   420→   420→                      </div>
+   421→   421→                    </div>
+   422→   422→                  </div>
+   423→   423→                  <div className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2.5">
+   424→   424→                    <div>
+   425→   425→                      <Label htmlFor="brand-active" className="text-xs font-medium">Brand aktif</Label>
+   426→   426→                      <p className="text-[10px] text-slate-500">Nonaktif = tidak muncul sebagai pilihan brand untuk lead baru</p>
+   427→   427→                    </div>
+   428→   428→                    <Switch id="brand-active" checked={form.isActive} onCheckedChange={(v) => set('isActive', v)} />
+   429→   429→                  </div>
+   430→   430→                </div>
+   431→   431→              </div>
+   432→   432→
+   433→   433→              {/* Kolom preview — kop dokumen live mengikuti form */}
+   434→   434→              <div className="space-y-3">
+   435→   435→                <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Pratinjau kop</p>
+   436→   436→                <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+   437→   437→                  <div className="h-1 w-full" style={{ backgroundColor: form.color }} />
+   438→   438→                  <div className="p-3">
+   439→   439→                    <div className="flex items-center gap-2">
+   440→   440→                      <span className="flex h-6 w-6 items-center justify-center rounded text-white" style={{ backgroundColor: form.color }}>
+   441→   441→                        <Building2 className="h-3 w-3" />
+   442→   442→                      </span>
+   443→   443→                      <p className="text-xs font-bold text-slate-900">{editing.name}</p>
+   444→   444→                    </div>
+   445→   445→                    {form.tagline && <p className="mt-0.5 text-[9px] italic text-slate-500">{form.tagline}</p>}
+   446→   446→                    <div className="mt-1.5 space-y-px border-t pt-1.5 text-[8.5px] leading-relaxed text-slate-500" style={{ borderColor: `${form.color}55` }}>
+   447→   447→                      {[form.address, form.phone, form.email, form.instagram, form.website].filter(Boolean).map((line, i) => (
+   448→   448→                        <p key={i} className="truncate">{line}</p>
+   449→   449→                      ))}
+   450→   450→                    </div>
+   451→   451→                    <div className="mt-2 space-y-1">
+   452→   452→                      <div className="h-1.5 w-3/4 rounded bg-slate-200" />
+   453→   453→                      <div className="h-1.5 w-1/2 rounded bg-slate-100" />
+   454→   454→                    </div>
+   455→   455→                    <div className="mt-3 flex items-center justify-between rounded-md px-1.5 py-1 text-[8px] font-semibold text-white" style={{ backgroundColor: form.color }}>
+   456→   456→                      <span>{form.invoicePrefix}-2025-0001</span>
+   457→   457→                      <span>{form.primaryCurrency}</span>
+   458→   458→                    </div>
+   459→   459→                  </div>
+   460→   460→                </div>
+   461→   461→                <p className="text-[10px] leading-relaxed text-slate-400">
+   462→   462→                  Pratinjau menunjukkan bagaimana identitas brand tampil di kepala dokumen penawaran/invoice.
+   463→   463→                </p>
+   464→   464→              </div>
+   465→   465→            </div>
+   466→   466→          )}
+   467→   467→
+   468→   468→          <DialogFooter className="gap-2">
+   469→   469→            <Button variant="outline" onClick={() => { setEditing(null); setForm(null) }} disabled={saving}>Batal</Button>
+   470→   470→            <Button onClick={() => void handleSave()} disabled={!dirty || hasErrors || saving} className="gap-1.5 bg-teal-700 text-white hover:bg-teal-800">
+   471→   471→              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+   472→   472→              Simpan Perubahan
+   473→   473→            </Button>
+   474→   474→          </DialogFooter>
+   475→   475→        </DialogContent>
+   476→   476→      </Dialog>
+   477→   477→    </div>
+   478→   478→  )
+   479→   479→}
+   480→   480→

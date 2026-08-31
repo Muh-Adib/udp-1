@@ -2,6 +2,8 @@
  * R15: brand sebelumnya read-only penuh (GET saja). Route ini menambah PATCH utk
  * konfigurasi & identitas brand: kontak (email/telepon/instagram/alamat), warna,
  * SLA, mata uang, prefix dokumen, workflow, dan status aktif.
+ * R19: dua varian logo (logoSquare 1:1 & logoWide horizontal) sebagai data-URL —
+ * divalidasi mime + panjang; audit hanya mencatat placeholder (bukan base64 penuh).
  * name & slug sengaja TIDAK bisa diubah dari sini (identitas data + FK berantai). */
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -13,6 +15,11 @@ export const dynamic = 'force-dynamic'
 const STRING_FIELDS = [
   'tagline', 'description', 'website', 'email', 'phone', 'instagram', 'address',
 ] as const
+
+/* R19 — logo: data-URL gambar; base64 tidak masuk audit log (cukup placeholder) */
+const LOGO_FIELDS = ['logoSquare', 'logoWide'] as const
+const LOGO_MIME_RE = /^data:image\/(png|jpeg|jpg|webp|svg\+xml);base64,[A-Za-z0-9+/=]+$/
+const LOGO_MAX_CHARS = 900_000 // ≈ 660 KB biner per logo
 
 const CURRENCIES = ['IDR', 'SGD', 'USD']
 const WORKFLOWS = ['website', 'video', 'animation', 'livestream', 'generic']
@@ -73,6 +80,36 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     data[key] = next
     oldValue[key] = current[key]
     newValue[key] = next
+  }
+
+  /* R19 — logo (persegi / lebar): null atau '' = hapus; selain itu wajib data-URL gambar valid.
+     Audit memakai placeholder supaya tabel AuditLog tidak menelan ratusan KB base64. */
+  for (const key of LOGO_FIELDS) {
+    if (body[key] === undefined) continue
+    const raw = body[key]
+    if (raw !== null && typeof raw !== 'string') {
+      return NextResponse.json({ error: `Kolom ${key} harus berupa data-URL gambar` }, { status: 400 })
+    }
+    const trimmed = typeof raw === 'string' ? raw.trim() : ''
+    let next: string | null = trimmed === '' ? null : trimmed
+    if (next !== null) {
+      if (!LOGO_MIME_RE.test(next)) {
+        return NextResponse.json(
+          { error: 'Logo harus berupa data-URL gambar (PNG, JPG, WebP, atau SVG)' },
+          { status: 400 },
+        )
+      }
+      if (next.length > LOGO_MAX_CHARS) {
+        return NextResponse.json(
+          { error: 'Ukuran logo terlalu besar — gunakan gambar maksimal ±600 KB' },
+          { status: 400 },
+        )
+      }
+    }
+    if (next === current[key]) continue
+    data[key] = next
+    oldValue[key] = current[key] ? '(logo terpasang)' : null
+    newValue[key] = next ? '(logo terpasang)' : null
   }
 
   /* color — hex 6 digit */

@@ -189,7 +189,7 @@ export function mapBrand(b: {
   id: string; name: string; slug: string; tagline?: string | null
   description?: string | null; color: string; website?: string | null
   email?: string | null; phone?: string | null; instagram?: string | null
-  address?: string | null
+  address?: string | null; logoSquare?: string | null; logoWide?: string | null
   primaryCurrency: string; invoicePrefix: string; quotationPrefix: string
   slaHours: number; workflowType: string
   services?: { id: string; name: string; category: string; brandId: string }[]
@@ -206,6 +206,8 @@ export function mapBrand(b: {
     phone: b.phone ?? null,
     instagram: b.instagram ?? null,
     address: b.address ?? null,
+    logoSquare: b.logoSquare ?? null,
+    logoWide: b.logoWide ?? null,
     primaryCurrency: b.primaryCurrency,
     invoicePrefix: b.invoicePrefix,
     quotationPrefix: b.quotationPrefix,
@@ -483,7 +485,7 @@ export async function generateInvoiceCode(): Promise<string> {
 
 export const quotationInclude = {
   opportunity: { select: { id: true, code: true, title: true, stage: true, estimatedValue: true } },
-  brand: { select: { id: true, name: true, color: true } },
+  brand: { select: { id: true, name: true, color: true, logoSquare: true, logoWide: true } },
   company: { select: { id: true, name: true } },
   createdBy: { select: { id: true, name: true } },
   approvedBy: { select: { id: true, name: true } },
@@ -540,6 +542,8 @@ export function mapQuotation(q: QuotationWithRelations): QuotationDTO {
     brandId: q.brandId,
     brandName: q.brand.name,
     brandColor: q.brand.color,
+    brandLogoSquare: q.brand.logoSquare ?? null,
+    brandLogoWide: q.brand.logoWide ?? null,
     companyId: q.companyId,
     companyName: q.company.name,
     itemsCount: q._count.items,
@@ -555,7 +559,7 @@ export function mapQuotationDetail(q: QuotationWithItems): QuotationDetailDTO {
 export const invoiceInclude = {
   opportunity: { select: { id: true, code: true, title: true } },
   project: { select: { id: true, code: true } },
-  brand: { select: { id: true, name: true, color: true } },
+  brand: { select: { id: true, name: true, color: true, logoSquare: true, logoWide: true } },
   company: { select: { id: true, name: true } },
   payments: {
     orderBy: { paidAt: 'desc' as const },
@@ -601,6 +605,8 @@ export function mapInvoice(i: InvoiceWithRelations): InvoiceDTO {
     brandId: i.brandId,
     brandName: i.brand.name,
     brandColor: i.brand.color,
+    brandLogoSquare: i.brand.logoSquare ?? null,
+    brandLogoWide: i.brand.logoWide ?? null,
     companyId: i.companyId,
     companyName: i.company.name,
     payments: i.payments.map(mapPayment),

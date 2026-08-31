@@ -65,6 +65,10 @@ model Brand {
   phone           String?
   instagram       String?
   address         String?
+  /* Logo brand — dua varian data-URL: persegi 1:1 (avatar/stempel/ikon) & lebar horizontal (kop surat).
+     Disimpan sebagai data:image/...;base64 agar tidak butuh file storage terpisah. */
+  logoSquare      String?
+  logoWide        String?
   primaryCurrency String  @default("IDR")
   invoicePrefix   String  @default("INV")
   quotationPrefix String  @default("QUO")

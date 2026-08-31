@@ -1,7 +1,7 @@
 /* ============ Brands View — konfigurasi multi-brand + pengaturan (R15) ============ */
 'use client'
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { crmApi } from './api-client'
 import { useCrmStore } from './crm-store'
 import { useToast } from '@/hooks/use-toast'
@@ -24,8 +24,8 @@ import { WORKFLOW_MILESTONES, formatMoney } from '@/lib/crm-constants'
 import type { BrandDTO, OpportunityDTO, UserDTO } from '@/lib/crm-types'
 import { cn } from '@/lib/utils'
 import {
-  Building2, Globe, Info, Loader2, Mail, MapPin, Instagram, Phone, Save, Settings2,
-  Timer, Users2, Workflow,
+  Building2, Globe, ImagePlus, Info, Loader2, Mail, MapPin, Instagram, Phone, Save, Settings2,
+  Timer, Trash2, Upload, Users2, Workflow,
 } from 'lucide-react'
 
 const WORKFLOW_LABELS: Record<string, string> = {
@@ -37,7 +37,58 @@ const WORKFLOWS = ['website', 'video', 'animation', 'livestream', 'generic'] as 
 
 const COLOR_PRESETS = ['#10b981', '#0d9488', '#d97706', '#7c3aed', '#e11d48', '#0284c7', '#65a30d', '#57534e']
 
+/* R19 — proses file logo di sisi client: validasi + kompres via canvas agar data-URL ringan.
+   Persegi 1:1 → crop tengah jadi 256×256; lebar → diskalakan proporsional (lebar maks 960px).
+   Aspect ratio TIDAK diubah utk logo lebar — penempatan memakai object-contain. */
+async function processLogoFile(file: File, variant: 'square' | 'wide'): Promise<string> {
+  if (!file.type.startsWith('image/')) {
+    throw new Error('File harus berupa gambar (PNG, JPG, WebP, atau SVG)')
+  }
+  if (file.size > 2 * 1024 * 1024) {
+    throw new Error('Ukuran file maksimal 2 MB')
+  }
+  const readAsDataUrl = () => new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result))
+    reader.onerror = () => reject(new Error('Gagal membaca file'))
+    reader.readAsDataURL(file)
+  })
+  /* SVG disimpan apa adanya — vektor & biasanya ringan, rasterisasi malah merusak kualitas */
+  if (file.type === 'image/svg+xml') {
+    const url = await readAsDataUrl()
+    if (url.length > 900_000) throw new Error('SVG terlalu besar — gunakan maksimal ±600 KB')
+    return url
+  }
+  const dataUrl = await readAsDataUrl()
+  const img = document.createElement('img')
+  await new Promise<void>((resolve, reject) => {
+    img.onload = () => resolve()
+    img.onerror = () => reject(new Error('Gambar tidak dapat dibaca'))
+    img.src = dataUrl
+  })
+  const canvas = document.createElement('canvas')
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Browser tidak mendukung pemrosesan gambar')
+  if (variant === 'square') {
+    const s = Math.min(img.naturalWidth, img.naturalHeight)
+    if (s < 64) throw new Error('Logo persegi minimal 64×64 px')
+    const sx = (img.naturalWidth - s) / 2
+    const sy = (img.naturalHeight - s) / 2
+    canvas.width = 256
+    canvas.height = 256
+    ctx.drawImage(img, sx, sy, s, s, 0, 0, 256, 256)
+  } else {
+    const scale = Math.min(1, 960 / img.naturalWidth)
+    canvas.width = Math.max(1, Math.round(img.naturalWidth * scale))
+    canvas.height = Math.max(1, Math.round(img.naturalHeight * scale))
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+  }
+  return canvas.toDataURL('image/png')
+}
+
 interface BrandFormState {
+  logoSquare: string
+  logoWide: string
   tagline: string
   description: string
   website: string
@@ -55,6 +106,8 @@ interface BrandFormState {
 }
 
 const toForm = (b: BrandDTO): BrandFormState => ({
+  logoSquare: b.logoSquare ?? '',
+  logoWide: b.logoWide ?? '',
   tagline: b.tagline ?? '',
   description: b.description ?? '',
   website: (b.website ?? '').replace(/^https?:\/\//, ''),
@@ -85,6 +138,9 @@ export default function BrandsView() {
   const [editing, setEditing] = useState<BrandDTO | null>(null)
   const [form, setForm] = useState<BrandFormState | null>(null)
   const [saving, setSaving] = useState(false)
+  const [logoBusy, setLogoBusy] = useState<'square' | 'wide' | null>(null)
+  const fileSquareRef = useRef<HTMLInputElement>(null)
+  const fileWideRef = useRef<HTMLInputElement>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -105,6 +161,23 @@ export default function BrandsView() {
 
   const set = <K extends keyof BrandFormState>(key: K, value: BrandFormState[K]) =>
     setForm((f) => (f ? { ...f, [key]: value } : f))
+
+  /* R19 — ambil file logo dari input, proses di client, lalu isi form (belum tersimpan
+     sampai user menekan Simpan). Error divalidasi ramah (tipe/ukuran) via toast. */
+  const pickLogo = async (variant: 'square' | 'wide', file: File | undefined) => {
+    if (!file) return
+    setLogoBusy(variant)
+    try {
+      const dataUrl = await processLogoFile(file, variant)
+      set(variant === 'square' ? 'logoSquare' : 'logoWide', dataUrl)
+    } catch (e) {
+      toast({ title: 'Logo gagal diproses', description: e instanceof Error ? e.message : undefined, variant: 'destructive' })
+    } finally {
+      setLogoBusy(null)
+      if (variant === 'square' && fileSquareRef.current) fileSquareRef.current.value = ''
+      if (variant === 'wide' && fileWideRef.current) fileWideRef.current.value = ''
+    }
+  }
 
   /* Dirty check — bandingkan form dengan brand asal */
   const dirty = useMemo(() => {
@@ -133,6 +206,8 @@ export default function BrandsView() {
     setSaving(true)
     try {
       const updated = await crmApi.updateBrand(editing.id, {
+        logoSquare: form.logoSquare,
+        logoWide: form.logoWide,
         tagline: form.tagline,
         description: form.description,
         website: form.website,
@@ -149,7 +224,7 @@ export default function BrandsView() {
         isActive: form.isActive,
       })
       setBrands(brands.map((b) => (b.id === updated.id ? updated : b)))
-      toast({ title: 'Pengaturan brand tersimpan', description: `${updated.name} diperbarui — kop dokumen & identifikasi kanal ikut berubah.` })
+      toast({ title: 'Pengaturan brand tersimpan', description: `${updated.name} diperbarui — logo, kop dokumen, & identifikasi kanal ikut berubah.` })
       setEditing(null)
       setForm(null)
     } catch (e) {
@@ -170,7 +245,7 @@ export default function BrandsView() {
           <Info className="mt-0.5 h-4 w-4 shrink-0 text-teal-600" />
           <p className="text-xs leading-relaxed text-teal-900">
             <b>Architecture note:</b> keempat brand berbagi satu database company/contact. Menambah brand kelima cukup dengan konfigurasi baru (nama, warna, layanan, SLA, workflow, template) — tanpa mengubah source code maupun menduplikasi data klien.
-            {canManage && <> Klik <b>Pengaturan</b> pada kartu brand untuk memperbarui identitas kontak, warna, SLA, dan prefix dokumen.</>}
+            {canManage && <> Klik <b>Pengaturan</b> pada kartu brand untuk memperbarui logo (persegi 1:1 &amp; lebar), identitas kontak, warna, SLA, dan prefix dokumen.</>}
           </p>
         </CardContent>
       </Card>
@@ -200,9 +275,13 @@ export default function BrandsView() {
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div className="min-w-0">
                       <CardTitle className="flex items-center gap-2 text-base">
-                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white shadow-sm" style={{ backgroundColor: b.color }}>
-                          <Building2 className="h-4 w-4" />
-                        </span>
+                        {b.logoSquare ? (
+                          <img src={b.logoSquare} alt={`Logo ${b.name}`} className="h-8 w-8 shrink-0 rounded-lg object-contain" />
+                        ) : (
+                          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white shadow-sm" style={{ backgroundColor: b.color }}>
+                            <Building2 className="h-4 w-4" />
+                          </span>
+                        )}
                         {b.name}
                       </CardTitle>
                       <p className="mt-1 text-xs text-slate-500">{b.tagline}</p>
@@ -299,13 +378,17 @@ export default function BrandsView() {
         <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <span className="flex h-7 w-7 items-center justify-center rounded-md text-white" style={{ backgroundColor: editing?.color }}>
-                <Building2 className="h-3.5 w-3.5" />
-              </span>
+              {form?.logoSquare ? (
+                <img src={form.logoSquare} alt={`Logo ${editing?.name}`} className="h-7 w-7 rounded-md object-contain" />
+              ) : (
+                <span className="flex h-7 w-7 items-center justify-center rounded-md text-white" style={{ backgroundColor: editing?.color }}>
+                  <Building2 className="h-3.5 w-3.5" />
+                </span>
+              )}
               Pengaturan · {editing?.name}
             </DialogTitle>
             <DialogDescription>
-              Identitas kontak dipakai di kop dokumen (penawaran/invoice) & membantu identifikasi kanal masuk. Warna dipakai konsisten di seluruh aplikasi.
+              Logo tampil di kartu brand &amp; kop dokumen (penawaran/invoice); kontak membantu identifikasi kanal masuk. Warna dipakai konsisten di seluruh aplikasi.
             </DialogDescription>
           </DialogHeader>
 
@@ -313,6 +396,54 @@ export default function BrandsView() {
             <div className="grid gap-5 md:grid-cols-[1fr_240px]">
               {/* Kolom form */}
               <div className="space-y-4">
+                <div className="space-y-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Logo</p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {/* Logo persegi 1:1 — crop tengah otomatis saat diproses, tampil dalam kotak aspek 1:1 */}
+                    <div className="rounded-lg border border-slate-200 p-3">
+                      <div className="flex aspect-square w-full items-center justify-center overflow-hidden rounded-md border border-dashed border-slate-200 bg-slate-50">
+                        {form.logoSquare
+                          ? <img src={form.logoSquare} alt={`Logo persegi ${editing.name}`} className="h-full w-full object-contain" />
+                          : <ImagePlus className="h-6 w-6 text-slate-300" aria-hidden />}
+                      </div>
+                      <p className="mt-2 text-[11px] font-medium text-slate-700">Logo persegi (1:1)</p>
+                      <p className="text-[10px] leading-snug text-slate-400">Avatar brand, ikon kartu, stempel dokumen. PNG/JPG/WebP/SVG, min. 64px.</p>
+                      <div className="mt-2 flex gap-1.5">
+                        <Button type="button" variant="outline" size="sm" className="h-7 gap-1 px-2 text-[11px]" disabled={logoBusy !== null} onClick={() => fileSquareRef.current?.click()}>
+                          {logoBusy === 'square' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />} Unggah
+                        </Button>
+                        {form.logoSquare && (
+                          <Button type="button" variant="ghost" size="sm" className="h-7 gap-1 px-2 text-[11px] text-rose-600 hover:bg-rose-50 hover:text-rose-700" onClick={() => set('logoSquare', '')}>
+                            <Trash2 className="h-3 w-3" /> Hapus
+                          </Button>
+                        )}
+                      </div>
+                      <input ref={fileSquareRef} type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" className="hidden" aria-label="Unggah logo persegi" onChange={(e) => void pickLogo('square', e.target.files?.[0])} />
+                    </div>
+                    {/* Logo lebar — rasio asli dipertahankan, tampil object-contain (tidak gepeng/tertarik) */}
+                    <div className="rounded-lg border border-slate-200 p-3">
+                      <div className="flex h-[104px] w-full items-center justify-center overflow-hidden rounded-md border border-dashed border-slate-200 bg-slate-50 p-2 sm:h-[128px]">
+                        {form.logoWide
+                          ? <img src={form.logoWide} alt={`Logo lebar ${editing.name}`} className="h-full w-full object-contain" />
+                          : <ImagePlus className="h-6 w-6 text-slate-300" aria-hidden />}
+                      </div>
+                      <p className="mt-2 text-[11px] font-medium text-slate-700">Logo lebar (horizontal)</p>
+                      <p className="text-[10px] leading-snug text-slate-400">Kop surat penawaran/invoice. Rasio asli dipertahankan — tampil proporsional.</p>
+                      <div className="mt-2 flex gap-1.5">
+                        <Button type="button" variant="outline" size="sm" className="h-7 gap-1 px-2 text-[11px]" disabled={logoBusy !== null} onClick={() => fileWideRef.current?.click()}>
+                          {logoBusy === 'wide' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />} Unggah
+                        </Button>
+                        {form.logoWide && (
+                          <Button type="button" variant="ghost" size="sm" className="h-7 gap-1 px-2 text-[11px] text-rose-600 hover:bg-rose-50 hover:text-rose-700" onClick={() => set('logoWide', '')}>
+                            <Trash2 className="h-3 w-3" /> Hapus
+                          </Button>
+                        )}
+                      </div>
+                      <input ref={fileWideRef} type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" className="hidden" aria-label="Unggah logo lebar" onChange={(e) => void pickLogo('wide', e.target.files?.[0])} />
+                    </div>
+                  </div>
+                </div>
+
                 <div className="space-y-3">
                   <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Identitas</p>
                   <div className="grid gap-3 sm:grid-cols-2">
@@ -436,12 +567,17 @@ export default function BrandsView() {
                 <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
                   <div className="h-1 w-full" style={{ backgroundColor: form.color }} />
                   <div className="p-3">
-                    <div className="flex items-center gap-2">
-                      <span className="flex h-6 w-6 items-center justify-center rounded text-white" style={{ backgroundColor: form.color }}>
-                        <Building2 className="h-3 w-3" />
-                      </span>
-                      <p className="text-xs font-bold text-slate-900">{editing.name}</p>
-                    </div>
+                    {form.logoWide ? (
+                      /* Logo lebar → dipakai di kop sesuai proporsi aslinya (object-contain, rata kiri) */
+                      <img src={form.logoWide} alt="Logo lebar pada kop dokumen" className="h-10 w-auto max-w-full object-contain object-left" />
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        {form.logoSquare
+                          ? <img src={form.logoSquare} alt="Logo pada kop dokumen" className="h-6 w-6 rounded object-contain" />
+                          : <span className="flex h-6 w-6 items-center justify-center rounded text-white" style={{ backgroundColor: form.color }}><Building2 className="h-3 w-3" /></span>}
+                        <p className="text-xs font-bold text-slate-900">{editing.name}</p>
+                      </div>
+                    )}
                     {form.tagline && <p className="mt-0.5 text-[9px] italic text-slate-500">{form.tagline}</p>}
                     <div className="mt-1.5 space-y-px border-t pt-1.5 text-[8.5px] leading-relaxed text-slate-500" style={{ borderColor: `${form.color}55` }}>
                       {[form.address, form.phone, form.email, form.instagram, form.website].filter(Boolean).map((line, i) => (

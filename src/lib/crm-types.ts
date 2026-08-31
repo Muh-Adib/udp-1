@@ -43,6 +43,9 @@ export interface BrandDTO {
   phone?: string | null
   instagram?: string | null
   address?: string | null
+  /* Logo brand — dua varian data-URL (R19): persegi 1:1 & lebar horizontal utk kop */
+  logoSquare?: string | null
+  logoWide?: string | null
   primaryCurrency: string
   invoicePrefix: string
   quotationPrefix: string
@@ -373,6 +376,9 @@ export interface QuotationDTO {
   brandId: string
   brandName: string
   brandColor: string
+  /* Logo utk kop dokumen cetak (R19) — lebar dipakai di letterhead, persegi fallback stempel */
+  brandLogoSquare?: string | null
+  brandLogoWide?: string | null
   companyId: string
   companyName: string
   itemsCount: number
@@ -413,6 +419,8 @@ export interface InvoiceDTO {
   brandId: string
   brandName: string
   brandColor: string
+  brandLogoSquare?: string | null
+  brandLogoWide?: string | null
   companyId: string
   companyName: string
   payments: PaymentDTO[]

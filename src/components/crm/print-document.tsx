@@ -80,9 +80,11 @@ const INV_STATUS_LABEL: Record<string, string> = {
   UNPAID: 'Belum Dibayar', PARTIAL: 'Dibayar Sebagian', PAID: 'Lunas', CANCELLED: 'Dibatalkan',
 }
 
-function DocHeader({ brandName, brandColor, docLabel, docLabelEn, code, statusLabel, dateLabel }: {
+function DocHeader({ brandName, brandColor, brandLogoSquare, brandLogoWide, docLabel, docLabelEn, code, statusLabel, dateLabel }: {
   brandName: string
   brandColor: string
+  brandLogoSquare?: string | null
+  brandLogoWide?: string | null
   docLabel: string
   docLabelEn: string
   code: string
@@ -94,18 +96,29 @@ function DocHeader({ brandName, brandColor, docLabel, docLabelEn, code, statusLa
       {/* Bar aksen brand 4px — full-bleed ke tepi lembar (parent relative di PrintOverlay), tetap terlihat saat cetak B/W */}
       <div className="absolute inset-x-0 top-0 h-1" style={{ backgroundColor: brandColor }} aria-hidden />
       <div className="flex items-start justify-between gap-6">
-        {/* Letterhead pengirim */}
+        {/* Letterhead pengirim — R19: logo lebar mengikuti proporsi aslinya (object-contain, tidak gepeng);
+            fallback ke logo persegi, lalu ke inisial dalam kotak warna brand */}
         <div className="flex items-center gap-3">
-          <div
-            className="flex h-12 w-12 items-center justify-center rounded-xl text-base font-bold text-white"
-            style={{ backgroundColor: brandColor }}
-          >
-            {initials(brandName)}
-          </div>
-          <div>
-            <p className="text-lg font-bold leading-tight tracking-tight text-slate-900">{brandName}</p>
-            <p className="mt-0.5 text-[11px] leading-snug text-slate-500">Grupa Kreasi Media · Creative &amp; Multimedia Group</p>
-          </div>
+          {brandLogoWide ? (
+            <img src={brandLogoWide} alt={`Logo ${brandName}`} className="h-12 w-auto max-w-[88mm] object-contain object-left" />
+          ) : (
+            <>
+              {brandLogoSquare ? (
+                <img src={brandLogoSquare} alt={`Logo ${brandName}`} className="h-12 w-12 shrink-0 object-contain" />
+              ) : (
+                <div
+                  className="flex h-12 w-12 items-center justify-center rounded-xl text-base font-bold text-white"
+                  style={{ backgroundColor: brandColor }}
+                >
+                  {initials(brandName)}
+                </div>
+              )}
+              <div>
+                <p className="text-lg font-bold leading-tight tracking-tight text-slate-900">{brandName}</p>
+                <p className="mt-0.5 text-[11px] leading-snug text-slate-500">Grupa Kreasi Media · Creative &amp; Multimedia Group</p>
+              </div>
+            </>
+          )}
         </div>
         {/* Judul dokumen: label kecil, kode besar, stempel status berbingkai */}
         <div className="text-right">
@@ -173,6 +186,8 @@ export function QuotationPrintBody({ q }: { q: QuotationDetailDTO }) {
       <DocHeader
         brandName={q.brandName}
         brandColor={accent}
+        brandLogoSquare={q.brandLogoSquare}
+        brandLogoWide={q.brandLogoWide}
         docLabel="Penawaran"
         docLabelEn="Quotation"
         code={q.code}
@@ -281,6 +296,8 @@ export function InvoicePrintBody({ inv }: { inv: InvoiceDTO }) {
       <DocHeader
         brandName={inv.brandName}
         brandColor={accent}
+        brandLogoSquare={inv.brandLogoSquare}
+        brandLogoWide={inv.brandLogoWide}
         docLabel="Faktur"
         docLabelEn="Invoice"
         code={inv.code}
