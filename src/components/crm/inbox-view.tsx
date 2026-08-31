@@ -1,12 +1,13 @@
 /* ============ Lead Inbox — Omnichannel + Anti-Duplikat ============ */
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { crmApi } from './api-client'
 import { useCrmStore } from './crm-store'
+import { ChatFocusView } from './chat-focus'
 import { BrandChip, ChannelIcon, EmptyState, LoadingRows, RefreshButton, StageBadge, UserAvatar } from './shared'
 import { CHANNELS, channelMeta, formatDate, initials, PRIORITIES, timeAgo } from '@/lib/crm-constants'
-import type { ContactDTO, ConversationListItemDTO, DuplicateCandidate, InteractionDTO, OpportunityDTO, TemplateDTO } from '@/lib/crm-types'
+import type { ContactDTO, ConversationListItemDTO, DuplicateCandidate, InteractionDTO, OpportunityDTO } from '@/lib/crm-types'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -24,8 +25,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
 import {
-  AlertTriangle, Building2, Check, CheckCheck, ChevronDown, Clock, Flame, Globe, Inbox, Instagram, List, Loader2,
-  Mail, Merge, MessagesSquare, Phone, Plus, Search, Send, Users, X,
+  AlertTriangle, Building2, Flame, Globe, Inbox, List, Loader2,
+  Mail, Merge, MessagesSquare, Phone, Plus, Search, Send, X,
 } from 'lucide-react'
 
 const NONE = '__none__'
@@ -49,18 +50,6 @@ const MATCH_META: Record<string, { label: string; cls: string }> = {
 
 const dupKey = (c: DuplicateCandidate) => `${c.matchType}:${c.contactA.id}:${c.contactB.id}`
 
-/* ---------- Mode Chat: kanal composer + tipe percakapan ---------- */
-const CHAT_CHANNELS = ['WHATSAPP', 'EMAIL', 'INSTAGRAM', 'PHONE'] as const
-
-/** Ikon putih untuk bubble OUT (ChannelIcon memakai warna meta — kurang kontras di atas emerald). */
-const OUT_CHANNEL_ICON: Record<string, ReactNode> = {
-  EMAIL: <Mail className="h-3 w-3" />,
-  INSTAGRAM: <Instagram className="h-3 w-3" />,
-  PHONE: <Phone className="h-3 w-3" />,
-  WEBSITE: <Globe className="h-3 w-3" />,
-  MEETING: <Users className="h-3 w-3" />,
-}
-
 type SlaBreach = { over: number; sla: number; brandName: string }
 
 /** Percakapan = interaksi ter-filter digroup per opportunity (client-side, tanpa API baru). */
@@ -73,20 +62,6 @@ type Conversation = {
   opportunityTitle?: string | null
   messages: InteractionDTO[]
   last: InteractionDTO
-}
-
-const sameDay = (a: Date, b: Date) =>
-  a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
-
-/** Label pemisah tanggal: Hari Ini / Kemarin / tanggal singkat. */
-const dayLabel = (iso: string) => {
-  const d = new Date(iso)
-  const now = new Date()
-  const yesterday = new Date(now)
-  yesterday.setDate(now.getDate() - 1)
-  if (sameDay(d, now)) return 'Hari Ini'
-  if (sameDay(d, yesterday)) return 'Kemarin'
-  return formatDate(iso)
 }
 
 /* ---------- Chip SLA + tingkat eskalasi (solid rose + Flame bila menunggu > 2× sla) ---------- */
@@ -112,7 +87,8 @@ function SlaChip({ breach }: { breach: SlaBreach }) {
   )
 }
 
-/* ---------- Baris percakapan (mode Chat — kolom kiri desktop) ---------- */
+/* ---------- Kartu percakapan (mode Chat — R20: daftar fokus per kontak,
+   avatar warna brand, target sentuh lega, klik → buka chat full-screen) ---------- */
 function ConversationRow({ conv, active, breach, onSelect }: {
   conv: Conversation
   active: boolean
@@ -126,36 +102,47 @@ function ConversationRow({ conv, active, breach, onSelect }: {
       onClick={onSelect}
       aria-current={active ? 'true' : undefined}
       className={cn(
-        'block w-full border-l-[3px] px-3 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-slate-400/60',
-        active ? 'bg-slate-100 hover:bg-slate-100' : 'bg-white hover:bg-slate-50',
+        'flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400/60 sm:p-3.5',
+        active
+          ? 'border-slate-900/25 bg-slate-50 shadow-sm ring-1 ring-slate-900/10'
+          : 'border-slate-200 bg-white hover:border-slate-300 hover:shadow-sm',
       )}
-      style={{ borderLeftColor: conv.brandColor }}
     >
-      <div className="flex items-center gap-2">
-        <p className={cn('min-w-0 flex-1 truncate text-sm', active ? 'font-semibold text-slate-900' : 'font-medium text-slate-800')}>
-          {conv.contactName}
-        </p>
-        <span className="shrink-0 text-[10px] text-slate-400">{formatDate(conv.last.sentAt)}</span>
+      <div
+        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white"
+        style={{ backgroundColor: conv.brandColor }}
+        aria-hidden
+      >
+        {initials(conv.contactName)}
       </div>
-      <p className="truncate text-xs text-slate-500">{conv.companyName ?? 'Tanpa perusahaan'}</p>
-      <p className="mt-1 truncate text-xs text-slate-600">
-        {conv.last.direction === 'OUT' ? 'Anda: ' : ''}{conv.last.body}
-      </p>
-      <div className="mt-1.5 flex items-center gap-1.5">
-        {unanswered && (
-          <span className="inline-flex shrink-0 items-center gap-1 text-[10px] font-medium text-emerald-700">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden /> belum dibalas
-          </span>
-        )}
-        {breach && <SlaChip breach={breach} />}
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline gap-2">
+          <p className={cn('min-w-0 flex-1 truncate text-sm', active ? 'font-semibold text-slate-900' : 'font-medium text-slate-800')}>
+            {conv.contactName}
+          </p>
+          <span className="shrink-0 text-[10px] text-slate-400">{formatDate(conv.last.sentAt, true)}</span>
+        </div>
+        <p className="truncate text-xs text-slate-500">{conv.companyName ?? 'Tanpa perusahaan'}</p>
+        <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-slate-600">
+          {conv.last.direction === 'OUT' && <span className="font-medium text-emerald-600">Anda: </span>}
+          {conv.last.body}
+        </p>
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+          {unanswered && (
+            <span className="inline-flex shrink-0 items-center gap-1 text-[10px] font-medium text-emerald-700">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden /> belum dibalas
+            </span>
+          )}
+          {breach && <SlaChip breach={breach} />}
+        </div>
       </div>
     </button>
   )
 }
 
-/* ---------- Baris percakapan SERVER (mode Chat — kolom kiri desktop) ----------
+/* ---------- Kartu percakapan SERVER (mode Chat) ----------
    Sumber: GET /api/conversations (ConversationListItemDTO) — preview lastMessage dari DB
-   sehingga "Anda: …" & dot belum-dibalas persist setelah reload (fix gap kosmetik R12). */
+   sehingga "Anda: …" & dot belum-dibalas persist setelah reload. Klik → chat full-screen. */
 function ServerConversationRow({ conv, active, onSelect }: {
   conv: ConversationListItemDTO
   active: boolean
@@ -174,30 +161,40 @@ function ServerConversationRow({ conv, active, onSelect }: {
       onClick={onSelect}
       aria-current={active ? 'true' : undefined}
       className={cn(
-        'block w-full border-l-[3px] px-3 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-slate-400/60',
-        active ? 'bg-slate-100 hover:bg-slate-100' : 'bg-white hover:bg-slate-50',
+        'flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400/60 sm:p-3.5',
+        active
+          ? 'border-slate-900/25 bg-slate-50 shadow-sm ring-1 ring-slate-900/10'
+          : 'border-slate-200 bg-white hover:border-slate-300 hover:shadow-sm',
       )}
-      style={{ borderLeftColor: conv.brandColor }}
     >
-      <div className="flex items-center gap-2">
-        <p className={cn('min-w-0 flex-1 truncate text-sm', active ? 'font-semibold text-slate-900' : 'font-medium text-slate-800')}>
-          {conv.contactName}
-        </p>
-        <span className="shrink-0 text-[10px] text-slate-400">{formatDate(conv.lastSentAt, true)}</span>
+      <div
+        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white"
+        style={{ backgroundColor: conv.brandColor }}
+        aria-hidden
+      >
+        {initials(conv.contactName)}
       </div>
-      <p className="truncate text-xs text-slate-500">{conv.companyName ?? 'Tanpa perusahaan'}</p>
-      <p className="mt-1 truncate text-xs text-slate-600">
-        {conv.lastDirection === 'OUT' && <span className="font-medium text-emerald-600">Anda: </span>}
-        {conv.lastBody}
-      </p>
-      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-        {conv.unanswered && (
-          <span className="inline-flex shrink-0 items-center gap-1 text-[10px] font-medium text-emerald-700">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden /> belum dibalas
-          </span>
-        )}
-        {breach && <SlaChip breach={breach} />}
-        <StageBadge stage={conv.stage} />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline gap-2">
+          <p className={cn('min-w-0 flex-1 truncate text-sm', active ? 'font-semibold text-slate-900' : 'font-medium text-slate-800')}>
+            {conv.contactName}
+          </p>
+          <span className="shrink-0 text-[10px] text-slate-400">{formatDate(conv.lastSentAt, true)}</span>
+        </div>
+        <p className="truncate text-xs text-slate-500">{conv.companyName ?? 'Tanpa perusahaan'} · {conv.opportunityCode}</p>
+        <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-slate-600">
+          {conv.lastDirection === 'OUT' && <span className="font-medium text-emerald-600">Anda: </span>}
+          {conv.lastBody}
+        </p>
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+          {conv.unanswered && (
+            <span className="inline-flex shrink-0 items-center gap-1 text-[10px] font-medium text-emerald-700">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden /> belum dibalas
+            </span>
+          )}
+          {breach && <SlaChip breach={breach} />}
+          <StageBadge stage={conv.stage} />
+        </div>
       </div>
     </button>
   )
@@ -263,47 +260,18 @@ export default function InboxView() {
   const [wf, setWf] = useState({ name: '', email: '', whatsapp: '', brandId: '', serviceId: NONE, message: '' })
   const [submittingWf, setSubmittingWf] = useState(false)
 
-  /* ---------- Mode Chat state ---------- */
+  /* ---------- Mode Chat state (R20: daftar fokus + overlay full-screen) ---------- */
   const [view, setView] = useState<'list' | 'chat'>('list')
   const [selectedConvId, setSelectedConvId] = useState<string | null>(null)
-  const [chatBody, setChatBody] = useState('')
-  const [chatChannel, setChatChannel] = useState('WHATSAPP')
-  const [chatSending, setChatSending] = useState(false)
-  const [templates, setTemplates] = useState<TemplateDTO[] | null>(null)
-  // Balasan OUT terkirim dari composer — dipakai di DUA tempat: (1) digabung ke grouping
-  // percakapan LOKAL yang kini hanya fallback (API conversations gagal), (2) overlay
-  // optimistik di atas daftar percakapan SERVER agar preview "Anda: …" & hilangnya dot
-  // "belum dibalas" terlihat SEKETIKA setelah kirim (sebelum refetch conversations selesai).
-  // Bukan lagi sumber utama preview — daftar server (lastMessage dari DB) yang authoritative
-  // dan persist setelah reload (fix gap kosmetik R12); thread panel tetap append sendiri.
+  // Balasan OUT terkirim dari chat full-screen — overlay optimistik di atas daftar percakapan
+  // SERVER agar preview "Anda: …" & hilangnya dot "belum dibalas" terlihat SEKETIKA.
   const [sentExtras, setSentExtras] = useState<InteractionDTO[]>([])
-  // Thread penuh IN+OUT hasil GET /api/opportunities/[id]/thread — sumber panel chat.
-  // null = belum termuat utk percakapan terpilih (saat loading / gagal → fallback grouping lokal).
-  const [thread, setThread] = useState<{ oppId: string; msgs: InteractionDTO[] } | null>(null)
-  const [threadLoading, setThreadLoading] = useState(false)
   // Daftar percakapan SERVER (GET /api/conversations) — authoritative di mode Chat.
   // null = belum termuat / gagal → tampilan jatuh ke grouping lokal (view tidak pernah rusak).
   const [serverConvs, setServerConvs] = useState<ConversationListItemDTO[] | null>(null)
   const [convLoading, setConvLoading] = useState(false)
   const convLoadedRef = useRef(false)
   const convErrToastRef = useRef(0)
-  const threadRef = useRef<HTMLDivElement>(null)
-  const chatTaRef = useRef<HTMLTextAreaElement>(null)
-  // R15 UX: tombol "ke pesan terbaru" muncul saat user scroll jauh ke atas;
-  // auto-scroll hanya dipaksa saat membuka percakapan, bukan saat user sedang membaca riwayat.
-  const [showJump, setShowJump] = useState(false)
-  const stickToBottomRef = useRef(true)
-  // R15 UX: keyboard virtual mobile = Enter → baris baru (bukan kirim); desktop = Enter kirim.
-  const [isCoarse, setIsCoarse] = useState(false)
-  useEffect(() => {
-    const mq = window.matchMedia('(pointer: coarse)')
-    const update = () => setIsCoarse(mq.matches)
-    update()
-    mq.addEventListener?.('change', update)
-    return () => mq.removeEventListener?.('change', update)
-  }, [])
-  // R15 UX mobile: panel thread diref agar bisa di-scrollIntoView saat percakapan dipilih via chip
-  const threadPanelRef = useRef<HTMLDivElement>(null)
 
   /* ---------- Debounce search 400ms ---------- */
   useEffect(() => {
@@ -436,32 +404,38 @@ export default function InboxView() {
     return convs
   }, [interactions, sentExtras])
 
-  const activeConv = useMemo(
-    () => conversations.find((c) => c.opportunityId === selectedConvId) ?? null,
-    [conversations, selectedConvId],
-  )
-  const activeOpp = activeConv ? opportunities.find((o) => o.id === activeConv.opportunityId) ?? null : null
-
-  /* Baris server utk percakapan terpilih — sumber kode/stage header saat daftar server aktif */
-  const activeRow = useMemo(
-    () => serverConvs?.find((c) => c.opportunityId === selectedConvId) ?? null,
-    [serverConvs, selectedConvId],
-  )
-  const activeCode = activeRow?.opportunityCode ?? activeOpp?.code ?? null
-  const activeStage = activeRow?.stage ?? activeOpp?.stage ?? null
-
-  /* Identitas percakapan aktif — grouping lokal dulu, fallback ke baris server
-     (daftar server bisa memuat percakapan yang tidak ada di grouping lokal krn
-     /api/interactions ter-filter, mis. pesan terakhir OUT hasil kirim sendiri). */
-  const activeIdentity = useMemo<{ contactName: string; companyName: string | null; brandName: string; brandColor: string } | null>(() => {
-    if (activeConv) {
-      return { contactName: activeConv.contactName, companyName: activeConv.companyName ?? null, brandName: activeConv.brandName, brandColor: activeConv.brandColor }
+  /* ---------- Identitas percakapan utk chat full-screen ----------
+     Sumber utama: baris server (GET /api/conversations). Fallback: grouping lokal + data
+     opportunity — dipakai bila API conversations gagal sehingga fokus chat tetap terbuka. */
+  const focusConv = useMemo<ConversationListItemDTO | null>(() => {
+    if (!selectedConvId) return null
+    const serverRow = serverConvs?.find((c) => c.opportunityId === selectedConvId)
+    if (serverRow) return serverRow
+    const local = conversations.find((c) => c.opportunityId === selectedConvId)
+    if (!local) return null
+    const opp = opportunities.find((o) => o.id === selectedConvId)
+    return {
+      opportunityId: selectedConvId,
+      opportunityCode: opp?.code ?? '—',
+      opportunityTitle: opp?.title ?? local.opportunityTitle ?? '',
+      stage: opp?.stage ?? 'NEW',
+      contactName: local.contactName,
+      companyName: local.companyName ?? null,
+      brandId: opp?.sourceBrandId ?? null,
+      brandName: local.brandName,
+      brandColor: local.brandColor,
+      lastDirection: local.last.direction === 'OUT' ? 'OUT' : 'IN',
+      lastBody: local.last.body,
+      lastSentAt: local.last.sentAt,
+      lastChannel: local.last.channel,
+      messageCount: local.messages.length,
+      unanswered: local.last.direction !== 'OUT',
+      slaOverHours: slaBreaches.get(selectedConvId)?.over ?? null,
+      slaHours: null,
+      escalated: false,
+      ownerName: opp?.ownerName ?? null,
     }
-    if (activeRow) {
-      return { contactName: activeRow.contactName, companyName: activeRow.companyName ?? null, brandName: activeRow.brandName, brandColor: activeRow.brandColor }
-    }
-    return null
-  }, [activeConv, activeRow])
+  }, [selectedConvId, serverConvs, conversations, opportunities, slaBreaches])
 
   /* ---------- Daftar percakapan SERVER + overlay optimistik sentExtras ----------
      Overlay: pesan terkirim menimpa lastMessage baris terkait → preview "Anda: …" &
@@ -497,123 +471,7 @@ export default function InboxView() {
     })
   }, [chatRows, brandId, channel, unreadOnly, search])
 
-  /* Thread API (IN+OUT penuh) utk percakapan aktif; fallback = grouping lokal (inbox IN-only) */
-  const activeThread = thread && thread.oppId === selectedConvId ? thread.msgs : null
-  const activeMessages = activeThread ?? activeConv?.messages ?? []
-  const activeMsgCount = activeMessages.length
-
-  /* Muat thread penuh (semua direction, asc) saat percakapan dipilih di mode Chat —
-     fix: /api/interactions hanya IN sehingga bubble OUT hilang setelah reload.
-     Gagal → toast destructive + fallback ke grouping lokal (panel tetap terpakai). */
-  useEffect(() => {
-    if (view !== 'chat' || !selectedConvId) return
-    let cancelled = false
-    setThreadLoading(true)
-    crmApi.opportunityThread(selectedConvId)
-      .then((msgs) => { if (!cancelled) setThread({ oppId: selectedConvId, msgs }) })
-      .catch((e) => {
-        if (cancelled) return
-        setThread(null)
-        toast({
-          title: 'Gagal memuat thread percakapan',
-          description: e instanceof Error ? e.message : 'Menampilkan pesan lokal saja',
-          variant: 'destructive',
-        })
-      })
-      .finally(() => { if (!cancelled) setThreadLoading(false) })
-    return () => { cancelled = true }
-  }, [view, selectedConvId, toast])
-
-  /* Balasan cepat — fetch lazy saat mode Chat pertama dibuka; gagal/kosong = baris dihilangkan senyap */
-  useEffect(() => {
-    if (view !== 'chat' || templates !== null) return
-    let cancelled = false
-    crmApi.templates()
-      .then((t) => { if (!cancelled) setTemplates(t) })
-      .catch(() => { if (!cancelled) setTemplates([]) })
-    return () => { cancelled = true }
-  }, [view, templates])
-
-  /* Auto-scroll thread ke bawah saat membuka percakapan / ada pesan baru.
-     R15: hormati posisi baca — hanya scroll otomatis bila user memang di dekat dasar
-     (atau baru ganti percakapan); pesan baru saat user membaca riwayat tidak menculik. */
-  useEffect(() => {
-    const el = threadRef.current
-    if (!el) return
-    stickToBottomRef.current = true
-    setShowJump(false)
-    el.scrollTop = el.scrollHeight
-  }, [selectedConvId, view])
-  useEffect(() => {
-    const el = threadRef.current
-    if (!el || !stickToBottomRef.current) return
-    el.scrollTop = el.scrollHeight
-  }, [activeMsgCount])
-
-  /* R15 UX: paksa user dibawa ke panel thread saat memilih percakapan di mobile
-     (chip horizontal) — panel berada di bawah chip, tanpa ini user harus scroll manual. */
-  const selectConvMobile = useCallback((oppId: string) => {
-    setSelectedConvId(oppId)
-    if (typeof window !== 'undefined' && window.innerWidth < 1024) {
-      // delay satu frame agar panel sudah dirender sebelum di-scroll ke viewport
-      requestAnimationFrame(() => threadPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
-    }
-  }, [])
-
-  /* R15 UX: pelacak posisi scroll utk tombol "ke pesan terbaru" + sticky auto-scroll */
-  const handleThreadScroll = useCallback(() => {
-    const el = threadRef.current
-    if (!el) return
-    const gap = el.scrollHeight - el.scrollTop - el.clientHeight
-    const nearBottom = gap < 80
-    stickToBottomRef.current = nearBottom
-    setShowJump(gap > 160)
-  }, [])
-
-  const jumpToLatest = useCallback(() => {
-    const el = threadRef.current
-    if (!el) return
-    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
-    stickToBottomRef.current = true
-    setShowJump(false)
-  }, [])
-
-  /* Auto-resize composer textarea (1–4 baris, maks 120px) */
-  useEffect(() => {
-    const el = chatTaRef.current
-    if (el) {
-      el.style.height = 'auto'
-      el.style.height = `${Math.min(el.scrollHeight, 120)}px`
-    }
-  }, [chatBody])
-
-  /* ---------- Aksi: kirim pesan dari composer Chat ---------- */
-  const handleSendChat = async () => {
-    if (!selectedConvId || !chatBody.trim() || chatSending) return
-    setChatSending(true)
-    try {
-      const text = chatBody.trim()
-      const oppId = selectedConvId
-      const msg = await crmApi.addInteraction(oppId, { channel: chatChannel, direction: 'OUT', body: text })
-      // Append ke thread ter-fetch (panel chat merender API thread → bubble langsung tampil dan
-      // persist setelah reload krn tersimpan di DB) + ke sentExtras utk overlay optimistik daftar
-      // server (preview "Anda: …" & dot belum-dibalas hilang seketika). loadInteractions +
-      // loadConversations di-refresh agar list server, flag replied, chip SLA tetap sinkron.
-      setThread((prev) => (prev && prev.oppId === oppId ? { ...prev, msgs: [...prev.msgs, msg] } : prev))
-      setSentExtras((prev) => [...prev, msg])
-      setChatBody('')
-      toast({ title: 'Pesan terkirim — tercatat di percakapan', description: `Kepada ${msg.contactName} via ${channelMeta(chatChannel).label}.` })
-      await Promise.all([loadInteractions(), loadConversations({ silent: true })])
-    } catch (e) {
-      toast({
-        title: 'Gagal mengirim pesan',
-        description: e instanceof Error ? e.message : 'Coba lagi',
-        variant: 'destructive',
-      })
-    } finally {
-      setChatSending(false)
-    }
-  }
+  /* Thread & composer kini hidup di chat-focus.tsx (overlay full-screen R20).
 
   /* ---------- Aksi: reply ---------- */
   const openReply = (m: InteractionDTO) => {
@@ -913,7 +771,7 @@ export default function InboxView() {
               ? 'Memuat…'
               : view === 'chat'
                 ? serverConvs
-                  ? `${visibleChatRows.length} percakapan · ${visibleChatRows.filter((c) => c.unanswered).length} belum dibalas`
+                  ? `${visibleChatRows.length} percakapan · ${visibleChatRows.filter((c) => c.unanswered).length} belum dibalas · klik untuk fokus layar penuh`
                   : `${conversations.length} percakapan · ${unreadCount} belum dibalas`
                 : `${interactions.length} pesan · ${unreadCount} belum dibalas`}
           </CardDescription>
@@ -950,290 +808,30 @@ export default function InboxView() {
                 }
               />
             ) : (
-              <div className="flex flex-col gap-3 lg:h-[65vh] lg:flex-row">
-                {/* Daftar percakapan — kolom kiri (desktop) */}
-                <div className={cn('hidden w-80 shrink-0 overflow-y-auto rounded-xl border border-slate-200 bg-white lg:block', SCROLLBAR)} aria-label="Daftar percakapan">
-                  <div className="divide-y divide-slate-100">
-                    {serverConvs
-                      ? visibleChatRows.map((c) => (
-                          <ServerConversationRow
-                            key={c.opportunityId}
-                            conv={c}
-                            active={c.opportunityId === selectedConvId}
-                            onSelect={() => setSelectedConvId(c.opportunityId)}
-                          />
-                        ))
-                      : conversations.map((c) => (
-                          <ConversationRow
-                            key={c.opportunityId}
-                            conv={c}
-                            active={c.opportunityId === selectedConvId}
-                            breach={slaBreaches.get(c.opportunityId)}
-                            onSelect={() => setSelectedConvId(c.opportunityId)}
-                          />
-                        ))}
-                  </div>
-                </div>
-
-                {/* Pemilih percakapan — chip horizontal (mobile) */}
-                <div className="flex gap-1.5 overflow-x-auto pb-1 lg:hidden" role="tablist" aria-label="Pilih percakapan">
-                  {serverConvs
-                    ? visibleChatRows.map((c) => (
-                        <button
-                          key={c.opportunityId}
-                          type="button"
-                          role="tab"
-                          aria-selected={c.opportunityId === selectedConvId}
-                          onClick={() => selectConvMobile(c.opportunityId)}
-                          className={cn(
-                            'flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400/60',
-                            c.opportunityId === selectedConvId ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50',
-                          )}
-                        >
-                          {c.unanswered && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden />}
-                          {c.contactName}
-                        </button>
-                      ))
-                    : conversations.map((c) => (
-                        <button
-                          key={c.opportunityId}
-                          type="button"
-                          role="tab"
-                          aria-selected={c.opportunityId === selectedConvId}
-                          onClick={() => selectConvMobile(c.opportunityId)}
-                          className={cn(
-                            'flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400/60',
-                            c.opportunityId === selectedConvId ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50',
-                          )}
-                        >
-                          {c.last.direction === 'IN' && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden />}
-                          {c.contactName}
-                        </button>
-                      ))}
-                </div>
-
-                {/* Panel thread — R15: tinggi terprediksi di mobile (h-[65vh], shrink-0 agar tidak collapse oleh flex basis-0)
-                    + ref utk scrollIntoView saat chip dipilih */}
-                <div ref={threadPanelRef} className="flex h-[65vh] shrink-0 basis-auto flex-col overflow-hidden rounded-xl border border-slate-200 bg-slate-50/60 lg:h-auto lg:min-h-0 lg:flex-1 lg:shrink lg:basis-0">
-                  {!selectedConvId || !activeIdentity ? (
-                    <div className="flex flex-1 items-center justify-center p-4">
-                      <EmptyState
-                        icon={<MessagesSquare className="h-6 w-6" />}
-                        title="Pilih percakapan untuk mulai membalas"
-                        description="Pilih salah satu percakapan untuk melihat timeline pesan dan mengirim balasan dari composer di bawah."
-                      />
-                    </div>
-                  ) : (
-                    <>
-                      {/* Header thread (sticky) — R15: avatar memakai warna brand + badge status percakapan */}
-                      <div className="flex shrink-0 items-center gap-2.5 border-b border-slate-200 bg-white px-3 py-2.5 sm:px-4">
-                        <div
-                          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-white ring-2 ring-white"
-                          style={{ backgroundColor: activeIdentity.brandColor }}
-                          aria-hidden
-                        >
-                          {initials(activeIdentity.contactName)}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-semibold text-slate-900">{activeIdentity.contactName}</p>
-                          <div className="flex min-w-0 items-center gap-1.5">
-                            {activeIdentity.companyName && <span className="truncate text-xs text-slate-500">{activeIdentity.companyName} ·</span>}
-                            <BrandChip name={activeIdentity.brandName} color={activeIdentity.brandColor} size="xs" />
-                            {activeRow?.unanswered && (
-                              <Badge variant="outline" className="hidden border-amber-200 bg-amber-50 px-1.5 py-px text-[9px] font-semibold text-amber-700 sm:inline-flex">Belum dibalas</Badge>
-                            )}
-                            {activeRow?.escalated && (
-                              <Badge variant="outline" className="hidden border-rose-200 bg-rose-50 px-1.5 py-px text-[9px] font-semibold text-rose-700 sm:inline-flex">SLA terlampaui</Badge>
-                            )}
-                          </div>
-                        </div>
-                        {(activeCode || activeStage) && (
-                          <div className="hidden shrink-0 items-center gap-2 sm:flex">
-                            {activeCode && (
-                              <button
-                                type="button"
-                                onClick={() => selectedConvId && openOpportunity(selectedConvId)}
-                                title="Buka opportunity terkait"
-                                className="font-mono text-[10px] text-slate-400 hover:text-teal-700 hover:underline"
-                              >
-                                {activeCode}
-                              </button>
-                            )}
-                            {activeStage && <StageBadge stage={activeStage} />}
-                          </div>
-                        )}
+              /* R20: daftar fokus per kontak — kartu lega, klik membuka chat FULL-SCREEN.
+                 Panel inline dua kolom digantikan overlay ChatFocusView agar marketing
+                 bebas distraksi saat follow-up. */
+              <div className={cn('mx-auto max-w-3xl space-y-2.5', SCROLLBAR)} role="list" aria-label="Daftar percakapan">
+                {serverConvs
+                  ? visibleChatRows.map((c) => (
+                      <div key={c.opportunityId} role="listitem">
+                        <ServerConversationRow
+                          conv={c}
+                          active={c.opportunityId === selectedConvId}
+                          onSelect={() => setSelectedConvId(c.opportunityId)}
+                        />
                       </div>
-
-                      {/* Timeline pesan — sumber thread API (IN+OUT); pulse halus saat thread dimuat pertama kali.
-                          R15: aria-live utk screen reader + onScroll pelacak posisi + grouping bubble. */}
-                      <div className="relative min-h-0 flex-1">
-                        <div
-                          ref={threadRef}
-                          role="log"
-                          aria-label="Timeline pesan"
-                          aria-live="polite"
-                          onScroll={handleThreadScroll}
-                          className={cn('absolute inset-0 overflow-y-auto p-3 sm:p-4', SCROLLBAR)}
-                        >
-                          {threadLoading && !activeThread ? (
-                            <div className="space-y-2.5" aria-hidden>
-                              {[0, 1, 2].map((i) => (
-                                <div key={i} className={cn('flex', i % 2 === 0 ? 'justify-start' : 'justify-end')}>
-                                  <div
-                                    className="h-9 w-2/3 max-w-[260px] animate-pulse rounded-2xl bg-slate-200/70"
-                                    style={{ animationDelay: `${i * 120}ms` }}
-                                  />
-                                </div>
-                              ))}
-                            </div>
-                          ) : activeMessages.length === 0 ? (
-                            <div className="flex h-full items-center justify-center">
-                              <EmptyState
-                                icon={<MessagesSquare className="h-6 w-6" />}
-                                title="Belum ada pesan"
-                                description="Mulai percakapan dengan mengirim balasan dari kolom di bawah."
-                              />
-                            </div>
-                          ) : activeMessages.map((m, i) => {
-                            const prev = i > 0 ? activeMessages[i - 1] : null
-                            const next = i < activeMessages.length - 1 ? activeMessages[i + 1] : null
-                            const showDate = !prev || !sameDay(new Date(prev.sentAt), new Date(m.sentAt))
-                            const isIn = m.direction !== 'OUT'
-                            /* R15 grouping: pesan berurutan arah & kanal sama (≤5 menit) dibubungkan
-                               rapat — margin menyempit & ekor bubble hanya di pesan pertama grup. */
-                            const near = (a: InteractionDTO | null, b: InteractionDTO | null) =>
-                              !!a && !!b && a.direction === b.direction && a.channel === b.channel
-                              && sameDay(new Date(a.sentAt), new Date(b.sentAt))
-                              && Math.abs(new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime()) < 5 * 60_000
-                            const groupedPrev = !showDate && near(prev, m)
-                            const groupedNext = !!(next && near(m, next))
-                            return (
-                              <div key={m.id} className={showDate ? 'mt-1.5' : groupedPrev ? 'mt-0.5' : 'mt-2'}>
-                                {showDate && (
-                                  <div className="mb-1.5 flex items-center gap-2">
-                                    <span className="h-px flex-1 bg-slate-200" aria-hidden />
-                                    <span className="rounded-full bg-slate-200/80 px-3 py-0.5 text-[10px] font-semibold text-slate-600">{dayLabel(m.sentAt)}</span>
-                                    <span className="h-px flex-1 bg-slate-200" aria-hidden />
-                                  </div>
-                                )}
-                                <div className={cn('flex', isIn ? 'justify-start' : 'justify-end')}>
-                                  <div
-                                    className={cn(
-                                      'max-w-[85%] rounded-2xl px-3 py-2 shadow-sm sm:max-w-[75%]',
-                                      isIn
-                                        ? cn('border border-slate-200 bg-white text-slate-800', groupedPrev ? 'rounded-tl-md' : 'rounded-tl-sm', groupedNext ? 'rounded-bl-md' : 'rounded-bl-2xl')
-                                        : cn('bg-emerald-600 text-white', groupedPrev ? 'rounded-tr-md' : 'rounded-tr-sm', groupedNext ? 'rounded-br-md' : 'rounded-br-2xl'),
-                                    )}
-                                  >
-                                    {m.subject && (
-                                      <p className={cn('mb-0.5 break-words text-xs font-bold', isIn ? 'text-slate-900' : 'text-white')}>{m.subject}</p>
-                                    )}
-                                    <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{m.body}</p>
-                                    <div className={cn('mt-1 flex items-center gap-1.5 text-[10px]', isIn ? 'text-slate-400' : 'text-emerald-100')}>
-                                      {m.channel !== 'WHATSAPP' && (
-                                        <span className={cn('inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-px font-medium', isIn ? 'bg-slate-100 text-slate-500' : 'bg-white/15 text-white')}>
-                                          {isIn ? <ChannelIcon channel={m.channel} className="h-3 w-3" /> : (OUT_CHANNEL_ICON[m.channel] ?? <Globe className="h-3 w-3" />)}
-                                          {channelMeta(m.channel).label}
-                                        </span>
-                                      )}
-                                      <span className="ml-auto shrink-0 tabular-nums" title={new Date(m.sentAt).toLocaleString('id-ID', { dateStyle: 'full', timeStyle: 'short' })}>
-                                        {formatDate(m.sentAt, true)}
-                                      </span>
-                                      {!isIn && (
-                                        m.status === 'READ'
-                                          ? <CheckCheck className="h-3.5 w-3.5 shrink-0" aria-label="Dibaca" />
-                                          : m.status === 'SENT'
-                                            ? <Check className="h-3.5 w-3.5 shrink-0" aria-label="Terkirim" />
-                                            : <Clock className="h-3.5 w-3.5 shrink-0" aria-label={m.status || 'Menunggu'} />
-                                      )}
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                            )
-                          })}
-                        </div>
-                        {/* R15: tombol “ke pesan terbaru” — muncul saat user menjauh dari dasar timeline */}
-                        {showJump && (
-                          <button
-                            type="button"
-                            onClick={jumpToLatest}
-                            className="absolute bottom-3 right-4 flex h-9 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 text-[11px] font-medium text-slate-600 shadow-md transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
-                          >
-                            <ChevronDown className="h-3.5 w-3.5" /> Ke pesan terbaru
-                          </button>
-                        )}
+                    ))
+                  : conversations.map((c) => (
+                      <div key={c.opportunityId} role="listitem">
+                        <ConversationRow
+                          conv={c}
+                          active={c.opportunityId === selectedConvId}
+                          breach={slaBreaches.get(c.opportunityId)}
+                          onSelect={() => setSelectedConvId(c.opportunityId)}
+                        />
                       </div>
-
-                      {/* Composer — R15: aman utk keyboard mobile (safe-area), Enter kirim di desktop,
-                          tombol kanal ringkas di mobile, hint keyboard desktop-only */}
-                      <div className="shrink-0 border-t border-slate-200 bg-white px-3 pb-[max(0.625rem,env(safe-area-inset-bottom))] pt-2.5 sm:px-4 sm:pb-2.5">
-                        {templates && templates.length > 0 && (
-                          <div className="mb-2 flex items-center gap-1.5 overflow-x-auto pb-0.5 sm:flex-wrap sm:overflow-visible">
-                            <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Balasan cepat</span>
-                            {templates.slice(0, 6).map((t) => (
-                              <button
-                                key={t.id}
-                                type="button"
-                                title={t.body}
-                                onClick={() => setChatBody(t.body)}
-                                className="max-w-[220px] shrink-0 truncate rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-600 transition-colors hover:border-slate-300 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400/60"
-                              >
-                                {t.name}
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                        <div className="flex items-end gap-2">
-                          <Textarea
-                            ref={chatTaRef}
-                            value={chatBody}
-                            onChange={(e) => setChatBody(e.target.value)}
-                            onKeyDown={(e) => {
-                              if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-                                e.preventDefault()
-                                void handleSendChat()
-                                return
-                              }
-                              /* Enter kirim hanya di pointer halus (mouse/trackpad); mobile = newline */
-                              if (e.key === 'Enter' && !e.shiftKey && !isCoarse && !e.nativeEvent.isComposing) {
-                                e.preventDefault()
-                                void handleSendChat()
-                              }
-                            }}
-                            placeholder={`Tulis pesan untuk ${activeIdentity.contactName}…`}
-                            rows={1}
-                            className="min-h-[40px] max-h-[120px] flex-1 resize-none py-2"
-                            aria-label="Tulis pesan balasan"
-                          />
-                          <Select value={chatChannel} onValueChange={setChatChannel}>
-                            <SelectTrigger aria-label="Kanal pengiriman" className="h-9 w-[104px] shrink-0 text-xs sm:w-[124px] sm:text-sm"><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                              {CHAT_CHANNELS.map((c) => (
-                                <SelectItem key={c} value={c}>{channelMeta(c).label}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          <Button
-                            onClick={() => void handleSendChat()}
-                            disabled={chatSending || !chatBody.trim()}
-                            className="h-9 shrink-0 gap-1.5 bg-emerald-600 px-3 text-white hover:bg-emerald-700"
-                            aria-label="Kirim pesan"
-                          >
-                            {chatSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                            <span className="hidden sm:inline">Kirim</span>
-                          </Button>
-                        </div>
-                        {!isCoarse && (
-                          <p className="mt-1 text-right text-[10px] text-slate-400">
-                            <kbd className="rounded border border-slate-200 bg-slate-50 px-1 font-sans">Enter</kbd> kirim ·
-                            <kbd className="ml-0.5 rounded border border-slate-200 bg-slate-50 px-1 font-sans">Shift+Enter</kbd> baris baru
-                          </p>
-                        )}
-                      </div>
-                    </>
-                  )}
-                </div>
+                    ))}
               </div>
             )
           ) : loading && interactions.length === 0 ? (
@@ -1333,6 +931,28 @@ export default function InboxView() {
           )}
         </CardContent>
       </Card>
+
+      {/* ===== Chat Fokus Full-Screen (R20) =====
+          Overlay layar penuh per kontak: timeline lega + panel konteks lead +
+          aksi cepat (Penawaran / Brief / Assign Tugas) langsung dari percakapan. */}
+      {view === 'chat' && focusConv && (
+        <ChatFocusView
+          conv={focusConv}
+          onClose={() => setSelectedConvId(null)}
+          onMessageSent={(m) => {
+            setSentExtras((prev) => [...prev, m])
+            void loadConversations({ silent: true })
+          }}
+          onActivity={() => {
+            void loadInteractions()
+            void loadConversations({ silent: true })
+          }}
+          onOpenOpportunity={(id) => {
+            setSelectedConvId(null)
+            openOpportunity(id)
+          }}
+        />
+      )}
 
       {/* ===== Dialog Reply ===== */}
       <Dialog open={!!replyTarget} onOpenChange={(o) => { if (!o) setReplyTarget(null) }}>
