@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { crmApi, estimationApi, financeApi, type QuotationItemInput } from './api-client'
+import { ConversationList } from './conversation-list'
 import { BrandChip, ChannelIcon, EmptyState, StageBadge, TempBadge, UserAvatar } from './shared'
 import { PRIORITIES, TASK_TYPES, channelMeta, daysUntil, formatDate, formatMoney, initials, temperatureMeta } from '@/lib/crm-constants'
 import type { BriefDTO, ConversationListItemDTO, InteractionDTO, OpportunityDetailDTO, QuotationDTO, TaskDTO, UserDTO } from '@/lib/crm-types'
@@ -26,8 +27,8 @@ import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
 import {
   AlertCircle, ArrowLeft, CalendarClock, Check, CheckCheck, ChevronDown, ClipboardList, Clock,
-  FileBarChart2, Globe, Instagram, ListChecks, Loader2, Mail, Phone, Plus, Receipt, Send,
-  Target, Trash2, User, X,
+  FileBarChart2, Globe, Instagram, ListChecks, Loader2, Mail, MessagesSquare, Phone, Plus,
+  Receipt, Send, Target, Trash2, User, X,
 } from 'lucide-react'
 
 const CHAT_CHANNELS = ['WHATSAPP', 'EMAIL', 'INSTAGRAM', 'PHONE'] as const
@@ -713,8 +714,14 @@ const isTaskOverdue = (iso?: string | null) => {
 /* ================================================================== */
 /* View utama: overlay full-screen                                     */
 /* ================================================================== */
-export function ChatFocusView({ conv, onClose, onMessageSent, onActivity, onOpenOpportunity }: {
+export function ChatFocusView({ conv, conversations, activeConvId, onSelectConversation, listToolbar, onClose, onMessageSent, onActivity, onOpenOpportunity }: {
   conv: ConversationListItemDTO
+  /** Daftar percakapan utk switcher (sidebar desktop ≥xl / drawer mobile <xl) — opsional */
+  conversations?: ConversationListItemDTO[]
+  activeConvId?: string | null
+  onSelectConversation?: (id: string) => void
+  /** Slot toolbar filter bersama dari inbox-view (search, chip brand, kanal, belum-dibalas) */
+  listToolbar?: React.ReactNode
   onClose: () => void
   onMessageSent: (m: InteractionDTO) => void
   onActivity: () => void
@@ -731,6 +738,8 @@ export function ChatFocusView({ conv, onClose, onMessageSent, onActivity, onOpen
   const [chatBody, setChatBody] = useState('')
   const [chatChannel, setChatChannel] = useState('WHATSAPP')
   const [chatSending, setChatSending] = useState(false)
+  // Draft per percakapan — berganti kontak via switcher tidak menghilangkan ketikan
+  const draftsRef = useRef(new Map<string, string>())
   const [templates, setTemplates] = useState<React.ComponentState>(null)
   const [isCoarse, setIsCoarse] = useState(false)
 
@@ -743,6 +752,7 @@ export function ChatFocusView({ conv, onClose, onMessageSent, onActivity, onOpen
 
   /* ---------- UI state ---------- */
   const [infoOpen, setInfoOpen] = useState(false)
+  const [switcherOpen, setSwitcherOpen] = useState(false)
   const [showJump, setShowJump] = useState(false)
   const stickToBottomRef = useRef(true)
   const threadRef = useRef<HTMLDivElement>(null)
@@ -771,6 +781,7 @@ export function ChatFocusView({ conv, onClose, onMessageSent, onActivity, onOpen
     const target = e.target as Node | null
     if (target && containerRef.current && !containerRef.current.contains(target)) return
     e.stopPropagation()
+    if (switcherOpen) { setSwitcherOpen(false); return }
     if (infoOpen) { setInfoOpen(false); return }
     onClose()
   }
@@ -779,10 +790,15 @@ export function ChatFocusView({ conv, onClose, onMessageSent, onActivity, onOpen
      (trigger diklik secara programatik tidak memindahkan fokus). Kembalikan fokus
      ke container agar ESC "tutup view fokus" tetap bekerja setelah dialog ditutup. */
   useEffect(() => {
-    if (!taskOpen && !quoOpen && !briefOpen && !infoOpen) {
+    if (!taskOpen && !quoOpen && !briefOpen && !infoOpen && !switcherOpen) {
       containerRef.current?.focus({ preventScroll: true })
     }
-  }, [taskOpen, quoOpen, briefOpen, infoOpen])
+  }, [taskOpen, quoOpen, briefOpen, infoOpen, switcherOpen])
+
+  /* Pindah percakapan (switcher) → pulihkan draft milik percakapan tsb */
+  useEffect(() => {
+    setChatBody(draftsRef.current.get(oppId) ?? '')
+  }, [oppId])
 
   /* ---------- Keyboard semantik: coarse pointer = Enter newline ---------- */
   useEffect(() => {
@@ -896,6 +912,7 @@ export function ChatFocusView({ conv, onClose, onMessageSent, onActivity, onOpen
       const msg = await crmApi.addInteraction(oppId, { channel: chatChannel, direction: 'OUT', body: chatBody.trim() })
       setThread((prev) => (prev ? [...prev, msg] : [msg]))
       setChatBody('')
+      draftsRef.current.set(oppId, '')
       onMessageSent(msg)
       toast({ title: 'Pesan terkirim', description: `Kepada ${conv.contactName} via ${channelMeta(chatChannel).label}.` })
     } catch (e) {
@@ -951,6 +968,18 @@ export function ChatFocusView({ conv, onClose, onMessageSent, onActivity, onOpen
         <Button variant="ghost" size="icon" onClick={onClose} aria-label="Kembali ke daftar percakapan" className="h-9 w-9 shrink-0">
           <ArrowLeft className="h-5 w-5" />
         </Button>
+        {onSelectConversation && (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setSwitcherOpen(true)}
+            aria-label="Ganti percakapan"
+            title="Ganti percakapan"
+            className="h-9 w-9 shrink-0 xl:hidden"
+          >
+            <MessagesSquare className="h-5 w-5" />
+          </Button>
+        )}
         <div
           className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white ring-2 ring-white"
           style={{ backgroundColor: conv.brandColor }}
@@ -987,8 +1016,27 @@ export function ChatFocusView({ conv, onClose, onMessageSent, onActivity, onOpen
         </Button>
       </header>
 
-      {/* ===== Body: chat + sidebar ===== */}
+      {/* ===== Body: switcher percakapan + chat + sidebar ===== */}
       <div className="flex min-h-0 flex-1">
+        {/* Daftar percakapan — switcher desktop (≥xl): berganti kontak tanpa keluar dari mode fokus */}
+        {onSelectConversation && (
+          <aside className="hidden w-[300px] shrink-0 flex-col border-r border-slate-200 bg-white xl:flex" aria-label="Daftar percakapan">
+            <div className="flex shrink-0 items-center gap-2 border-b border-slate-200 px-3.5 py-2.5">
+              <MessagesSquare className="h-4 w-4 shrink-0 text-teal-600" aria-hidden />
+              <h2 className="text-sm font-semibold text-slate-900">Percakapan</h2>
+              <span className="ml-auto shrink-0 text-[10px] tabular-nums text-slate-400">{conversations?.length ?? 0}</span>
+            </div>
+            <ConversationList
+              rows={conversations ?? []}
+              activeId={activeConvId}
+              onSelect={onSelectConversation}
+              toolbar={listToolbar}
+              loading={conversations === undefined}
+              ariaLabel="Ganti percakapan"
+            />
+          </aside>
+        )}
+
         {/* Kolom chat */}
         <section className="flex min-w-0 flex-1 flex-col">
           {/* Timeline */}
@@ -1126,7 +1174,10 @@ export function ChatFocusView({ conv, onClose, onMessageSent, onActivity, onOpen
                       key={t.id}
                       type="button"
                       title={t.body}
-                      onClick={() => setChatBody(t.body)}
+                      onClick={() => {
+                        setChatBody(t.body)
+                        draftsRef.current.set(oppId, t.body)
+                      }}
                       className="max-w-[220px] shrink-0 truncate rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-600 transition-colors hover:border-slate-300 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400/60"
                     >
                       {t.name}
@@ -1138,7 +1189,11 @@ export function ChatFocusView({ conv, onClose, onMessageSent, onActivity, onOpen
                 <Textarea
                   ref={chatTaRef}
                   value={chatBody}
-                  onChange={(e) => setChatBody(e.target.value)}
+                  onChange={(e) => {
+                    const v = e.target.value
+                    setChatBody(v)
+                    draftsRef.current.set(oppId, v)
+                  }}
                   onKeyDown={(e) => {
                     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
                       e.preventDefault()
@@ -1200,6 +1255,27 @@ export function ChatFocusView({ conv, onClose, onMessageSent, onActivity, onOpen
           />
         </aside>
       </div>
+
+      {/* Drawer daftar percakapan — switcher mobile/tablet (<xl) */}
+      {switcherOpen && onSelectConversation && (
+        <div className="fixed inset-0 z-[60] flex flex-col bg-white xl:hidden" role="dialog" aria-modal="true" aria-label="Ganti percakapan">
+          <div className="flex shrink-0 items-center gap-2 border-b border-slate-200 bg-white px-3 py-2.5">
+            <Button variant="ghost" size="icon" onClick={() => setSwitcherOpen(false)} aria-label="Tutup daftar percakapan" className="h-9 w-9 shrink-0">
+              <X className="h-5 w-5" />
+            </Button>
+            <h2 className="text-sm font-semibold text-slate-900">Percakapan</h2>
+            <span className="ml-auto shrink-0 text-[10px] tabular-nums text-slate-400">{conversations?.length ?? 0}</span>
+          </div>
+          <ConversationList
+            rows={conversations ?? []}
+            activeId={activeConvId}
+            onSelect={(id) => { onSelectConversation(id); setSwitcherOpen(false) }}
+            toolbar={listToolbar}
+            loading={conversations === undefined}
+            ariaLabel="Daftar percakapan"
+          />
+        </div>
+      )}
 
       {/* Sheet Info (mobile/tablet) */}
       {infoOpen && (

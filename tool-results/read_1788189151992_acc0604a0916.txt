@@ -1,0 +1,1277 @@
+     1→/* ============ Lead Inbox — Omnichannel + Anti-Duplikat ============ */
+     2→'use client'
+     3→
+     4→import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+     5→import { crmApi } from './api-client'
+     6→import { useCrmStore } from './crm-store'
+     7→import { ChatFocusView } from './chat-focus'
+     8→import { BrandChip, ChannelIcon, EmptyState, LoadingRows, RefreshButton, StageBadge, UserAvatar } from './shared'
+     9→import { CHANNELS, channelMeta, formatDate, initials, PRIORITIES, timeAgo } from '@/lib/crm-constants'
+    10→import type { ContactDTO, ConversationListItemDTO, DuplicateCandidate, InteractionDTO, OpportunityDTO } from '@/lib/crm-types'
+    11→import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+    12→import { Badge } from '@/components/ui/badge'
+    13→import { Button } from '@/components/ui/button'
+    14→import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+    15→import {
+    16→  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+    17→} from '@/components/ui/dialog'
+    18→import { Input } from '@/components/ui/input'
+    19→import { Label } from '@/components/ui/label'
+    20→import {
+    21→  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+    22→} from '@/components/ui/select'
+    23→import { Switch } from '@/components/ui/switch'
+    24→import { Textarea } from '@/components/ui/textarea'
+    25→import { useToast } from '@/hooks/use-toast'
+    26→import { cn } from '@/lib/utils'
+    27→import {
+    28→  AlertTriangle, Building2, Flame, Globe, Inbox, List, Loader2,
+    29→  Mail, Merge, MessagesSquare, Phone, Plus, Search, Send, X,
+    30→} from 'lucide-react'
+    31→
+    32→const NONE = '__none__'
+    33→const ALL = '__all__'
+    34→
+    35→/* Mapping channel → leadSource untuk create opportunity */
+    36→const CHANNEL_TO_LEAD_SOURCE: Record<string, string> = {
+    37→  WHATSAPP: 'WHATSAPP',
+    38→  EMAIL: 'EMAIL',
+    39→  INSTAGRAM: 'INSTAGRAM',
+    40→  WEBSITE: 'WEBSITE',
+    41→  PHONE: 'COLD_CALL',
+    42→  MEETING: 'REFERRAL',
+    43→}
+    44→
+    45→const MATCH_META: Record<string, { label: string; cls: string }> = {
+    46→  EMAIL: { label: 'Email', cls: 'border-amber-200 bg-amber-50 text-amber-700' },
+    47→  WHATSAPP: { label: 'WhatsApp', cls: 'border-emerald-200 bg-emerald-50 text-emerald-700' },
+    48→  PHONE: { label: 'Telepon', cls: 'border-orange-200 bg-orange-50 text-orange-700' },
+    49→}
+    50→
+    51→const dupKey = (c: DuplicateCandidate) => `${c.matchType}:${c.contactA.id}:${c.contactB.id}`
+    52→
+    53→type SlaBreach = { over: number; sla: number; brandName: string }
+    54→
+    55→/** Percakapan = interaksi ter-filter digroup per opportunity (client-side, tanpa API baru). */
+    56→type Conversation = {
+    57→  opportunityId: string
+    58→  contactName: string
+    59→  companyName?: string | null
+    60→  brandName: string
+    61→  brandColor: string
+    62→  opportunityTitle?: string | null
+    63→  messages: InteractionDTO[]
+    64→  last: InteractionDTO
+    65→}
+    66→
+    67→/* ---------- Chip SLA + tingkat eskalasi (solid rose + Flame bila menunggu > 2× sla) ---------- */
+    68→function SlaChip({ breach }: { breach: SlaBreach }) {
+    69→  const escalated = breach.over > breach.sla
+    70→  if (escalated) {
+    71→    return (
+    72→      <span
+    73→        title={`Melewati ${breach.sla * 2} jam — eskalasi ke pemberi lead`}
+    74→        className="inline-flex shrink-0 items-center gap-1 rounded-full bg-rose-600 px-1.5 py-0.5 text-[10px] font-semibold text-white"
+    75→      >
+    76→        <Flame className="h-3 w-3" /> ESKALASI +{breach.over}j
+    77→      </span>
+    78→    )
+    79→  }
+    80→  return (
+    81→    <span
+    82→      title={`Melewati SLA respons ${breach.brandName} (${breach.sla} jam)`}
+    83→      className="shrink-0 rounded-full bg-rose-50 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700"
+    84→    >
+    85→      SLA +{breach.over}j
+    86→    </span>
+    87→  )
+    88→}
+    89→
+    90→/* ---------- Kartu percakapan (mode Chat — R20: daftar fokus per kontak,
+    91→   avatar warna brand, target sentuh lega, klik → buka chat full-screen) ---------- */
+    92→function ConversationRow({ conv, active, breach, onSelect }: {
+    93→  conv: Conversation
+    94→  active: boolean
+    95→  breach?: SlaBreach
+    96→  onSelect: () => void
+    97→}) {
+    98→  const unanswered = conv.last.direction === 'IN'
+    99→  return (
+   100→    <button
+   101→      type="button"
+   102→      onClick={onSelect}
+   103→      aria-current={active ? 'true' : undefined}
+   104→      className={cn(
+   105→        'flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400/60 sm:p-3.5',
+   106→        active
+   107→          ? 'border-slate-900/25 bg-slate-50 shadow-sm ring-1 ring-slate-900/10'
+   108→          : 'border-slate-200 bg-white hover:border-slate-300 hover:shadow-sm',
+   109→      )}
+   110→    >
+   111→      <div
+   112→        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white"
+   113→        style={{ backgroundColor: conv.brandColor }}
+   114→        aria-hidden
+   115→      >
+   116→        {initials(conv.contactName)}
+   117→      </div>
+   118→      <div className="min-w-0 flex-1">
+   119→        <div className="flex items-baseline gap-2">
+   120→          <p className={cn('min-w-0 flex-1 truncate text-sm', active ? 'font-semibold text-slate-900' : 'font-medium text-slate-800')}>
+   121→            {conv.contactName}
+   122→          </p>
+   123→          <span className="shrink-0 text-[10px] text-slate-400">{formatDate(conv.last.sentAt, true)}</span>
+   124→        </div>
+   125→        <p className="truncate text-xs text-slate-500">{conv.companyName ?? 'Tanpa perusahaan'}</p>
+   126→        <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-slate-600">
+   127→          {conv.last.direction === 'OUT' && <span className="font-medium text-emerald-600">Anda: </span>}
+   128→          {conv.last.body}
+   129→        </p>
+   130→        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+   131→          {unanswered && (
+   132→            <span className="inline-flex shrink-0 items-center gap-1 text-[10px] font-medium text-emerald-700">
+   133→              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden /> belum dibalas
+   134→            </span>
+   135→          )}
+   136→          {breach && <SlaChip breach={breach} />}
+   137→        </div>
+   138→      </div>
+   139→    </button>
+   140→  )
+   141→}
+   142→
+   143→/* ---------- Kartu percakapan SERVER (mode Chat) ----------
+   144→   Sumber: GET /api/conversations (ConversationListItemDTO) — preview lastMessage dari DB
+   145→   sehingga "Anda: …" & dot belum-dibalas persist setelah reload. Klik → chat full-screen. */
+   146→function ServerConversationRow({ conv, active, onSelect }: {
+   147→  conv: ConversationListItemDTO
+   148→  active: boolean
+   149→  onSelect: () => void
+   150→}) {
+   151→  // Chip SLA memakai renderer existing (SlaBreach): escalated server = over > sla (2× SLA) — sama dgn formula SlaChip.
+   152→  // Won/Lost = pertanyaan SLA tak relevan lagi → chip disembunyikan (hindari "ESKALASI +291j" pada deal selesai).
+   153→  const closed = conv.stage === 'WON' || conv.stage === 'LOST'
+   154→  const breach: SlaBreach | undefined =
+   155→    !closed && conv.slaOverHours != null
+   156→      ? { over: conv.slaOverHours, sla: conv.slaHours ?? 24, brandName: conv.brandName }
+   157→      : undefined
+   158→  return (
+   159→    <button
+   160→      type="button"
+   161→      onClick={onSelect}
+   162→      aria-current={active ? 'true' : undefined}
+   163→      className={cn(
+   164→        'flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400/60 sm:p-3.5',
+   165→        active
+   166→          ? 'border-slate-900/25 bg-slate-50 shadow-sm ring-1 ring-slate-900/10'
+   167→          : 'border-slate-200 bg-white hover:border-slate-300 hover:shadow-sm',
+   168→      )}
+   169→    >
+   170→      <div
+   171→        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white"
+   172→        style={{ backgroundColor: conv.brandColor }}
+   173→        aria-hidden
+   174→      >
+   175→        {initials(conv.contactName)}
+   176→      </div>
+   177→      <div className="min-w-0 flex-1">
+   178→        <div className="flex items-baseline gap-2">
+   179→          <p className={cn('min-w-0 flex-1 truncate text-sm', active ? 'font-semibold text-slate-900' : 'font-medium text-slate-800')}>
+   180→            {conv.contactName}
+   181→          </p>
+   182→          <span className="shrink-0 text-[10px] text-slate-400">{formatDate(conv.lastSentAt, true)}</span>
+   183→        </div>
+   184→        <p className="truncate text-xs text-slate-500">{conv.companyName ?? 'Tanpa perusahaan'} · {conv.opportunityCode}</p>
+   185→        <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-slate-600">
+   186→          {conv.lastDirection === 'OUT' && <span className="font-medium text-emerald-600">Anda: </span>}
+   187→          {conv.lastBody}
+   188→        </p>
+   189→        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+   190→          {conv.unanswered && (
+   191→            <span className="inline-flex shrink-0 items-center gap-1 text-[10px] font-medium text-emerald-700">
+   192→              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden /> belum dibalas
+   193→            </span>
+   194→          )}
+   195→          {breach && <SlaChip breach={breach} />}
+   196→          <StageBadge stage={conv.stage} />
+   197→        </div>
+   198→      </div>
+   199→    </button>
+   200→  )
+   201→}
+   202→
+   203→const SCROLLBAR = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar-track]:bg-transparent'
+   204→
+   205→/* ---------- Kartu kontak kecil untuk dialog duplikat ---------- */
+   206→function DuplicateContactCard({ contact, tag }: { contact: ContactDTO; tag: string }) {
+   207→  return (
+   208→    <div className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-slate-50/70 p-3">
+   209→      <div className="flex items-center gap-2">
+   210→        <UserAvatar name={contact.fullName} color={tag === 'A' ? '#0d9488' : '#d97706'} size={26} />
+   211→        <p className="truncate text-sm font-semibold text-slate-900">{contact.fullName}</p>
+   212→        <span className="ml-auto rounded bg-white px-1.5 text-[10px] font-bold text-slate-400">KONTAK {tag}</span>
+   213→      </div>
+   214→      <p className="mt-1.5 truncate text-xs text-slate-500">{contact.company?.name ?? 'Tanpa perusahaan'}</p>
+   215→      <p className="mt-1 flex items-center gap-1.5 truncate text-xs text-slate-500">
+   216→        <Mail className="h-3 w-3 shrink-0 text-slate-400" /> {contact.email ?? '—'}
+   217→      </p>
+   218→      <p className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-slate-500">
+   219→        <Phone className="h-3 w-3 shrink-0 text-slate-400" /> {contact.whatsapp ?? contact.phone ?? '—'}
+   220→      </p>
+   221→    </div>
+   222→  )
+   223→}
+   224→
+   225→export default function InboxView() {
+   226→  const brands = useCrmStore((s) => s.brands)
+   227→  const openOpportunity = useCrmStore((s) => s.openOpportunity)
+   228→  const { toast } = useToast()
+   229→
+   230→  /* ---------- Filter state ---------- */
+   231→  const [searchInput, setSearchInput] = useState('')
+   232→  const [search, setSearch] = useState('')
+   233→  const [brandId, setBrandId] = useState('')
+   234→  const [channel, setChannel] = useState('')
+   235→  const [unreadOnly, setUnreadOnly] = useState(false)
+   236→
+   237→  /* ---------- Data state ---------- */
+   238→  const [interactions, setInteractions] = useState<InteractionDTO[]>([])
+   239→  const [opportunities, setOpportunities] = useState<OpportunityDTO[]>([])
+   240→  const [loading, setLoading] = useState(true)
+   241→  const [error, setError] = useState<string | null>(null)
+   242→
+   243→  /* ---------- Duplicate state ---------- */
+   244→  const [duplicates, setDuplicates] = useState<DuplicateCandidate[]>([])
+   245→  const [dismissed, setDismissed] = useState<Set<string>>(new Set())
+   246→  const [dupOpen, setDupOpen] = useState(false)
+   247→  const [mergingKey, setMergingKey] = useState<string | null>(null)
+   248→
+   249→  /* ---------- Dialog state ---------- */
+   250→  const [replyTarget, setReplyTarget] = useState<InteractionDTO | null>(null)
+   251→  const [replyChannel, setReplyChannel] = useState('WHATSAPP')
+   252→  const [replyBody, setReplyBody] = useState('')
+   253→  const [sending, setSending] = useState(false)
+   254→
+   255→  const [createTarget, setCreateTarget] = useState<InteractionDTO | null>(null)
+   256→  const [oppForm, setOppForm] = useState({ title: '', brandId: '', serviceId: NONE, estimatedValue: '', brief: '', priority: 'MEDIUM' })
+   257→  const [creating, setCreating] = useState(false)
+   258→
+   259→  const [webFormOpen, setWebFormOpen] = useState(false)
+   260→  const [wf, setWf] = useState({ name: '', email: '', whatsapp: '', brandId: '', serviceId: NONE, message: '' })
+   261→  const [submittingWf, setSubmittingWf] = useState(false)
+   262→
+   263→  /* ---------- Mode Chat state (R20: daftar fokus + overlay full-screen) ---------- */
+   264→  const [view, setView] = useState<'list' | 'chat'>('list')
+   265→  const [selectedConvId, setSelectedConvId] = useState<string | null>(null)
+   266→  // Balasan OUT terkirim dari chat full-screen — overlay optimistik di atas daftar percakapan
+   267→  // SERVER agar preview "Anda: …" & hilangnya dot "belum dibalas" terlihat SEKETIKA.
+   268→  const [sentExtras, setSentExtras] = useState<InteractionDTO[]>([])
+   269→  // Daftar percakapan SERVER (GET /api/conversations) — authoritative di mode Chat.
+   270→  // null = belum termuat / gagal → tampilan jatuh ke grouping lokal (view tidak pernah rusak).
+   271→  const [serverConvs, setServerConvs] = useState<ConversationListItemDTO[] | null>(null)
+   272→  const [convLoading, setConvLoading] = useState(false)
+   273→  const convLoadedRef = useRef(false)
+   274→  const convErrToastRef = useRef(0)
+   275→
+   276→  /* ---------- Debounce search 400ms ---------- */
+   277→  useEffect(() => {
+   278→    const t = setTimeout(() => setSearch(searchInput.trim()), 400)
+   279→    return () => clearTimeout(t)
+   280→  }, [searchInput])
+   281→
+   282→  /* ---------- Query params (hanya yang terisi) ---------- */
+   283→  const params = useMemo(() => {
+   284→    const p = new URLSearchParams()
+   285→    if (brandId) p.set('brandId', brandId)
+   286→    if (channel) p.set('channel', channel)
+   287→    if (unreadOnly) p.set('unreadOnly', '1')
+   288→    if (search) p.set('search', search)
+   289→    return p.toString()
+   290→  }, [brandId, channel, unreadOnly, search])
+   291→
+   292→  const loadInteractions = useCallback(async () => {
+   293→    setLoading(true)
+   294→    setError(null)
+   295→    try {
+   296→      // opportunities ikut dimuat untuk komputasi SLA per lead (stage/createdAt/brand)
+   297→      const [msgs, opps] = await Promise.all([crmApi.interactions(params), crmApi.opportunities()])
+   298→      setInteractions(msgs)
+   299→      setOpportunities(opps)
+   300→    } catch (e) {
+   301→      setError(e instanceof Error ? e.message : 'Gagal memuat pesan')
+   302→    } finally {
+   303→      setLoading(false)
+   304→    }
+   305→  }, [params])
+   306→
+   307→  const loadDuplicates = useCallback(async () => {
+   308→    try {
+   309→      setDuplicates(await crmApi.duplicates())
+   310→    } catch {
+   311→      /* banner duplikat bersifat opsional — gagal senyap */
+   312→    }
+   313→  }, [])
+   314→
+   315→  useEffect(() => { void loadInteractions() }, [loadInteractions])
+   316→  useEffect(() => { void loadDuplicates() }, [loadDuplicates])
+   317→
+   318→  /* ---------- Muat daftar percakapan server (authoritative di mode Chat) ----------
+   319→     Refetch: setiap masuk mode Chat, tombol refresh, dan setelah kirim pesan.
+   320→     Gagal → toast (throttle 30 dtk, silent utk refresh latar) + fallback grouping lokal. */
+   321→  const loadConversations = useCallback(async (opts?: { silent?: boolean }) => {
+   322→    setConvLoading(true)
+   323→    try {
+   324→      const list = await crmApi.conversations()
+   325→      convLoadedRef.current = true
+   326→      setServerConvs(list)
+   327→    } catch (e) {
+   328→      if (!opts?.silent && Date.now() - convErrToastRef.current > 30_000) {
+   329→        convErrToastRef.current = Date.now()
+   330→        toast({
+   331→          title: 'Gagal memuat daftar percakapan server',
+   332→          description: e instanceof Error ? e.message : 'Menampilkan grouping lokal sebagai fallback',
+   333→          variant: 'destructive',
+   334→        })
+   335→      }
+   336→    } finally {
+   337→      setConvLoading(false)
+   338→    }
+   339→  }, [toast])
+   340→
+   341→  /* Masuk mode Chat → pastikan daftar server terbaru */
+   342→  useEffect(() => {
+   343→    if (view !== 'chat') return
+   344→    void loadConversations()
+   345→  }, [view, loadConversations])
+   346→
+   347→  const visibleDuplicates = useMemo(
+   348→    () => duplicates.filter((d) => !dismissed.has(dupKey(d))),
+   349→    [duplicates, dismissed],
+   350→  )
+   351→  const unreadCount = interactions.filter((m) => !m.replied).length
+   352→
+   353→  /* ---------- SLA breach per lead (client-side, sama dgn dashboard) ---------- */
+   354→  // waitingSince = lastInboundAt (interaksi IN terakhir, fallback createdAt utk lead
+   355→  // yang belum pernah ada inbound). Breach bila waitingHours > slaHours brand
+   356→  // (sourceBrand ?? executingBrand, fallback 24).
+   357→  const slaBreaches = useMemo(() => {
+   358→    const map = new Map<string, { over: number; sla: number; brandName: string }>()
+   359→    const nowMs = Date.now()
+   360→    for (const o of opportunities) {
+   361→      if (o.stage !== 'NEW' && o.stage !== 'CONTACT_ATTEMPTED') continue
+   362→      const brand = brands.find((b) => b.id === o.sourceBrandId) ?? brands.find((b) => b.id === o.executingBrandId)
+   363→      const sla = brand?.slaHours ?? 24
+   364→      const waitingHours = (nowMs - new Date(o.lastInboundAt ?? o.createdAt).getTime()) / 3600000
+   365→      if (waitingHours > sla) {
+   366→        map.set(o.id, { over: Math.round(waitingHours - sla), sla, brandName: brand?.name ?? o.brandName })
+   367→      }
+   368→    }
+   369→    return map
+   370→  }, [opportunities, brands])
+   371→
+   372→  /* ---------- Mode Chat FALLBACK: group percakapan per opportunity (client-side, hanya bila API conversations gagal/belum termuat) ---------- */
+   373→  const conversations = useMemo<Conversation[]>(() => {
+   374→    const byOpp = new Map<string, InteractionDTO[]>()
+   375→    for (const m of interactions) {
+   376→      if (!m.opportunityId) continue
+   377→      const arr = byOpp.get(m.opportunityId)
+   378→      if (arr) arr.push(m)
+   379→      else byOpp.set(m.opportunityId, [m])
+   380→    }
+   381→    // bubble OUT hasil kirim dari composer (API inbox hanya IN) — digabung agar thread & preview akurat
+   382→    for (const x of sentExtras) {
+   383→      if (!x.opportunityId) continue
+   384→      const arr = byOpp.get(x.opportunityId)
+   385→      if (arr) arr.push(x)
+   386→      else byOpp.set(x.opportunityId, [x])
+   387→    }
+   388→    const convs: Conversation[] = []
+   389→    for (const [oppId, msgs] of byOpp) {
+   390→      msgs.sort((a, b) => new Date(a.sentAt).getTime() - new Date(b.sentAt).getTime())
+   391→      const last = msgs[msgs.length - 1]
+   392→      convs.push({
+   393→        opportunityId: oppId,
+   394→        contactName: last.contactName,
+   395→        companyName: last.companyName,
+   396→        brandName: last.brandName,
+   397→        brandColor: last.brandColor,
+   398→        opportunityTitle: last.opportunityTitle,
+   399→        messages: msgs,
+   400→        last,
+   401→      })
+   402→    }
+   403→    convs.sort((a, b) => new Date(b.last.sentAt).getTime() - new Date(a.last.sentAt).getTime())
+   404→    return convs
+   405→  }, [interactions, sentExtras])
+   406→
+   407→  /* ---------- Identitas percakapan utk chat full-screen ----------
+   408→     Sumber utama: baris server (GET /api/conversations). Fallback: grouping lokal + data
+   409→     opportunity — dipakai bila API conversations gagal sehingga fokus chat tetap terbuka. */
+   410→  const focusConv = useMemo<ConversationListItemDTO | null>(() => {
+   411→    if (!selectedConvId) return null
+   412→    const serverRow = serverConvs?.find((c) => c.opportunityId === selectedConvId)
+   413→    if (serverRow) return serverRow
+   414→    const local = conversations.find((c) => c.opportunityId === selectedConvId)
+   415→    if (!local) return null
+   416→    const opp = opportunities.find((o) => o.id === selectedConvId)
+   417→    return {
+   418→      opportunityId: selectedConvId,
+   419→      opportunityCode: opp?.code ?? '—',
+   420→      opportunityTitle: opp?.title ?? local.opportunityTitle ?? '',
+   421→      stage: opp?.stage ?? 'NEW',
+   422→      contactName: local.contactName,
+   423→      companyName: local.companyName ?? null,
+   424→      brandId: opp?.sourceBrandId ?? null,
+   425→      brandName: local.brandName,
+   426→      brandColor: local.brandColor,
+   427→      lastDirection: local.last.direction === 'OUT' ? 'OUT' : 'IN',
+   428→      lastBody: local.last.body,
+   429→      lastSentAt: local.last.sentAt,
+   430→      lastChannel: local.last.channel,
+   431→      messageCount: local.messages.length,
+   432→      unanswered: local.last.direction !== 'OUT',
+   433→      slaOverHours: slaBreaches.get(selectedConvId)?.over ?? null,
+   434→      slaHours: null,
+   435→      escalated: false,
+   436→      ownerName: opp?.ownerName ?? null,
+   437→    }
+   438→  }, [selectedConvId, serverConvs, conversations, opportunities, slaBreaches])
+   439→
+   440→  /* ---------- Daftar percakapan SERVER + overlay optimistik sentExtras ----------
+   441→     Overlay: pesan terkirim menimpa lastMessage baris terkait → preview "Anda: …" &
+   442→     dot belum-dibalas hilang SEKETIKA; refetch conversations menyusul & konvergen
+   443→     (server mengurutkan desc by lastSentAt — sort overlay hanya menyamakan urutan agar
+   444→     baris naik ke atas tanpa lompatan visual saat refetch tiba). */
+   445→  const chatRows = useMemo<ConversationListItemDTO[]>(() => {
+   446→    if (!serverConvs) return []
+   447→    const extras = new Map<string, InteractionDTO>()
+   448→    for (const x of sentExtras) if (x.opportunityId) extras.set(x.opportunityId, x)
+   449→    if (extras.size === 0) return serverConvs
+   450→    const merged = serverConvs.map((c) => {
+   451→      const x = extras.get(c.opportunityId)
+   452→      if (!x) return c
+   453→      return { ...c, lastDirection: 'OUT' as const, lastBody: x.body, lastSentAt: x.sentAt, lastChannel: x.channel, unanswered: false }
+   454→    })
+   455→    return [...merged].sort((a, b) => new Date(b.lastSentAt).getTime() - new Date(a.lastSentAt).getTime())
+   456→  }, [serverConvs, sentExtras])
+   457→
+   458→  /* Filter client-side atas daftar server: brand, kanal (lastChannel), belum dibalas (flag server),
+   459→     search (opportunityCode / companyName / contactName / lastBody) */
+   460→  const visibleChatRows = useMemo(() => {
+   461→    const q = search.toLowerCase()
+   462→    return chatRows.filter((c) => {
+   463→      if (brandId && c.brandId !== brandId) return false
+   464→      if (channel && c.lastChannel !== channel) return false
+   465→      if (unreadOnly && !c.unanswered) return false
+   466→      if (q) {
+   467→        const hay = `${c.opportunityCode} ${c.companyName ?? ''} ${c.contactName} ${c.lastBody}`.toLowerCase()
+   468→        if (!hay.includes(q)) return false
+   469→      }
+   470→      return true
+   471→    })
+   472→  }, [chatRows, brandId, channel, unreadOnly, search])
+   473→
+   474→  /* Thread & composer kini hidup di chat-focus.tsx (overlay full-screen R20).
+   475→
+   476→  /* ---------- Aksi: reply ---------- */
+   477→  const openReply = (m: InteractionDTO) => {
+   478→    setReplyChannel(m.channel === 'EMAIL' ? 'EMAIL' : 'WHATSAPP')
+   479→    setReplyBody('')
+   480→    setReplyTarget(m)
+   481→  }
+   482→
+   483→  const handleSendReply = async () => {
+   484→    if (!replyTarget || !replyBody.trim()) return
+   485→    setSending(true)
+   486→    try {
+   487→      const body = replyBody.trim()
+   488→      if (replyTarget.opportunityId) {
+   489→        await crmApi.addInteraction(replyTarget.opportunityId, { channel: replyChannel, direction: 'OUT', body })
+   490→      } else {
+   491→        await crmApi.logInteraction({
+   492→          contactId: replyTarget.contactId,
+   493→          brandId: replyTarget.brandId,
+   494→          channel: replyChannel,
+   495→          direction: 'OUT',
+   496→          body,
+   497→        })
+   498→      }
+   499→      toast({ title: 'Balasan terkirim — draft disimpan di percakapan', description: `Kepada ${replyTarget.contactName} via ${channelMeta(replyChannel).label}.` })
+   500→      setReplyTarget(null)
+   501→      setReplyBody('')
+   502→      await Promise.all([loadInteractions(), loadConversations({ silent: true })])
+   503→    } catch (e) {
+   504→      toast({
+   505→        title: 'Gagal mengirim balasan',
+   506→        description: e instanceof Error ? e.message : 'Coba lagi',
+   507→        variant: 'destructive',
+   508→      })
+   509→    } finally {
+   510→      setSending(false)
+   511→    }
+   512→  }
+   513→
+   514→  /* ---------- Aksi: create opportunity ---------- */
+   515→  useEffect(() => {
+   516→    if (createTarget) {
+   517→      setOppForm({
+   518→        title: `Kebutuhan ${createTarget.brandName}`,
+   519→        brandId: createTarget.brandId,
+   520→        serviceId: NONE,
+   521→        estimatedValue: '',
+   522→        brief: createTarget.body,
+   523→        priority: 'MEDIUM',
+   524→      })
+   525→    }
+   526→  }, [createTarget])
+   527→
+   528→  const selectedBrand = brands.find((b) => b.id === oppForm.brandId)
+   529→  const brandServices = selectedBrand?.services ?? []
+   530→
+   531→  /** API opportunity butuh companyId — resolve dari kontak via endpoint contacts. */
+   532→  const resolveCompanyId = async (contactId: string, contactName: string): Promise<string | null> => {
+   533→    try {
+   534→      const list = await crmApi.contacts(`search=${encodeURIComponent(contactName)}`)
+   535→      const hit = list.find((c) => c.id === contactId)
+   536→      if (hit?.companyId) return hit.companyId
+   537→      const all = await crmApi.contacts()
+   538→      return all.find((c) => c.id === contactId)?.companyId ?? null
+   539→    } catch {
+   540→      return null
+   541→    }
+   542→  }
+   543→
+   544→  const handleCreateOpp = async () => {
+   545→    if (!createTarget) return
+   546→    if (!oppForm.title.trim()) {
+   547→      toast({ title: 'Judul wajib diisi', variant: 'destructive' })
+   548→      return
+   549→    }
+   550→    if (!oppForm.brandId) {
+   551→      toast({ title: 'Brand wajib dipilih', variant: 'destructive' })
+   552→      return
+   553→    }
+   554→    setCreating(true)
+   555→    try {
+   556→      const companyId = await resolveCompanyId(createTarget.contactId, createTarget.contactName)
+   557→      if (!companyId) {
+   558→        throw new Error('Company untuk kontak ini tidak ditemukan. Buat company terlebih dahulu di modul Contacts.')
+   559→      }
+   560→      const opp = await crmApi.createOpportunity({
+   561→        title: oppForm.title.trim(),
+   562→        companyId,
+   563→        contactId: createTarget.contactId,
+   564→        sourceBrandId: oppForm.brandId,
+   565→        executingBrandId: oppForm.brandId,
+   566→        serviceId: oppForm.serviceId === NONE ? undefined : oppForm.serviceId,
+   567→        leadSource: CHANNEL_TO_LEAD_SOURCE[createTarget.channel] ?? 'WEBSITE',
+   568→        channel: createTarget.channel,
+   569→        estimatedValue: oppForm.estimatedValue ? Number(oppForm.estimatedValue) : 0,
+   570→        brief: oppForm.brief.trim() || undefined,
+   571→        priority: oppForm.priority,
+   572→      })
+   573→      toast({ title: 'Opportunity dibuat', description: `${opp.code} — ${opp.title}` })
+   574→      setCreateTarget(null)
+   575→      openOpportunity(opp.id)
+   576→    } catch (e) {
+   577→      toast({
+   578→        title: 'Gagal membuat opportunity',
+   579→        description: e instanceof Error ? e.message : 'Coba lagi',
+   580→        variant: 'destructive',
+   581→      })
+   582→    } finally {
+   583→      setCreating(false)
+   584→    }
+   585→  }
+   586→
+   587→  /* ---------- Aksi: merge / keep separate ---------- */
+   588→  const handleMerge = async (c: DuplicateCandidate) => {
+   589→    const key = dupKey(c)
+   590→    setMergingKey(key)
+   591→    try {
+   592→      await crmApi.merge({ keepId: c.contactA.id, mergeId: c.contactB.id })
+   593→      toast({
+   594→        title: 'Duplikat digabung',
+   595→        description: `${c.contactA.fullName} dipertahankan; data ${c.contactB.fullName} digabungkan ke kontak utama.`,
+   596→      })
+   597→      setDupOpen(false)
+   598→      await Promise.all([loadDuplicates(), loadInteractions()])
+   599→    } catch (e) {
+   600→      toast({
+   601→        title: 'Gagal menggabungkan duplikat',
+   602→        description: e instanceof Error ? e.message : 'Coba lagi',
+   603→        variant: 'destructive',
+   604→      })
+   605→    } finally {
+   606→      setMergingKey(null)
+   607→    }
+   608→  }
+   609→
+   610→  const handleKeepSeparate = (c: DuplicateCandidate) => {
+   611→    setDismissed((prev) => new Set(prev).add(dupKey(c)))
+   612→    toast({ title: 'Kandidat diabaikan', description: `${c.contactA.fullName} & ${c.contactB.fullName} dibiarkan terpisah.` })
+   613→  }
+   614→
+   615→  /* ---------- Aksi: simulasi form website ---------- */
+   616→  const handleWebsiteForm = async () => {
+   617→    if (!wf.name.trim() || !wf.email.trim() || !wf.brandId || !wf.message.trim()) {
+   618→      toast({ title: 'Lengkapi nama, email, brand, dan pesan', variant: 'destructive' })
+   619→      return
+   620→    }
+   621→    if (!/.+@.+\..+/.test(wf.email.trim())) {
+   622→      toast({ title: 'Format email tidak valid', variant: 'destructive' })
+   623→      return
+   624→    }
+   625→    setSubmittingWf(true)
+   626→    try {
+   627→      await crmApi.websiteForm({
+   628→        websiteForm: {
+   629→          name: wf.name.trim(),
+   630→          email: wf.email.trim(),
+   631→          whatsapp: wf.whatsapp.trim() || undefined,
+   632→          message: wf.message.trim(),
+   633→          brandId: wf.brandId,
+   634→          serviceId: wf.serviceId === NONE ? undefined : wf.serviceId,
+   635→        },
+   636→      })
+   637→      toast({ title: 'Lead baru dari website masuk ke inbox', description: `${wf.name.trim()} — ${brands.find((b) => b.id === wf.brandId)?.name ?? ''}` })
+   638→      setWebFormOpen(false)
+   639→      setWf({ name: '', email: '', whatsapp: '', brandId: '', serviceId: NONE, message: '' })
+   640→      await loadInteractions()
+   641→    } catch (e) {
+   642→      toast({
+   643→        title: 'Gagal mensimulasikan lead website',
+   644→        description: e instanceof Error ? e.message : 'Coba lagi',
+   645→        variant: 'destructive',
+   646→      })
+   647→    } finally {
+   648→      setSubmittingWf(false)
+   649→    }
+   650→  }
+   651→
+   652→  const wfServices = brands.find((b) => b.id === wf.brandId)?.services ?? []
+   653→
+   654→  /* ---------- Render ---------- */
+   655→  return (
+   656→    <div className="space-y-4">
+   657→      {/* ===== Toolbar ===== */}
+   658→      <Card className="rounded-xl border-slate-200 shadow-sm">
+   659→        <CardContent className="flex flex-wrap items-center gap-2 p-3 sm:p-4">
+   660→          <div className="relative min-w-[200px] flex-1">
+   661→            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+   662→            <Input
+   663→              id="inbox-search"
+   664→              value={searchInput}
+   665→              onChange={(e) => setSearchInput(e.target.value)}
+   666→              onKeyDown={(e) => { if (e.key === 'Enter') setSearch(searchInput.trim()) }}
+   667→              placeholder="Cari nama, isi pesan…"
+   668→              className="h-9 pl-9"
+   669→              aria-label="Cari pesan"
+   670→            />
+   671→          </div>
+   672→
+   673→          <Select value={brandId || ALL} onValueChange={(v) => setBrandId(v === ALL ? '' : v)}>
+   674→            <SelectTrigger className="h-9 w-[150px] sm:w-[170px]" aria-label="Filter brand">
+   675→              <SelectValue placeholder="Semua Brand" />
+   676→            </SelectTrigger>
+   677→            <SelectContent>
+   678→              <SelectItem value={ALL}>Semua Brand</SelectItem>
+   679→              {brands.map((b) => (
+   680→                <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+   681→              ))}
+   682→            </SelectContent>
+   683→          </Select>
+   684→
+   685→          <Select value={channel || ALL} onValueChange={(v) => setChannel(v === ALL ? '' : v)}>
+   686→            <SelectTrigger className="h-9 w-[140px] sm:w-[150px]" aria-label="Filter kanal">
+   687→              <SelectValue placeholder="Semua Kanal" />
+   688→            </SelectTrigger>
+   689→            <SelectContent>
+   690→              <SelectItem value={ALL}>Semua Kanal</SelectItem>
+   691→              {CHANNELS.map((c) => (
+   692→                <SelectItem key={c.key} value={c.key}>{c.label}</SelectItem>
+   693→              ))}
+   694→            </SelectContent>
+   695→          </Select>
+   696→
+   697→          <label htmlFor="inbox-unread" className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50">
+   698→            <Switch id="inbox-unread" checked={unreadOnly} onCheckedChange={setUnreadOnly} />
+   699→            Belum dibalas saja
+   700→          </label>
+   701→
+   702→          {/* Toggle mode tampilan: Daftar / Chat */}
+   703→          <div className="flex items-center rounded-lg border border-slate-200 bg-slate-50 p-0.5" role="group" aria-label="Mode tampilan inbox">
+   704→            <button
+   705→              type="button"
+   706→              onClick={() => setView('list')}
+   707→              aria-pressed={view === 'list'}
+   708→              className={cn(
+   709→                'flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400/60',
+   710→                view === 'list' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700',
+   711→              )}
+   712→            >
+   713→              <List className="h-3.5 w-3.5" /> Daftar
+   714→            </button>
+   715→            <button
+   716→              type="button"
+   717→              onClick={() => setView('chat')}
+   718→              aria-pressed={view === 'chat'}
+   719→              className={cn(
+   720→                'flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400/60',
+   721→                view === 'chat' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700',
+   722→              )}
+   723→            >
+   724→              <MessagesSquare className="h-3.5 w-3.5" /> Chat
+   725→            </button>
+   726→          </div>
+   727→
+   728→          <div className="ml-auto flex items-center gap-2">
+   729→            <RefreshButton
+   730→              onClick={() => {
+   731→                void loadInteractions()
+   732→                // Refresh juga daftar percakapan server (toast hanya bila mode Chat aktif)
+   733→                void loadConversations({ silent: view !== 'chat' })
+   734→              }}
+   735→              loading={loading}
+   736→            />
+   737→            <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => setWebFormOpen(true)}>
+   738→              <Globe className="h-3.5 w-3.5" />
+   739→              <span className="hidden sm:inline">Simulasi Form Website</span>
+   740→              <span className="sm:hidden">Form Website</span>
+   741→            </Button>
+   742→          </div>
+   743→        </CardContent>
+   744→      </Card>
+   745→
+   746→      {/* ===== Banner duplikat ===== */}
+   747→      {visibleDuplicates.length > 0 && (
+   748→        <Alert className="rounded-xl border-amber-300 bg-amber-50 text-amber-900">
+   749→          <AlertTriangle className="h-4 w-4 text-amber-600" />
+   750→          <AlertTitle className="text-sm font-semibold">⚠️ {visibleDuplicates.length} kandidat duplikat terdeteksi</AlertTitle>
+   751→          <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+   752→            <span className="text-amber-800">
+   753→              Kontak ganda memecah timeline percakapan dan merusak statistik pipeline. Review dan gabungkan sekarang.
+   754→            </span>
+   755→            <Button size="sm" className="h-8 gap-1.5 bg-amber-600 text-white hover:bg-amber-700" onClick={() => setDupOpen(true)}>
+   756→              <Merge className="h-3.5 w-3.5" /> Review Duplikat
+   757→            </Button>
+   758→          </AlertDescription>
+   759→        </Alert>
+   760→      )}
+   761→
+   762→      {/* ===== Daftar pesan ===== */}
+   763→      <Card className="rounded-xl border-slate-200 shadow-sm">
+   764→        <CardHeader className="pb-3">
+   765→          <CardTitle className="flex items-center gap-2 text-base">
+   766→            {view === 'chat' ? <MessagesSquare className="h-4 w-4 text-teal-600" /> : <Inbox className="h-4 w-4 text-teal-600" />}
+   767→            {view === 'chat' ? 'Percakapan' : 'Pesan Masuk'}
+   768→          </CardTitle>
+   769→          <CardDescription>
+   770→            {loading
+   771→              ? 'Memuat…'
+   772→              : view === 'chat'
+   773→                ? serverConvs
+   774→                  ? `${visibleChatRows.length} percakapan · ${visibleChatRows.filter((c) => c.unanswered).length} belum dibalas · klik untuk fokus layar penuh`
+   775→                  : `${conversations.length} percakapan · ${unreadCount} belum dibalas`
+   776→                : `${interactions.length} pesan · ${unreadCount} belum dibalas`}
+   777→          </CardDescription>
+   778→        </CardHeader>
+   779→        <CardContent className="p-3 sm:p-4 sm:pt-0">
+   780→          {error ? (
+   781→            <div className="flex flex-col items-center gap-3 rounded-xl border border-rose-200 bg-rose-50 p-6 text-center">
+   782→              <AlertTriangle className="h-7 w-7 text-rose-500" />
+   783→              <div>
+   784→                <p className="font-semibold text-rose-800">Gagal memuat pesan</p>
+   785→                <p className="mt-0.5 text-sm text-rose-600">{error}</p>
+   786→              </div>
+   787→              <Button variant="outline" className="border-rose-300 hover:bg-rose-100" onClick={() => void loadInteractions()}>
+   788→                Coba lagi
+   789→              </Button>
+   790→            </div>
+   791→          ) : view === 'chat' ? (
+   792→            /* ===== Mode Chat =====
+   793→               Daftar authoritative = server (GET /api/conversations). Grouping lokal hanya
+   794→               fallback loading/error — view tidak pernah kosong/rusak.
+   795→               CATATAN: branch chat dicek SEBELUM empty-check interactions — daftar percakapan
+   796→               server independen dari hasil /api/interactions (search dpt mengosongkan
+   797→               interactions tanpa mengosongkan daftar percakapan). */
+   798→            (loading && interactions.length === 0 && !serverConvs) ? (
+   799→              <LoadingRows rows={6} />
+   800→            ) : (serverConvs ? visibleChatRows.length === 0 : conversations.length === 0) ? (
+   801→              <EmptyState
+   802→                icon={<MessagesSquare className="h-6 w-6" />}
+   803→                title={serverConvs && chatRows.length > 0 ? 'Tidak ada percakapan yang cocok' : 'Belum ada percakapan'}
+   804→                description={
+   805→                  serverConvs && chatRows.length > 0
+   806→                    ? 'Tidak ada percakapan yang cocok dengan filter aktif. Coba ubah pencarian, filter, atau matikan “Belum dibalas saja”.'
+   807→                    : 'Belum ada pesan yang terhubung ke opportunity. Gunakan mode Daftar untuk membuat opportunity dari pesan masuk terlebih dahulu.'
+   808→                }
+   809→              />
+   810→            ) : (
+   811→              /* R20: daftar fokus per kontak — kartu lega, klik membuka chat FULL-SCREEN.
+   812→                 Panel inline dua kolom digantikan overlay ChatFocusView agar marketing
+   813→                 bebas distraksi saat follow-up. */
+   814→              <div className={cn('mx-auto max-w-3xl space-y-2.5', SCROLLBAR)} role="list" aria-label="Daftar percakapan">
+   815→                {serverConvs
+   816→                  ? visibleChatRows.map((c) => (
+   817→                      <div key={c.opportunityId} role="listitem">
+   818→                        <ServerConversationRow
+   819→                          conv={c}
+   820→                          active={c.opportunityId === selectedConvId}
+   821→                          onSelect={() => setSelectedConvId(c.opportunityId)}
+   822→                        />
+   823→                      </div>
+   824→                    ))
+   825→                  : conversations.map((c) => (
+   826→                      <div key={c.opportunityId} role="listitem">
+   827→                        <ConversationRow
+   828→                          conv={c}
+   829→                          active={c.opportunityId === selectedConvId}
+   830→                          breach={slaBreaches.get(c.opportunityId)}
+   831→                          onSelect={() => setSelectedConvId(c.opportunityId)}
+   832→                        />
+   833→                      </div>
+   834→                    ))}
+   835→              </div>
+   836→            )
+   837→          ) : loading && interactions.length === 0 ? (
+   838→            <LoadingRows rows={6} />
+   839→          ) : interactions.length === 0 ? (
+   840→            <EmptyState
+   841→              icon={<Inbox className="h-6 w-6" />}
+   842→              title="Tidak ada pesan masuk"
+   843→              description="Coba ubah filter, matikan “Belum dibalas saja”, atau simulasikan lead masuk dari form website."
+   844→              action={
+   845→                <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setWebFormOpen(true)}>
+   846→                  <Globe className="h-3.5 w-3.5" /> Simulasi Form Website
+   847→                </Button>
+   848→              }
+   849→            />
+   850→          ) : (
+   851→            <div className={cn('max-h-[65vh] space-y-2 overflow-y-auto pr-1', SCROLLBAR)}>
+   852→              {interactions.map((m) => {
+   853→                const meta = channelMeta(m.channel)
+   854→                const breach = m.opportunityId ? slaBreaches.get(m.opportunityId) : undefined
+   855→                return (
+   856→                  <div
+   857→                    key={m.id}
+   858→                    className={cn(
+   859→                      'group relative flex gap-3 rounded-xl p-3 transition-colors sm:p-4',
+   860→                      m.replied
+   861→                        ? 'border border-slate-200 bg-white hover:border-slate-300 hover:shadow-sm'
+   862→                        : 'border border-slate-900/20 bg-white shadow-sm hover:border-slate-900/35',
+   863→                    )}
+   864→                  >
+   865→                    {/* Channel icon */}
+   866→                    <div className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-full', meta.bg)}>
+   867→                      <ChannelIcon channel={m.channel} className="h-5 w-5" />
+   868→                    </div>
+   869→
+   870→                    {/* Main */}
+   871→                    <div className="min-w-0 flex-1">
+   872→                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+   873→                        <p className="truncate text-sm font-semibold text-slate-900">{m.contactName}</p>
+   874→                        {m.companyName && <span className="truncate text-xs text-slate-500">{m.companyName}</span>}
+   875→                        <BrandChip name={m.brandName} color={m.brandColor} size="xs" />
+   876→                        <span className="ml-auto shrink-0 text-[11px] text-slate-400 transition-opacity md:group-hover:opacity-0">
+   877→                          {timeAgo(m.sentAt)}
+   878→                        </span>
+   879→                      </div>
+   880→                      <p className="mt-1 line-clamp-2 text-sm leading-snug text-slate-600">{m.body}</p>
+   881→
+   882→                      {/* Badges baris 3 */}
+   883→                      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+   884→                        {breach && <SlaChip breach={breach} />}
+   885→                        {!m.replied && (
+   886→                          <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-700">Belum dibalas</Badge>
+   887→                        )}
+   888→                        {m.status === 'READ' && (
+   889→                          <Badge variant="outline" className="border-slate-200 bg-slate-50 text-slate-500">Dibaca</Badge>
+   890→                        )}
+   891→                        {m.opportunityTitle && (
+   892→                          <button
+   893→                            type="button"
+   894→                            onClick={() => m.opportunityId && openOpportunity(m.opportunityId)}
+   895→                            className="inline-flex items-center gap-1 text-xs font-medium text-teal-700 hover:text-teal-800 hover:underline"
+   896→                            title="Buka opportunity terkait"
+   897→                          >
+   898→                            <Building2 className="h-3 w-3" /> {m.opportunityTitle}
+   899→                          </button>
+   900→                        )}
+   901→                      </div>
+   902→
+   903→                      {/* Aksi mobile — selalu terlihat */}
+   904→                      <div className="mt-2.5 flex items-center gap-2 border-t border-slate-100 pt-2.5 md:hidden">
+   905→                        {!m.opportunityId && (
+   906→                          <Button size="sm" variant="outline" className="h-8 gap-1 text-xs" onClick={() => setCreateTarget(m)}>
+   907→                            <Plus className="h-3 w-3" /> Buat Opportunity
+   908→                          </Button>
+   909→                        )}
+   910→                        <Button size="sm" variant="outline" className="h-8 gap-1 text-xs" onClick={() => openReply(m)}>
+   911→                          <Send className="h-3 w-3" /> Balas
+   912→                        </Button>
+   913→                      </div>
+   914→                    </div>
+   915→
+   916→                    {/* Aksi desktop — muncul saat hover */}
+   917→                    <div className="absolute right-4 top-3.5 hidden items-center gap-2 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 md:flex">
+   918→                      {!m.opportunityId && (
+   919→                        <Button size="sm" variant="outline" className="h-7 gap-1 bg-white text-xs shadow-sm" onClick={() => setCreateTarget(m)}>
+   920→                          <Plus className="h-3 w-3" /> Buat Opportunity
+   921→                        </Button>
+   922→                      )}
+   923→                      <Button size="sm" variant="outline" className="h-7 gap-1 bg-white text-xs shadow-sm" onClick={() => openReply(m)}>
+   924→                        <Send className="h-3 w-3" /> Balas
+   925→                      </Button>
+   926→                    </div>
+   927→                  </div>
+   928→                )
+   929→              })}
+   930→            </div>
+   931→          )}
+   932→        </CardContent>
+   933→      </Card>
+   934→
+   935→      {/* ===== Chat Fokus Full-Screen (R20) =====
+   936→          Overlay layar penuh per kontak: timeline lega + panel konteks lead +
+   937→          aksi cepat (Penawaran / Brief / Assign Tugas) langsung dari percakapan. */}
+   938→      {view === 'chat' && focusConv && (
+   939→        <ChatFocusView
+   940→          conv={focusConv}
+   941→          onClose={() => setSelectedConvId(null)}
+   942→          onMessageSent={(m) => {
+   943→            setSentExtras((prev) => [...prev, m])
+   944→            void loadConversations({ silent: true })
+   945→          }}
+   946→          onActivity={() => {
+   947→            void loadInteractions()
+   948→            void loadConversations({ silent: true })
+   949→          }}
+   950→          onOpenOpportunity={(id) => {
+   951→            setSelectedConvId(null)
+   952→            openOpportunity(id)
+   953→          }}
+   954→        />
+   955→      )}
+   956→
+   957→      {/* ===== Dialog Reply ===== */}
+   958→      <Dialog open={!!replyTarget} onOpenChange={(o) => { if (!o) setReplyTarget(null) }}>
+   959→        <DialogContent className="sm:max-w-lg">
+   960→          <DialogHeader>
+   961→            <DialogTitle>Balas Pesan</DialogTitle>
+   962→            <DialogDescription>
+   963→              Balasan terkirim sebagai pesan keluar (OUT) dan otomatis tercatat di timeline percakapan.
+   964→            </DialogDescription>
+   965→          </DialogHeader>
+   966→
+   967→          {replyTarget && (
+   968→            <div className="space-y-4">
+   969→              {/* Konteks kontak */}
+   970→              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+   971→                <div className="flex items-center gap-2.5">
+   972→                  <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-full', channelMeta(replyTarget.channel).bg)}>
+   973→                    <ChannelIcon channel={replyTarget.channel} className="h-4 w-4" />
+   974→                  </div>
+   975→                  <div className="min-w-0 flex-1">
+   976→                    <p className="truncate text-sm font-semibold text-slate-900">{replyTarget.contactName}</p>
+   977→                    <p className="truncate text-xs text-slate-500">{replyTarget.companyName ?? 'Tanpa perusahaan'}</p>
+   978→                  </div>
+   979→                  <BrandChip name={replyTarget.brandName} color={replyTarget.brandColor} size="xs" />
+   980→                </div>
+   981→                <div className="mt-2.5 max-h-28 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2.5 text-xs leading-relaxed text-slate-600">
+   982→                  {replyTarget.body}
+   983→                </div>
+   984→              </div>
+   985→
+   986→              <div className="space-y-1.5">
+   987→                <Label htmlFor="reply-channel">Kanal balasan</Label>
+   988→                <Select value={replyChannel} onValueChange={setReplyChannel}>
+   989→                  <SelectTrigger id="reply-channel"><SelectValue /></SelectTrigger>
+   990→                  <SelectContent>
+   991→                    <SelectItem value="WHATSAPP">WhatsApp</SelectItem>
+   992→                    <SelectItem value="EMAIL">Email</SelectItem>
+   993→                  </SelectContent>
+   994→                </Select>
+   995→              </div>
+   996→
+   997→              <div className="space-y-1.5">
+   998→                <Label htmlFor="reply-body">Isi balasan</Label>
+   999→                <Textarea
+  1000→                  id="reply-body"
+  1001→                  value={replyBody}
+  1002→                  onChange={(e) => setReplyBody(e.target.value)}
+  1003→                  placeholder="Tulis balasan…"
+  1004→                  rows={4}
+  1005→                />
+  1006→              </div>
+  1007→            </div>
+  1008→          )}
+  1009→
+  1010→          <DialogFooter className="gap-2">
+  1011→            <Button variant="outline" onClick={() => setReplyTarget(null)}>Batal</Button>
+  1012→            <Button
+  1013→              onClick={() => void handleSendReply()}
+  1014→              disabled={sending || !replyBody.trim()}
+  1015→              className="gap-1.5 bg-teal-600 text-white hover:bg-teal-700"
+  1016→            >
+  1017→              {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+  1018→              Kirim Balasan
+  1019→            </Button>
+  1020→          </DialogFooter>
+  1021→        </DialogContent>
+  1022→      </Dialog>
+  1023→
+  1024→      {/* ===== Dialog Create Opportunity ===== */}
+  1025→      <Dialog open={!!createTarget} onOpenChange={(o) => { if (!o) setCreateTarget(null) }}>
+  1026→        <DialogContent className="sm:max-w-lg">
+  1027→          <DialogHeader>
+  1028→            <DialogTitle>Buat Opportunity dari Pesan</DialogTitle>
+  1029→            <DialogDescription>
+  1030→              Konversi pesan masuk menjadi opportunity pipeline. Perusahaan & kontak otomatis terhubung.
+  1031→            </DialogDescription>
+  1032→          </DialogHeader>
+  1033→
+  1034→          {createTarget && (
+  1035→            <div className="space-y-3.5">
+  1036→              <div className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
+  1037→                <ChannelIcon channel={createTarget.channel} className="h-3.5 w-3.5" />
+  1038→                <span className="font-semibold text-slate-700">{createTarget.contactName}</span>
+  1039→                {createTarget.companyName && <span>· {createTarget.companyName}</span>}
+  1040→              </div>
+  1041→
+  1042→              <div className="space-y-1.5">
+  1043→                <Label htmlFor="opp-title">Judul</Label>
+  1044→                <Input
+  1045→                  id="opp-title"
+  1046→                  value={oppForm.title}
+  1047→                  onChange={(e) => setOppForm((f) => ({ ...f, title: e.target.value }))}
+  1048→                  placeholder="Kebutuhan klien"
+  1049→                />
+  1050→              </div>
+  1051→
+  1052→              <div className="grid gap-3 sm:grid-cols-2">
+  1053→                <div className="space-y-1.5">
+  1054→                  <Label>Brand</Label>
+  1055→                  <Select
+  1056→                    value={oppForm.brandId || undefined}
+  1057→                    onValueChange={(v) => setOppForm((f) => ({ ...f, brandId: v, serviceId: NONE }))}
+  1058→                  >
+  1059→                    <SelectTrigger><SelectValue placeholder="Pilih brand" /></SelectTrigger>
+  1060→                    <SelectContent>
+  1061→                      {brands.map((b) => (
+  1062→                        <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+  1063→                      ))}
+  1064→                    </SelectContent>
+  1065→                  </Select>
+  1066→                </div>
+  1067→                <div className="space-y-1.5">
+  1068→                  <Label>Layanan</Label>
+  1069→                  <Select value={oppForm.serviceId} onValueChange={(v) => setOppForm((f) => ({ ...f, serviceId: v }))}>
+  1070→                    <SelectTrigger><SelectValue placeholder="Pilih layanan" /></SelectTrigger>
+  1071→                    <SelectContent>
+  1072→                      <SelectItem value={NONE}>— Tanpa layanan —</SelectItem>
+  1073→                      {brandServices.map((s) => (
+  1074→                        <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+  1075→                      ))}
+  1076→                    </SelectContent>
+  1077→                  </Select>
+  1078→                </div>
+  1079→              </div>
+  1080→
+  1081→              <div className="grid gap-3 sm:grid-cols-2">
+  1082→                <div className="space-y-1.5">
+  1083→                  <Label htmlFor="opp-value">Estimasi Nilai (IDR, opsional)</Label>
+  1084→                  <Input
+  1085→                    id="opp-value"
+  1086→                    type="number"
+  1087→                    min={0}
+  1088→                    value={oppForm.estimatedValue}
+  1089→                    onChange={(e) => setOppForm((f) => ({ ...f, estimatedValue: e.target.value }))}
+  1090→                    placeholder="mis. 25000000"
+  1091→                  />
+  1092→                </div>
+  1093→                <div className="space-y-1.5">
+  1094→                  <Label>Prioritas</Label>
+  1095→                  <Select value={oppForm.priority} onValueChange={(v) => setOppForm((f) => ({ ...f, priority: v }))}>
+  1096→                    <SelectTrigger><SelectValue /></SelectTrigger>
+  1097→                    <SelectContent>
+  1098→                      {PRIORITIES.map((p) => (
+  1099→                        <SelectItem key={p.key} value={p.key}>{p.label}</SelectItem>
+  1100→                      ))}
+  1101→                    </SelectContent>
+  1102→                  </Select>
+  1103→                </div>
+  1104→              </div>
+  1105→
+  1106→              <div className="space-y-1.5">
+  1107→                <Label htmlFor="opp-brief">Brief (opsional)</Label>
+  1108→                <Textarea
+  1109→                  id="opp-brief"
+  1110→                  value={oppForm.brief}
+  1111→                  onChange={(e) => setOppForm((f) => ({ ...f, brief: e.target.value }))}
+  1112→                  placeholder="Ringkasan kebutuhan…"
+  1113→                  rows={3}
+  1114→                />
+  1115→              </div>
+  1116→            </div>
+  1117→          )}
+  1118→
+  1119→          <DialogFooter className="gap-2">
+  1120→            <Button variant="outline" onClick={() => setCreateTarget(null)}>Batal</Button>
+  1121→            <Button
+  1122→              onClick={() => void handleCreateOpp()}
+  1123→              disabled={creating}
+  1124→              className="gap-1.5 bg-teal-600 text-white hover:bg-teal-700"
+  1125→            >
+  1126→              {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+  1127→              Buat Opportunity
+  1128→            </Button>
+  1129→          </DialogFooter>
+  1130→        </DialogContent>
+  1131→      </Dialog>
+  1132→
+  1133→      {/* ===== Dialog Simulasi Form Website ===== */}
+  1134→      <Dialog open={webFormOpen} onOpenChange={setWebFormOpen}>
+  1135→        <DialogContent className="sm:max-w-lg">
+  1136→          <DialogHeader>
+  1137→            <DialogTitle className="flex items-center gap-2">
+  1138→              <Globe className="h-4 w-4 text-teal-600" /> Simulasi Form Website
+  1139→            </DialogTitle>
+  1140→            <DialogDescription>
+  1141→              Fitur ini mensimulasikan lead masuk dari form website publik. Lead langsung muncul di inbox sebagai pesan channel Website.
+  1142→            </DialogDescription>
+  1143→          </DialogHeader>
+  1144→
+  1145→          <div className="space-y-3.5">
+  1146→            <div className="grid gap-3 sm:grid-cols-2">
+  1147→              <div className="space-y-1.5">
+  1148→                <Label htmlFor="wf-name">Nama *</Label>
+  1149→                <Input id="wf-name" value={wf.name} onChange={(e) => setWf((f) => ({ ...f, name: e.target.value }))} placeholder="Nama lengkap" />
+  1150→              </div>
+  1151→              <div className="space-y-1.5">
+  1152→                <Label htmlFor="wf-email">Email *</Label>
+  1153→                <Input id="wf-email" type="email" value={wf.email} onChange={(e) => setWf((f) => ({ ...f, email: e.target.value }))} placeholder="nama@perusahaan.com" />
+  1154→              </div>
+  1155→            </div>
+  1156→            <div className="grid gap-3 sm:grid-cols-2">
+  1157→              <div className="space-y-1.5">
+  1158→                <Label htmlFor="wf-wa">WhatsApp (opsional)</Label>
+  1159→                <Input id="wf-wa" value={wf.whatsapp} onChange={(e) => setWf((f) => ({ ...f, whatsapp: e.target.value }))} placeholder="+62…" />
+  1160→              </div>
+  1161→              <div className="space-y-1.5">
+  1162→                <Label>Brand *</Label>
+  1163→                <Select
+  1164→                  value={wf.brandId || undefined}
+  1165→                  onValueChange={(v) => setWf((f) => ({ ...f, brandId: v, serviceId: NONE }))}
+  1166→                >
+  1167→                  <SelectTrigger><SelectValue placeholder="Pilih brand" /></SelectTrigger>
+  1168→                  <SelectContent>
+  1169→                    {brands.map((b) => (
+  1170→                      <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+  1171→                    ))}
+  1172→                  </SelectContent>
+  1173→                </Select>
+  1174→              </div>
+  1175→            </div>
+  1176→            <div className="space-y-1.5">
+  1177→              <Label>Layanan (opsional)</Label>
+  1178→              <Select value={wf.serviceId} onValueChange={(v) => setWf((f) => ({ ...f, serviceId: v }))}>
+  1179→                <SelectTrigger><SelectValue placeholder="Pilih layanan" /></SelectTrigger>
+  1180→                <SelectContent>
+  1181→                  <SelectItem value={NONE}>— Tanpa layanan —</SelectItem>
+  1182→                  {wfServices.map((s) => (
+  1183→                    <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+  1184→                  ))}
+  1185→                </SelectContent>
+  1186→              </Select>
+  1187→            </div>
+  1188→            <div className="space-y-1.5">
+  1189→              <Label htmlFor="wf-message">Pesan *</Label>
+  1190→              <Textarea
+  1191→                id="wf-message"
+  1192→                value={wf.message}
+  1193→                onChange={(e) => setWf((f) => ({ ...f, message: e.target.value }))}
+  1194→                placeholder="Saya tertarik dengan layanan…"
+  1195→                rows={3}
+  1196→              />
+  1197→            </div>
+  1198→          </div>
+  1199→
+  1200→          <DialogFooter className="gap-2">
+  1201→            <Button variant="outline" onClick={() => setWebFormOpen(false)}>Batal</Button>
+  1202→            <Button
+  1203→              onClick={() => void handleWebsiteForm()}
+  1204→              disabled={submittingWf}
+  1205→              className="gap-1.5 bg-teal-600 text-white hover:bg-teal-700"
+  1206→            >
+  1207→              {submittingWf ? <Loader2 className="h-4 w-4 animate-spin" /> : <Globe className="h-4 w-4" />}
+  1208→              Kirim sebagai Lead
+  1209→            </Button>
+  1210→          </DialogFooter>
+  1211→        </DialogContent>
+  1212→      </Dialog>
+  1213→
+  1214→      {/* ===== Dialog Review Duplikat ===== */}
+  1215→      <Dialog open={dupOpen} onOpenChange={setDupOpen}>
+  1216→        <DialogContent className="sm:max-w-3xl">
+  1217→          <DialogHeader>
+  1218→            <DialogTitle className="flex items-center gap-2">
+  1219→              <AlertTriangle className="h-4 w-4 text-amber-500" /> Review Kandidat Duplikat
+  1220→            </DialogTitle>
+  1221→            <DialogDescription>
+  1222→              Sistem mendeteksi kontak dengan email / WhatsApp / telepon yang sama. Gabungkan untuk menyatukan timeline percakapan — kontak utama (kiri) dipertahankan, data kontak kanan dipindahkan lalu dinonaktifkan.
+  1223→            </DialogDescription>
+  1224→          </DialogHeader>
+  1225→
+  1226→          <div className={cn('max-h-[60vh] space-y-3 overflow-y-auto pr-1', SCROLLBAR)}>
+  1227→            {visibleDuplicates.length === 0 ? (
+  1228→              <EmptyState icon={<Merge className="h-5 w-5" />} title="Tidak ada kandidat duplikat" description="Semua kandidat sudah digabung atau diabaikan." />
+  1229→            ) : (
+  1230→              visibleDuplicates.map((c) => {
+  1231→                const key = dupKey(c)
+  1232→                const match = MATCH_META[c.matchType] ?? { label: c.matchType, cls: 'border-slate-200 bg-slate-50 text-slate-600' }
+  1233→                return (
+  1234→                  <div key={key} className="rounded-xl border border-slate-200 p-3.5">
+  1235→                    <div className="mb-2.5 flex flex-wrap items-center gap-2">
+  1236→                      <Badge variant="outline" className={match.cls}>{match.label}</Badge>
+  1237→                      <span className="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">{c.matchValue}</span>
+  1238→                      <span className="text-[11px] text-slate-400">cocok pada {match.label.toLowerCase()} ini</span>
+  1239→                    </div>
+  1240→                    <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
+  1241→                      <DuplicateContactCard contact={c.contactA} tag="A" />
+  1242→                      <div className="flex items-center justify-center">
+  1243→                        <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-500">VS</span>
+  1244→                      </div>
+  1245→                      <DuplicateContactCard contact={c.contactB} tag="B" />
+  1246→                    </div>
+  1247→                    <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+  1248→                      <Button
+  1249→                        size="sm"
+  1250→                        variant="outline"
+  1251→                        className="gap-1.5"
+  1252→                        disabled={mergingKey === key}
+  1253→                        onClick={() => handleKeepSeparate(c)}
+  1254→                      >
+  1255→                        <X className="h-3.5 w-3.5" /> Keep Separate
+  1256→                      </Button>
+  1257→                      <Button
+  1258→                        size="sm"
+  1259→                        className="gap-1.5 bg-teal-600 text-white hover:bg-teal-700"
+  1260→                        disabled={mergingKey === key}
+  1261→                        onClick={() => void handleMerge(c)}
+  1262→                      >
+  1263→                        {mergingKey === key ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Merge className="h-3.5 w-3.5" />}
+  1264→                        Gabung (Merge)
+  1265→                      </Button>
+  1266→                    </div>
+  1267→                  </div>
+  1268→                )
+  1269→              })
+  1270→            )}
+  1271→          </div>
+  1272→        </DialogContent>
+  1273→      </Dialog>
+  1274→    </div>
+  1275→  )
+  1276→}
+  1277→
