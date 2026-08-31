@@ -1,0 +1,298 @@
+     1→/* Seed data untuk Multi-Brand CRM — Grupa Kreasi Media */
+     2→import { PrismaClient } from '@prisma/client'
+     3→
+     4→const db = new PrismaClient()
+     5→
+     6→const d = (days: number, hour = 9, min = 0) => {
+     7→  const dt = new Date()
+     8→  dt.setDate(dt.getDate() + days)
+     9→  dt.setHours(hour, min, 0, 0)
+    10→  return dt
+    11→}
+    12→
+    13→const STAGES = ['NEW','CONTACT_ATTEMPTED','CONNECTED','QUALIFIED','DISCOVERY','ESTIMATION','PROPOSAL_SENT','NEGOTIATION','VERBAL_AGREEMENT','WON','LOST','NURTURE'] as const
+    14→
+    15→async function main() {
+    16→  console.log('🌱 Seeding Multi-Brand CRM...')
+    17→
+    18→  // clean (order matters)
+    19→  await db.auditLog.deleteMany()
+    20→  await db.milestone.deleteMany()
+    21→  await db.project.deleteMany()
+    22→  await db.followUpTemplate.deleteMany()
+    23→  await db.note.deleteMany()
+    24→  await db.task.deleteMany()
+    25→  await db.interaction.deleteMany()
+    26→  await db.opportunity.deleteMany()
+    27→  await db.contact.deleteMany()
+    28→  await db.company.deleteMany()
+    29→  await db.service.deleteMany()
+    30→  await db.brand.deleteMany()
+    31→  await db.userBrandAccess.deleteMany()
+    32→  await db.user.deleteMany()
+    33→
+    34→  /* ---------------- USERS ---------------- */
+    35→  const [ratna, bambang, dewi, fajar, sari, andi] = await Promise.all([
+    36→    db.user.create({ data: { email: 'ratna@grupakreasi.id', name: 'Ratna Wijaya', role: 'SUPER_ADMIN', title: 'Super Admin', avatarColor: '#0ea5a4' } }),
+    37→    db.user.create({ data: { email: 'bambang@grupakreasi.id', name: 'Bambang Sutrisno', role: 'DIREKTUR', title: 'Direktur Utama', avatarColor: '#f59e0b' } }),
+    38→    db.user.create({ data: { email: 'dewi@grupakreasi.id', name: 'Dewi Lestari', role: 'MARKETING', title: 'Marketing Lead', avatarColor: '#8b5cf6' } }),
+    39→    db.user.create({ data: { email: 'fajar@grupakreasi.id', name: 'Fajar Pratama', role: 'MARKETING', title: 'Marketing Executive', avatarColor: '#f43f5e' } }),
+    40→    db.user.create({ data: { email: 'sari@grupakreasi.id', name: 'Sari Kusuma', role: 'KEUANGAN', title: 'Finance Manager', avatarColor: '#ec4899' } }),
+    41→    db.user.create({ data: { email: 'andi@grupakreasi.id', name: 'Andi Mulyana', role: 'PRODUKSI', title: 'Production Manager', avatarColor: '#84cc16' } }),
+    42→  ])
+    43→
+    44→  /* ---------------- BRANDS + SERVICES ---------------- */
+    45→  const unimasi = await db.brand.create({ data: {
+    46→    name: 'Unimasi', slug: 'unimasi', color: '#f59e0b', tagline: 'Animation & Visual Learning Studio',
+    47→    description: 'Animasi company profile, pembelajaran, infografis, program/produk, sosialisasi, dan marketing.',
+    48→    website: 'https://www.unimasi.com', slaHours: 6, workflowType: 'animation',
+    49→  }})
+    50→  const segia = await db.brand.create({ data: {
+    51→    name: 'Segia Tech', slug: 'segia-tech', color: '#10b981', tagline: 'Digital Product & Growth Agency',
+    52→    description: 'Website, SEO, UI/UX, dan produksi konten digital.',
+    53→    website: 'https://www.segiatech.com', slaHours: 4, workflowType: 'website',
+    54→  }})
+    55→  const erfo = await db.brand.create({ data: {
+    56→    name: 'Erfo Multimedia', slug: 'erfo-multimedia', color: '#f43f5e', tagline: 'Documentation & Live Production',
+    57→    description: 'Foto/video dokumentasi, shooting, live streaming, drone, video AI, dan video 360.',
+    58→    website: 'https://www.erfomultimedia.com', slaHours: 3, workflowType: 'video',
+    59→  }})
+    60→  const unicam = await db.brand.create({ data: {
+    61→    name: 'Unicam Studio', slug: 'unicam-studio', color: '#8b5cf6', tagline: 'Creative Media & Immersive Experience',
+    62→    description: 'Corporate video, animasi 2D/3D, AI video, AR/VR, virtual tour, immersive experience, projection mapping.',
+    63→    website: 'https://www.unicamstudio.com', slaHours: 8, workflowType: 'video',
+    64→  }})
+    65→
+    66→  const svc = async (brandId: string, name: string, category: string) =>
+    67→    db.service.create({ data: { brandId, name, category } })
+    68→
+    69→  const [sWeb, sLanding, sSeo, sUiux, sContent, sMaint,
+    70→    sCpAnim, sElearn, sInfo, sProd, sSos, sMotion,
+    71→    sDok, sShooting, sLive, sDrone, sAiVid, sV360,
+    72→    sCorpVid, sAnim2d3d, sArvr, sVtour, sProjMap] = await Promise.all([
+    73→    svc(segia.id, 'Company Website', 'Web Development'),
+    74→    svc(segia.id, 'Landing Page', 'Web Development'),
+    75→    svc(segia.id, 'SEO Optimization', 'Digital Growth'),
+    76→    svc(segia.id, 'UI/UX Design', 'Design'),
+    77→    svc(segia.id, 'Produksi Konten Digital', 'Content'),
+    78→    svc(segia.id, 'Web Maintenance', 'Web Development'),
+    79→    svc(unimasi.id, 'Company Profile Animation', 'Animation'),
+    80→    svc(unimasi.id, 'E-Learning Animation', 'Animation'),
+    81→    svc(unimasi.id, 'Infographic Animation', 'Animation'),
+    82→    svc(unimasi.id, 'Product/Program Animation', 'Animation'),
+    83→    svc(unimasi.id, 'Sosialisasi & Kampanye', 'Animation'),
+    84→    svc(unimasi.id, 'Motion Graphics Marketing', 'Animation'),
+    85→    svc(erfo.id, 'Dokumentasi Foto/Video', 'Documentation'),
+    86→    svc(erfo.id, 'Shooting Iklan', 'Production'),
+    87→    svc(erfo.id, 'Live Streaming', 'Live Production'),
+    88→    svc(erfo.id, 'Drone Videography', 'Production'),
+    89→    svc(erfo.id, 'Video AI', 'Production'),
+    90→    svc(erfo.id, 'Video 360', 'Immersive'),
+    91→    svc(unicam.id, 'Corporate Video', 'Video Production'),
+    92→    svc(unicam.id, 'Animasi 2D/3D', 'Animation'),
+    93→    svc(unicam.id, 'AR/VR Experience', 'Immersive'),
+    94→    svc(unicam.id, 'Virtual Tour', 'Immersive'),
+    95→    svc(unicam.id, 'Projection Mapping', 'Immersive'),
+    96→  ])
+    97→
+    98→  await Promise.all([
+    99→    db.userBrandAccess.create({ data: { userId: dewi.id, brandId: unimasi.id, canManage: true } }),
+   100→    db.userBrandAccess.create({ data: { userId: dewi.id, brandId: unicam.id, canManage: true } }),
+   101→    db.userBrandAccess.create({ data: { userId: dewi.id, brandId: segia.id } }),
+   102→    db.userBrandAccess.create({ data: { userId: fajar.id, brandId: segia.id, canManage: true } }),
+   103→    db.userBrandAccess.create({ data: { userId: fajar.id, brandId: erfo.id, canManage: true } }),
+   104→    db.userBrandAccess.create({ data: { userId: fajar.id, brandId: unicam.id } }),
+   105→    db.userBrandAccess.create({ data: { userId: bambang.id, brandId: unimasi.id } }),
+   106→    db.userBrandAccess.create({ data: { userId: bambang.id, brandId: segia.id } }),
+   107→    db.userBrandAccess.create({ data: { userId: bambang.id, brandId: erfo.id } }),
+   108→    db.userBrandAccess.create({ data: { userId: bambang.id, brandId: unicam.id } }),
+   109→  ])
+   110→
+   111→  /* ---------------- COMPANIES ---------------- */
+   112→  const mkCompany = (data: Parameters<typeof db.company.create>[0]['data']) => db.company.create({ data })
+   113→  const [nusantara, kemenkes, sentosa, bumi, swg, cakrawala, maju, hotelier, yayasan, tekno] = await Promise.all([
+   114→    mkCompany({ name: 'PT Nusantara Sejahtera', industry: 'FMCG', website: 'https://nusantarasejahtera.co.id', country: 'Indonesia', city: 'Jakarta', size: 'Enterprise', currency: 'IDR', tags: 'fmcg,retail', ownerId: dewi.id, address: 'Jl. Gatot Subroto Kav. 12, Jakarta Selatan' }),
+   115→    mkCompany({ name: 'Kementerian Kesehatan RI', industry: 'Government', website: 'https://kemkes.go.id', country: 'Indonesia', city: 'Jakarta', size: 'Government', currency: 'IDR', tags: 'government,kesehatan', ownerId: dewi.id }),
+   116→    mkCompany({ name: 'Bank Sentosa', industry: 'Banking', website: 'https://banksentosa.co.id', country: 'Indonesia', city: 'Jakarta', size: 'Enterprise', currency: 'IDR', tags: 'banking,finance', ownerId: fajar.id }),
+   117→    mkCompany({ name: 'PT Bumi Energi Nusantara', industry: 'Energy', website: 'https://bumienergi.co.id', country: 'Indonesia', city: 'Balikpapan', size: 'Enterprise', currency: 'IDR', tags: 'energy,mining', ownerId: dewi.id }),
+   118→    mkCompany({ name: 'Singapore Wellness Group', industry: 'Healthcare', website: 'https://sgwellness.sg', country: 'Singapore', city: 'Singapore', size: 'Medium', currency: 'SGD', tags: 'healthcare,regional', ownerId: fajar.id }),
+   119→    mkCompany({ name: 'Universitas Cakrawala', industry: 'Education', website: 'https://cakrawala.ac.id', country: 'Indonesia', city: 'Bandung', size: 'Medium', currency: 'IDR', tags: 'education', ownerId: dewi.id }),
+   120→    mkCompany({ name: 'PT Maju Pangan Indonesia', industry: 'Food & Beverage', website: 'https://majupangan.co.id', country: 'Indonesia', city: 'Surabaya', size: 'Medium', currency: 'IDR', tags: 'fnb,ekspor', ownerId: fajar.id }),
+   121→    mkCompany({ name: 'Global Hotelier Group', industry: 'Hospitality', website: 'https://globalhotelier.com', country: 'Malaysia', city: 'Kuala Lumpur', size: 'Enterprise', currency: 'MYR', tags: 'hospitality,regional', ownerId: fajar.id }),
+   122→    mkCompany({ name: 'Yayasan Peduli Lingkungan', industry: 'NGO', country: 'Indonesia', city: 'Jakarta', size: 'NGO', currency: 'IDR', tags: 'ngo,lingkungan', ownerId: dewi.id }),
+   123→    mkCompany({ name: 'PT Tekno Presisi', industry: 'Manufacturing', website: 'https://teknopresisi.co.id', country: 'Indonesia', city: 'Bekasi', size: 'Medium', currency: 'IDR', tags: 'manufacturing,otomotif', ownerId: dewi.id }),
+   124→  ])
+   125→
+   126→  /* ---------------- CONTACTS ---------------- */
+   127→  const mkContact = (data: Parameters<typeof db.contact.create>[0]['data']) => db.contact.create({ data })
+   128→  const [hendra, maya, rina, jonathan, budi, profSari, ahmad, linda, dedi, ratih, kevin, sinta, daniel, clara] = await Promise.all([
+   129→    mkContact({ companyId: nusantara.id, firstName: 'Hendra', lastName: 'Gunawan', position: 'Marketing Director', email: 'hendra.gunawan@nusantarasejahtera.co.id', whatsapp: '+6281234567890', phone: '+62215551001', isPrimary: true, tags: 'decision-maker' }),
+   130→    mkContact({ companyId: nusantara.id, firstName: 'Maya', lastName: 'Anggraini', position: 'Brand Manager', email: 'maya.a@nusantarasejahtera.co.id', whatsapp: '+6281234567891', preferredChannel: 'EMAIL' }),
+   131→    mkContact({ companyId: kemenkes.id, firstName: 'Rina', lastName: 'Salim', position: 'Kepala Biro Informasi Publik', email: 'rina.salim@kemkes.go.id', whatsapp: '+6281298765432', isPrimary: true, preferredChannel: 'EMAIL', tags: 'government,pap' }),
+   132→    mkContact({ companyId: swg.id, firstName: 'Jonathan', lastName: 'Tan', position: 'Head of Marketing', email: 'jonathan.tan@sgwellness.sg', whatsapp: '+6591234567', country: 'Singapore', timezone: 'Asia/Singapore', language: 'en', isPrimary: true }),
+   133→    mkContact({ companyId: bumi.id, firstName: 'Budi', lastName: 'Santoso', position: 'IT & Digital Manager', email: 'budi.santoso@bumienergi.co.id', whatsapp: '+6281377788899', city: 'Balikpapan', isPrimary: true }),
+   134→    mkContact({ companyId: cakrawala.id, firstName: 'Sari', lastName: 'Wulandari', position: 'Direktur Pemasaran & Admisi', email: 'sari.w@cakrawala.ac.id', whatsapp: '+6281555443322', city: 'Bandung', isPrimary: true }),
+   135→    mkContact({ companyId: sentosa.id, firstName: 'Ahmad', lastName: 'Fauzi', position: 'Digital Banking Manager', email: 'ahmad.fauzi@banksentosa.co.id', whatsapp: '+6281199223344', isPrimary: true, tags: 'warm-referral' }),
+   136→    mkContact({ companyId: hotelier.id, firstName: 'Linda', lastName: 'Halim', position: 'Marcom Head', email: 'linda.halim@globalhotelier.com', whatsapp: '+60123456789', country: 'Malaysia', timezone: 'Asia/Kuala_Lumpur', language: 'en', isPrimary: true }),
+   137→    mkContact({ companyId: yayasan.id, firstName: 'Dedi', lastName: 'Kurniawan', position: 'Sekretaris Yayasan', email: 'dedi@pedulilingkungan.or.id', whatsapp: '+6281777665544', isPrimary: true }),
+   138→    mkContact({ companyId: maju.id, firstName: 'Ratih', lastName: 'Puspita', position: 'Product Manager', email: 'ratih.p@majupangan.co.id', whatsapp: '+6281333221100', city: 'Surabaya', isPrimary: true }),
+   139→    mkContact({ companyId: tekno.id, firstName: 'Kevin', lastName: 'Wijaya', position: 'Owner', email: 'kevin@teknopresisi.co.id', whatsapp: '+6281888997766', isPrimary: true, tags: 'repeat-client' }),
+   140→    mkContact({ companyId: kemenkes.id, firstName: 'Sinta', lastName: 'Maharani', position: 'PR Manager', email: 'sinta.maharani@kemkes.go.id', whatsapp: '+6281266554433', preferredChannel: 'WHATSAPP' }),
+   141→    mkContact({ companyId: sentosa.id, firstName: 'Daniel', lastName: 'Oei', position: 'Procurement Lead', email: 'daniel.oei@banksentosa.co.id', whatsapp: '+6281566778899' }),
+   142→    mkContact({ companyId: swg.id, firstName: 'Clara', lastName: 'Tanuwijaya', position: 'Event Manager', email: 'clara.t@sgwellness.sg', whatsapp: '+6598765432', country: 'Singapore', timezone: 'Asia/Singapore', language: 'en' }),
+   143→  ])
+   144→
+   145→  /* ---------------- OPPORTUNITIES ---------------- */
+   146→  const oppSeq = (n: number) => `OPP-2025-${String(n).padStart(4, '0')}`
+   147→  const mkOpp = async (seq: number, data: Parameters<typeof db.opportunity.create>[0]['data']) =>
+   148→    db.opportunity.create({ data: { ...data, code: oppSeq(seq) } })
+   149→
+   150→  const o1 = await mkOpp(1, { title: 'Redesign Website Corporate', companyId: nusantara.id, contactId: hendra.id, sourceBrandId: segia.id, executingBrandId: segia.id, serviceId: sWeb.id, leadSource: 'WEBSITE', channel: 'WEBSITE', campaign: 'Google Ads - Website Korporat', brief: 'Website corporate dengan katalog produk dan berita; referensi: kompetitor FMCG.', needs: 'Modernisasi website + katalog produk', deliverables: 'Website responsif, CMS, katalog 200 produk', estimatedValue: 180000000, probability: 15, stage: 'NEW', temperature: 'WARM', ownerId: dewi.id, priority: 'HIGH', expectedCloseDate: d(45), nextAction: 'Hubungi via WhatsApp (SLA 4 jam)', nextActionDate: d(0, 17), createdAt: d(0, 8) })
+   151→  const o2 = await mkOpp(2, { title: 'Animasi E-Learning Kesehatan Masyarakat', companyId: kemenkes.id, contactId: rina.id, sourceBrandId: unimasi.id, executingBrandId: unimasi.id, serviceId: sElearn.id, leadSource: 'INSTAGRAM', channel: 'INSTAGRAM', campaign: 'IG Organic', brief: 'Seri animasi edukasi PHBS untuk 10 episode.', estimatedValue: 320000000, probability: 55, stage: 'QUALIFIED', temperature: 'HOT', ownerId: dewi.id, priority: 'URGENT', expectedCloseDate: d(30), nextAction: 'Meeting penyusunan BAP', nextActionDate: d(2, 10), createdAt: d(9) })
+   152→  const o3 = await mkOpp(3, { title: 'Company Profile Video 2025', companyId: sentosa.id, contactId: ahmad.id, sourceBrandId: unicam.id, executingBrandId: unicam.id, serviceId: sCorpVid.id, leadSource: 'REFERRAL', channel: 'WHATSAPP', brief: 'Video profil bank untuk investor day.', estimatedValue: 275000000, probability: 70, stage: 'NEGOTIATION', temperature: 'HOT', ownerId: fajar.id, priority: 'HIGH', expectedCloseDate: d(12), nextAction: 'Follow-up revisi penawaran v2', nextActionDate: d(1, 11), competitorName: 'VisionReel', createdAt: d(24) })
+   153→  const o4 = await mkOpp(4, { title: 'Live Streaming Annual Wellness Summit', companyId: swg.id, contactId: clara.id, sourceBrandId: erfo.id, executingBrandId: erfo.id, serviceId: sLive.id, leadSource: 'EMAIL', channel: 'EMAIL', estimatedValue: 18, currency: 'SGD', probability: 45, stage: 'CONNECTED', temperature: 'WARM', ownerId: fajar.id, priority: 'MEDIUM', expectedCloseDate: d(35), nextAction: 'Kirim portofolio live streaming', nextActionDate: d(1), createdAt: d(6) })
+   154→  const o5 = await mkOpp(5, { title: 'SEO & Konten Digital Penerimaan Mahasiswa', companyId: cakrawala.id, contactId: profSari.id, sourceBrandId: segia.id, executingBrandId: segia.id, serviceId: sSeo.id, leadSource: 'WEBSITE', channel: 'WEBSITE', brief: 'Naikkan organic traffic untuk pendaftaran mahasiswa baru.', estimatedValue: 95000000, probability: 40, stage: 'ESTIMATION', temperature: 'WARM', ownerId: dewi.id, priority: 'MEDIUM', expectedCloseDate: d(25), nextAction: 'Finalisasi cost breakdown dengan finance', nextActionDate: d(1, 14), createdAt: d(11) })
+   155→  const o6 = await mkOpp(6, { title: 'Virtual Tour Pabrik Cikarang', companyId: tekno.id, contactId: kevin.id, sourceBrandId: unicam.id, executingBrandId: unicam.id, serviceId: sVtour.id, leadSource: 'WEBSITE', channel: 'WEBSITE', brief: 'Virtual tour 360° pabrik untuk keperluan audit vendor dan pameran digital.', estimatedValue: 145000000, probability: 60, stage: 'PROPOSAL_SENT', temperature: 'HOT', ownerId: dewi.id, priority: 'HIGH', expectedCloseDate: d(18), nextAction: 'Tanya status proposal (masa berlaku 14 hari)', nextActionDate: d(1, 9), createdAt: d(15) })
+   156→  const o7 = await mkOpp(7, { title: 'Dokumentasi Video Produk Ekspor', companyId: maju.id, contactId: ratih.id, sourceBrandId: erfo.id, executingBrandId: erfo.id, serviceId: sDok.id, leadSource: 'INSTAGRAM', channel: 'INSTAGRAM', estimatedValue: 60000000, probability: 20, stage: 'CONTACT_ATTEMPTED', temperature: 'COLD', ownerId: fajar.id, priority: 'LOW', expectedCloseDate: d(60), nextAction: 'Telepon ulang (belum direspons)', nextActionDate: d(0, 16), createdAt: d(3) })
+   157→  const o8 = await mkOpp(8, { title: 'Animasi Produk Untuk Pasar Ekspor', companyId: maju.id, contactId: ratih.id, sourceBrandId: unimasi.id, executingBrandId: unimasi.id, serviceId: sProd.id, leadSource: 'EVENT', channel: 'MEETING', brief: 'Animasi 3D proses produksi makanan untuk pameran Food Expo Shanghai.', estimatedValue: 210000000, probability: 35, stage: 'DISCOVERY', temperature: 'WARM', ownerId: dewi.id, priority: 'MEDIUM', expectedCloseDate: d(40), nextAction: 'Jadwalkan discovery call lanjutan', nextActionDate: d(3, 13), createdAt: d(8) })
+   158→  const o9 = await mkOpp(9, { title: 'Website + Booking Engine Jaringan Hotel', companyId: hotelier.id, contactId: linda.id, sourceBrandId: segia.id, executingBrandId: segia.id, serviceId: sWeb.id, leadSource: 'REFERRAL', channel: 'REFERRAL', estimatedValue: 460000000, probability: 100, stage: 'WON', temperature: 'HOT', ownerId: fajar.id, priority: 'HIGH', expectedCloseDate: d(-5), wonAt: d(-5), nextAction: 'Kick-off project dengan produksi', nextActionDate: d(1, 10), createdAt: d(48) })
+   159→  const o10 = await mkOpp(10, { title: 'Corporate Video Program CSR', companyId: bumi.id, contactId: budi.id, sourceBrandId: unicam.id, executingBrandId: unicam.id, serviceId: sCorpVid.id, leadSource: 'COLD_CALL', channel: 'PHONE', estimatedValue: 185000000, probability: 100, stage: 'WON', temperature: 'HOT', ownerId: dewi.id, priority: 'MEDIUM', expectedCloseDate: d(-12), wonAt: d(-12), createdAt: d(60) })
+   160→  const o11 = await mkOpp(11, { title: 'Infografis Kampanye Sampah Plastik', companyId: yayasan.id, contactId: dedi.id, sourceBrandId: unimasi.id, executingBrandId: unimasi.id, serviceId: sInfo.id, leadSource: 'INSTAGRAM', channel: 'INSTAGRAM', estimatedValue: 45000000, probability: 0, stage: 'LOST', temperature: 'COLD', ownerId: dewi.id, priority: 'LOW', lostReason: 'PRICE_TOO_HIGH', lostNotes: 'Anggaran yayasan terbatas tahun ini, memilih vendor lebih murah (Studio X).', competitorName: 'Studio X', lastOfferValue: 45000000, reactivation: 'SMALLER_PACKAGE', followUpDate: d(30), lostAt: d(-8), createdAt: d(35) })
+   161→  const o12 = await mkOpp(12, { title: 'Video 360 Tour Cabang Bank', companyId: sentosa.id, contactId: daniel.id, sourceBrandId: erfo.id, executingBrandId: erfo.id, serviceId: sV360.id, leadSource: 'WEBSITE', channel: 'WEBSITE', estimatedValue: 120000000, probability: 0, stage: 'LOST', temperature: 'COLD', ownerId: fajar.id, priority: 'LOW', lostReason: 'CHOSE_COMPETITOR', lostNotes: 'Kompetitor memberi harga 20% lebih rendah dengan timeline lebih cepat.', competitorName: 'VisionReel', lastOfferValue: 120000000, reactivation: 'REOFFER_90', followUpDate: d(75), lostAt: d(-20), createdAt: d(40) })
+   162→  const o13 = await mkOpp(13, { title: 'AR Catalog Produk Otomotif', companyId: tekno.id, contactId: kevin.id, sourceBrandId: unicam.id, executingBrandId: unicam.id, serviceId: sArvr.id, leadSource: 'REFERRAL', channel: 'WHATSAPP', estimatedValue: 300000000, probability: 25, stage: 'NURTURE', temperature: 'COLD', ownerId: dewi.id, priority: 'MEDIUM', reactivation: 'BUDGET_PERIOD', followUpDate: d(50), nurtureTrack: 'REOFFER_90', nextAction: 'Penawaran ulang menjelang budget 2026', nextActionDate: d(50), createdAt: d(30) })
+   163→  const o14 = await mkOpp(14, { title: 'UI/UX Redesign Mobile Banking', companyId: sentosa.id, contactId: daniel.id, sourceBrandId: segia.id, executingBrandId: segia.id, serviceId: sUiux.id, leadSource: 'REFERRAL', channel: 'MEETING', estimatedValue: 340000000, probability: 85, stage: 'VERBAL_AGREEMENT', temperature: 'HOT', ownerId: fajar.id, priority: 'URGENT', expectedCloseDate: d(5), nextAction: 'Tunggu PO & DP 50%', nextActionDate: d(2, 10), createdAt: d(20) })
+   164→  const o15 = await mkOpp(15, { title: 'Drone Video Site Survey Tambang', companyId: bumi.id, contactId: budi.id, sourceBrandId: erfo.id, executingBrandId: erfo.id, serviceId: sDrone.id, leadSource: 'REFERRAL', channel: 'WHATSAPP', estimatedValue: 85000000, probability: 55, stage: 'QUALIFIED', temperature: 'WARM', ownerId: fajar.id, priority: 'MEDIUM', expectedCloseDate: d(28), nextAction: 'Konfirmasi izin area tambang', nextActionDate: d(2, 9), createdAt: d(7) })
+   165→  const o16 = await mkOpp(16, { title: 'Animasi 2D Kampanye Vaksinasi', companyId: kemenkes.id, contactId: sinta.id, sourceBrandId: unimasi.id, executingBrandId: unimasi.id, serviceId: sProd.id, leadSource: 'EMAIL', channel: 'EMAIL', campaign: 'Kampanye Kesehatan Q3', estimatedValue: 265000000, probability: 60, stage: 'PROPOSAL_SENT', temperature: 'HOT', ownerId: dewi.id, priority: 'HIGH', expectedCloseDate: d(15), nextAction: 'Presentasi proposal ke PAP', nextActionDate: d(1, 13), createdAt: d(13) })
+   166→
+   167→  /* ---------------- INTERACTIONS ---------------- */
+   168→  const mkInt = (data: Parameters<typeof db.interaction.create>[0]['data']) => db.interaction.create({ data })
+   169→
+   170→  await Promise.all([
+   171→    // o1 — website form (baru, belum dibalas → SLA warning)
+   172→    mkInt({ opportunityId: o1.id, contactId: hendra.id, companyId: nusantara.id, brandId: segia.id, channel: 'WEBSITE', direction: 'IN', body: 'Halo, kami butuh redesign website corporate. Mohon info paket dan estimasi biaya. Terima kasih.', sentAt: d(0, 8), status: 'DELIVERED', originalLink: 'https://segiatech.com/contact?form=LF-2201' }),
+   173→    // o2 — IG DM thread
+   174→    mkInt({ opportunityId: o2.id, contactId: rina.id, companyId: kemenkes.id, brandId: unimasi.id, channel: 'INSTAGRAM', direction: 'IN', body: 'Selamat siang, kami dari Kemenkes tertarik dengan portofolio animasi edukasi. Apakah bisa kirim reel contoh?', sentAt: d(9, 10) }),
+   175→    mkInt({ opportunityId: o2.id, contactId: rina.id, companyId: kemenkes.id, brandId: unimasi.id, channel: 'INSTAGRAM', direction: 'OUT', respondedById: dewi.id, respondedAt: d(9, 11, 20), body: 'Selamat siang Ibu Rina 🙌 Tentu, berikut kami kirim 3 contoh reel animasi e-learning kami...', status: 'READ', sentAt: d(9, 11, 20) }),
+   176→    mkInt({ opportunityId: o2.id, contactId: rina.id, companyId: kemenkes.id, brandId: unimasi.id, channel: 'WHATSAPP', direction: 'IN', body: 'Setelah diskusi internal, kami perlu 10 episode animasi PHBS. Kira-kira berapa estimasinya?', sentAt: d(4, 14) }),
+   177→    mkInt({ opportunityId: o2.id, contactId: rina.id, companyId: kemenkes.id, brandId: unimasi.id, channel: 'WHATSAPP', direction: 'OUT', respondedById: dewi.id, respondedAt: d(4, 15), body: 'Siap Bu, untuk 10 episode range Rp 280–340 jt tergantung durasi & kompleksitas. Boleh kita jadwalkan meeting untuk brief?', status: 'READ', sentAt: d(4, 15) }),
+   178→    // o3 — negotiation thread
+   179→    mkInt({ opportunityId: o3.id, contactId: ahmad.id, companyId: sentosa.id, brandId: unicam.id, channel: 'WHATSAPP', direction: 'IN', body: 'Pak, proposal v1 kami review. Ada masukan dari legal terkait hak cipta footage.', sentAt: d(3, 13) }),
+   180→    mkInt({ opportunityId: o3.id, contactId: ahmad.id, companyId: sentosa.id, brandId: unicam.id, channel: 'EMAIL', direction: 'OUT', respondedById: fajar.id, respondedAt: d(3, 16, 30), subject: 'QUO-2025-0031 — Revisi Syarat Lisensi Footage', body: 'Pak Ahmad, terlampir proposal revisi v2 dengan skema lisensi perpetual.', status: 'READ', sentAt: d(3, 16, 30) }),
+   181→    // o4 — email
+   182→    mkInt({ opportunityId: o4.id, contactId: clara.id, companyId: swg.id, brandId: erfo.id, channel: 'EMAIL', direction: 'IN', subject: 'Enquiry: Live Streaming for Annual Summit (2 days)', body: 'Hi, we plan to live stream our annual summit on 2 stages, approx 800 concurrent viewers. Can you share package and past work?', sentAt: d(6, 9, 40) }),
+   183→    mkInt({ opportunityId: o4.id, contactId: clara.id, companyId: swg.id, brandId: erfo.id, channel: 'EMAIL', direction: 'OUT', respondedById: fajar.id, respondedAt: d(6, 13), subject: 'Re: Enquiry: Live Streaming for Annual Summit', body: 'Hi Clara, thanks for reaching out! Here is our live streaming deck with 3 package tiers...', status: 'READ', sentAt: d(6, 13) }),
+   184→    // o5 — website
+   185→    mkInt({ opportunityId: o5.id, contactId: profSari.id, companyId: cakrawala.id, brandId: segia.id, channel: 'WEBSITE', direction: 'IN', body: 'Kami butuh jasa SEO untuk program penerimaan mahasiswa baru. Mohon dihubungi.', sentAt: d(11, 10, 15) }),
+   186→    mkInt({ opportunityId: o5.id, contactId: profSari.id, companyId: cakrawala.id, brandId: segia.id, channel: 'PHONE', direction: 'OUT', respondedById: dewi.id, respondedAt: d(10, 11), body: 'Telepon awal: konfirmasi kebutuhan, target: 3x organic traffic sebelum Juli.' }),
+   187→    // o6 — website + wa
+   188→    mkInt({ opportunityId: o6.id, contactId: kevin.id, companyId: tekno.id, brandId: unicam.id, channel: 'WEBSITE', direction: 'IN', body: 'Butuh virtual tour 360 untuk pabrik kami di Cikarang. Sudah pernah lihat portofolio virtual tour showroom.', sentAt: d(15, 9, 30) }),
+   189→    mkInt({ opportunityId: o6.id, contactId: kevin.id, companyId: tekno.id, brandId: unicam.id, channel: 'WHATSAPP', direction: 'OUT', respondedById: dewi.id, respondedAt: d(15, 12), body: 'Siap Pak Kevin, kami kirim proposal virtual tour + contoh hasil 360° pabrik otomotif.', status: 'READ' }),
+   190→    // o7 — IG, belum dibalas 3 hari (overdue)
+   191→    mkInt({ opportunityId: o7.id, contactId: ratih.id, companyId: maju.id, brandId: erfo.id, channel: 'INSTAGRAM', direction: 'IN', body: 'Min, mau tanya untuk jasa dokumentasi video produk. Untuk katalog ekspor.', sentAt: d(3, 19, 45) }),
+   192→    // o8 — event + meeting
+   193→    mkInt({ opportunityId: o8.id, contactId: ratih.id, companyId: maju.id, brandId: unimasi.id, channel: 'MEETING', direction: 'IN', body: 'Pertemuan di pameran SIAL InterFOOD: minat animasi 3D proses produksi untuk booth Food Expo Shanghai.', sentAt: d(8, 14) }),
+   194→    // o9 — won thread (referral)
+   195→    mkInt({ opportunityId: o9.id, contactId: linda.id, companyId: hotelier.id, brandId: segia.id, channel: 'EMAIL', direction: 'IN', subject: 'Website Revamp for 12 Properties — RFP', body: 'Dear team, attached our RFP for website revamp including booking engine integration.', sentAt: d(48, 10) }),
+   196→    mkInt({ opportunityId: o9.id, contactId: linda.id, companyId: hotelier.id, brandId: segia.id, channel: 'EMAIL', direction: 'OUT', respondedById: fajar.id, respondedAt: d(40, 15), subject: 'SEG-Q-2025-0012 — Proposal Website + Booking Engine', body: 'Dear Linda, please find our proposal with 3 implementation phases. Valid for 14 days.', status: 'READ' }),
+   197→    mkInt({ opportunityId: o9.id, contactId: linda.id, companyId: hotelier.id, brandId: segia.id, channel: 'WHATSAPP', direction: 'IN', body: 'Good news! Management approved. PO will follow this week. 🎉', sentAt: d(-5, 11), status: 'READ' }),
+   198→    // o10 — cold call to won
+   199→    mkInt({ opportunityId: o10.id, contactId: budi.id, companyId: bumi.id, brandId: unicam.id, channel: 'PHONE', direction: 'OUT', body: 'Cold call awal: minat video CSR program reboisasi.', sentAt: d(60, 10, 30) }),
+   200→    mkInt({ opportunityId: o10.id, contactId: budi.id, companyId: bumi.id, brandId: unicam.id, channel: 'EMAIL', direction: 'IN', subject: 'PO No. 550/BEN/2025 — Corporate Video CSR', body: 'Pak Andi/Dewi, PO terlampir. Mohon jadwal pre-production meeting.', sentAt: d(-12, 9) }),
+   201→    // o11 lost
+   202→    mkInt({ opportunityId: o11.id, contactId: dedi.id, companyId: yayasan.id, brandId: unimasi.id, channel: 'WHATSAPP', direction: 'IN', body: 'Terima kasih, tapi anggaran kami tidak cukup untuk skema ini tahun ini.', sentAt: d(-8, 15) }),
+   203→    // o12 lost
+   204→    mkInt({ opportunityId: o12.id, contactId: daniel.id, companyId: sentosa.id, brandId: erfo.id, channel: 'EMAIL', direction: 'IN', subject: 'Re: Penawaran Video 360', body: 'Mohon maaf, kami memilih vendor lain. Semoga bisa bekerja sama di kesempatan lain.', sentAt: d(-20, 11) }),
+   205→    // o13 nurture
+   206→    mkInt({ opportunityId: o13.id, contactId: kevin.id, companyId: tekno.id, brandId: unicam.id, channel: 'WHATSAPP', direction: 'IN', body: 'Budget AR tahun ini sudah dialokasikan. Mungkin kalau tahun depan bisa jalan.', sentAt: d(22, 16) }),
+   207→    // o14 verbal
+   208→    mkInt({ opportunityId: o14.id, contactId: daniel.id, companyId: sentosa.id, brandId: segia.id, channel: 'MEETING', direction: 'IN', body: 'Rapat negosiasi: sepakat scope & harga. PO menyusul dari procurement.', sentAt: d(1, 14) }),
+   209→    // o15
+   210→    mkInt({ opportunityId: o15.id, contactId: budi.id, companyId: bumi.id, brandId: erfo.id, channel: 'WHATSAPP', direction: 'IN', body: 'Untuk drone, area tambang butuh izin. Kami proses dulu surat jalannya.', sentAt: d(2, 10, 30) }),
+   211→    // o16
+   212→    mkInt({ opportunityId: o16.id, contactId: sinta.id, companyId: kemenkes.id, brandId: unimasi.id, channel: 'EMAIL', direction: 'IN', subject: 'Permintaan Proposal Kampanye Vaksinasi', body: 'Mohon kirimkan proposal animasi 2D untuk kampanye vaksinasi nasional, 4 episode.', sentAt: d(13, 8, 50) }),
+   213→    mkInt({ opportunityId: o16.id, contactId: sinta.id, companyId: kemenkes.id, brandId: unimasi.id, channel: 'EMAIL', direction: 'OUT', respondedById: dewi.id, respondedAt: d(12, 10), subject: 'QUO-2025-0044 — Animasi 2D Kampanye Vaksinasi (4 Episode)', body: 'Bu Sinta, proposal terlampir. Kami siap presentasi minggu ini bila diperlukan.', status: 'READ' }),
+   214→    // extra: duplicate-ish inbound via WA for o1 contact (identity matching demo)
+   215→    mkInt({ opportunityId: o1.id, contactId: hendra.id, companyId: nusantara.id, brandId: segia.id, channel: 'WHATSAPP', direction: 'IN', body: 'Halo, tadi saya isi form website. Boleh dibalas ya? Butuh segera.', sentAt: d(0, 9, 30) }),
+   216→  ])
+   217→
+   218→  /* ---------------- TASKS ---------------- */
+   219→  await Promise.all([
+   220→    db.task.create({ data: { title: 'Respons lead website PT Nusantara Sejahtera (SLA 4 jam)', opportunityId: o1.id, assigneeId: dewi.id, dueDate: d(0, 12), priority: 'URGENT', type: 'FOLLOW_UP' } }),
+   221→    db.task.create({ data: { title: 'Telepon ulang PT Maju Pangan (belum respons IG)', opportunityId: o7.id, assigneeId: fajar.id, dueDate: d(-1, 16), priority: 'HIGH', type: 'FOLLOW_UP' } }),
+   222→    db.task.create({ data: { title: 'Siapkan BAP meeting Kemenkes E-Learning', opportunityId: o2.id, assigneeId: dewi.id, dueDate: d(2, 9), priority: 'HIGH', type: 'MEETING' } }),
+   223→    db.task.create({ data: { title: 'Follow-up revisi proposal Bank Sentosa v2', opportunityId: o3.id, assigneeId: fajar.id, dueDate: d(1, 11), priority: 'URGENT', type: 'FOLLOW_UP' } }),
+   224→    db.task.create({ data: { title: 'Kick-off meeting website Hotelier', opportunityId: o9.id, assigneeId: fajar.id, dueDate: d(1, 10), priority: 'HIGH', type: 'MEETING' } }),
+   225→    db.task.create({ data: { title: 'Pre-production meeting video CSR Bumi Energi', opportunityId: o10.id, assigneeId: andi.id, dueDate: d(0, 14), priority: 'MEDIUM', type: 'INTERNAL' } }),
+   226→    db.task.create({ data: { title: 'Finalisasi cost breakdown SEO Cakrawala', opportunityId: o5.id, assigneeId: sari.id, dueDate: d(1, 14), priority: 'MEDIUM', type: 'INTERNAL' } }),
+   227→    db.task.create({ data: { title: 'Tunggu & verifikasi PO UI/UX Mobile Banking', opportunityId: o14.id, assigneeId: fajar.id, dueDate: d(2, 10), priority: 'URGENT', type: 'FOLLOW_UP' } }),
+   228→    db.task.create({ data: { title: 'Re-offer paket infografis kecil ke Yayasan Peduli', opportunityId: o11.id, assigneeId: dewi.id, dueDate: d(30, 10), priority: 'LOW', type: 'FOLLOW_UP' } }),
+   229→    db.task.create({ data: { title: 'Kirim portofolio live streaming ke Singapore Wellness', opportunityId: o4.id, assigneeId: fajar.id, dueDate: d(1, 17), priority: 'MEDIUM', type: 'FOLLOW_UP' } }),
+   230→    db.task.create({ data: { title: 'Presentasi proposal vaksinasi ke PAP Kemenkes', opportunityId: o16.id, assigneeId: dewi.id, dueDate: d(1, 13), priority: 'HIGH', type: 'MEETING' } }),
+   231→  ])
+   232→
+   233→  /* ---------------- NOTES ---------------- */
+   234→  await Promise.all([
+   235→    db.note.create({ data: { opportunityId: o3.id, authorId: bambang.id, body: 'Direktur: Diskon maksimal 8% boleh disetujui. Jangan turunkan fee produksi, cukup dari margin lisensi.', visibility: 'DIRECTOR' } }),
+   236→    db.note.create({ data: { opportunityId: o3.id, authorId: fajar.id, body: 'Legal bank minta lisensi footage perpetual. Sudah dikonfirmasi ke produksi, tidak ada biaya tambahan.', visibility: 'INTERNAL' } }),
+   237→    db.note.create({ data: { opportunityId: o14.id, authorId: bambang.id, body: 'Direktur: Deal strategis untuk portfolio fintech. Prioritaskan ketersediaan tim UI/UX.', visibility: 'DIRECTOR' } }),
+   238→    db.note.create({ data: { opportunityId: o2.id, authorId: dewi.id, body: 'PAP Kemenkes punya anggaran tersendiri, tapi perlu persetujuan Kepala Biro. Kuncinya timeline proposal < 2 minggu.', visibility: 'INTERNAL' } }),
+   239→    db.note.create({ data: { opportunityId: o1.id, authorId: dewi.id, body: 'Lead dari Google Ads, kata kunci "jasa website corporate". Belum dibalas — perlu respons segera untuk SLA.', visibility: 'INTERNAL' } }),
+   240→    db.note.create({ data: { opportunityId: o9.id, authorId: andi.id, body: 'Handover produksi: 12 properti hotel, fase 1 = 4 properti pilot. Perlu copywriter bahasa Inggris.', visibility: 'INTERNAL' } }),
+   241→  ])
+   242→
+   243→  /* ---------------- PROJECTS (dari WON) ---------------- */
+   244→  const p1 = await db.project.create({ data: {
+   245→    name: 'Website + Booking Engine — Global Hotelier Group', code: 'PRJ-2025-001', opportunityId: o9.id,
+   246→    companyId: hotelier.id, brandId: segia.id, managerId: andi.id, status: 'IN_PROGRESS', progress: 35,
+   247→    workflowType: 'website', budget: 460000000, startDate: d(-4), endDate: d(70),
+   248→  }})
+   249→  const p2 = await db.project.create({ data: {
+   250→    name: 'Corporate Video CSR — PT Bumi Energi', code: 'PRJ-2025-002', opportunityId: o10.id,
+   251→    companyId: bumi.id, brandId: unicam.id, managerId: andi.id, status: 'IN_PROGRESS', progress: 60,
+   252→    workflowType: 'video', budget: 185000000, startDate: d(-11), endDate: d(30),
+   253→  }})
+   254→  const webMilestones = ['Discovery & Requirement', 'Sitemap & Wireframe', 'UI/UX Design', 'Development', 'QA & Testing', 'Launch & Handover']
+   255→  const vidMilestones = ['Pre-Production', 'Shooting', 'Editing', 'Revision Round', 'Final Delivery']
+   256→  await Promise.all([
+   257→    ...webMilestones.map((name, i) => db.milestone.create({ data: { projectId: p1.id, name, stepOrder: i + 1, status: i === 0 ? 'DONE' : i === 1 ? 'IN_PROGRESS' : 'PENDING', dueDate: d(10 + i * 10), completedAt: i === 0 ? d(-1) : null } })),
+   258→    ...vidMilestones.map((name, i) => db.milestone.create({ data: { projectId: p2.id, name, stepOrder: i + 1, status: i < 2 ? 'DONE' : i === 2 ? 'IN_PROGRESS' : 'PENDING', dueDate: d(-2 + i * 8), completedAt: i < 2 ? d(-4 + i) : null } })),
+   259→  ])
+   260→
+   261→  /* ---------------- FOLLOW-UP TEMPLATES ---------------- */
+   262→  const mkTpl = (brandId: string, data: Omit<Parameters<typeof db.followUpTemplate.create>[0]['data'], 'brandId'>) =>
+   263→    db.followUpTemplate.create({ data: { brandId, ...data } })
+   264→  await Promise.all([
+   265→    mkTpl(segia.id, { name: 'FU1 — Konfirmasi Diterima', step: 1, delayDays: 1, channel: 'WHATSAPP', purpose: 'Konfirmasi pesan diterima', body: 'Halo {{contact_name}}, terima kasih telah menghubungi {{brand_name}} 👋 Permintaan Anda terkait {{service_name}} sudah kami terima. Saya {{marketing_name}} akan membantu prosesnya. Boleh dishare sedikit detail kebutuhan perusahaan {{company_name}}?' }),
+   266→    mkTpl(segia.id, { name: 'FU2 — Tawaran Konsultasi', step: 2, delayDays: 3, channel: 'WHATSAPP', purpose: 'Tawarkan konsultasi singkat', body: 'Halo {{contact_name}}, semoga sehat selalu. Kami punya slot konsultasi gratis 30 menit membahas {{service_name}} untuk {{company_name}}. Tersedia {{meeting_link}} — kapan waktu yang nyaman untuk Bapak/Ibu?' }),
+   267→    mkTpl(segia.id, { name: 'FU3 — Portfolio Relevan', step: 3, delayDays: 7, channel: 'EMAIL', language: 'en', subject: 'Relevant work for {{company_name}} — {{brand_name}}', purpose: 'Kirim portfolio relevan', body: 'Hi {{contact_name}},\n\nFollowing up on your inquiry about {{service_name}}. Here are two case studies similar to what {{company_name}} needs:\n\n1. Case study A — booking engine for hospitality\n2. Case study B — corporate website revamp\n\nHappy to walk you through. Estimated timeline: {{estimated_timeline}}.\n\nBest,\n{{marketing_name}}' }),
+   268→    mkTpl(segia.id, { name: 'FU4 — Final Follow-up', step: 4, delayDays: 14, channel: 'WHATSAPP_EMAIL', purpose: 'Final follow-up', body: 'Halo {{contact_name}}, kami ingin memastikan apakah kebutuhan {{service_name}} masih relevan. Jika saat ini belum, dengan senang hati kami akan follow up lagi di waktu yang lebih tepat. Dokumen {{proposal_link}} tetap kami siapkan.' }),
+   269→    mkTpl(unimasi.id, { name: 'FU1 — Konfirmasi Diterima', step: 1, delayDays: 1, channel: 'WHATSAPP', purpose: 'Konfirmasi pesan diterima', body: 'Halo {{contact_name}}, terima kasih! Permintaan {{service_name}} dari {{company_name}} sudah kami terima. Saya {{marketing_name}} dari {{brand_name}}. Apakah boleh tahu target tayang & durasi yang diinginkan?' }),
+   270→    mkTpl(unimasi.id, { name: 'Nurture — Re-offer 30 Hari', step: 5, delayDays: 30, channel: 'EMAIL', purpose: 'Re-offer 30 hari', body: 'Halo {{contact_name}}, sudah sebulan sejak kita terakhir berbicara tentang {{service_name}}. Kami baru menyelesaikan 2 proyek serupa — apakah {{company_name}} ingin melihat hasilnya? {{proposal_link}}' }),
+   271→    mkTpl(erfo.id, { name: 'FU1 — Konfirmasi Diterima', step: 1, delayDays: 1, channel: 'WHATSAPP', purpose: 'Konfirmasi pesan diterima', body: 'Halo {{contact_name}}, pesan Anda untuk {{brand_name}} sudah kami terima 🙏 Untuk kebutuhan {{service_name}}, mohon info lokasi & tanggal rencana. Saya {{marketing_name}} siap membantu.' }),
+   272→    mkTpl(erfo.id, { name: 'FU2 — Penawaran Survey', step: 2, delayDays: 3, channel: 'WHATSAPP', purpose: 'Tawarkan site survey', body: 'Halo {{contact_name}}, untuk memberi estimasi akurat {{service_name}}, tim kami bisa lakukan site survey singkat. Kapan waktu yang cocok minggu ini?' }),
+   273→    mkTpl(unicam.id, { name: 'FU1 — Konfirmasi Diterima', step: 1, delayDays: 1, channel: 'EMAIL', language: 'en', subject: 'Thank you for contacting {{brand_name}}', purpose: 'Confirm receipt', body: 'Dear {{contact_name}},\n\nThank you for your interest in {{service_name}}. I am {{marketing_name}} from {{brand_name}}. Could we schedule a short call to understand {{company_name}}\'s objectives? Here is my meeting link: {{meeting_link}}\n\nBest regards,' }),
+   274→    mkTpl(unicam.id, { name: 'Nurture — Budget Period Re-offer', step: 5, delayDays: 60, channel: 'EMAIL', purpose: 'Re-offer menjelang budget period', body: 'Dear {{contact_name}},\n\nAs {{company_name}} plans next year\'s budget, immersive media like {{service_name}} could be a strong differentiator. We prepared an indicative proposal: {{proposal_link}}\n\nRegards,\n{{marketing_name}}' }),
+   275→  ])
+   276→
+   277→  /* ---------------- AUDIT LOGS ---------------- */
+   278→  await Promise.all([
+   279→    db.auditLog.create({ data: { userId: dewi.id, userName: 'Dewi Lestari', action: 'LOGIN', entityType: 'User', entityId: dewi.id, entityLabel: 'Dewi Lestari', ip: '103.11.22.33', userAgent: 'Chrome / macOS' } }),
+   280→    db.auditLog.create({ data: { userId: fajar.id, userName: 'Fajar Pratama', action: 'LOGIN', entityType: 'User', entityId: fajar.id, entityLabel: 'Fajar Pratama', ip: '103.11.22.40', userAgent: 'Chrome / Windows' } }),
+   281→    db.auditLog.create({ data: { userId: fajar.id, userName: 'Fajar Pratama', action: 'STAGE_CHANGE', entityType: 'Opportunity', entityId: o9.id, entityLabel: oppSeq(9) + ' — Website + Booking Engine Jaringan Hotel', oldValue: JSON.stringify({ stage: 'VERBAL_AGREEMENT' }), newValue: JSON.stringify({ stage: 'WON' }), ip: '103.11.22.40' } }),
+   282→    db.auditLog.create({ data: { userId: dewi.id, userName: 'Dewi Lestari', action: 'STAGE_CHANGE', entityType: 'Opportunity', entityId: o11.id, entityLabel: oppSeq(11) + ' — Infografis Kampanye Sampah Plastik', oldValue: JSON.stringify({ stage: 'ESTIMATION' }), newValue: JSON.stringify({ stage: 'LOST', lostReason: 'PRICE_TOO_HIGH' }), ip: '103.11.22.33' } }),
+   283→    db.auditLog.create({ data: { userId: bambang.id, userName: 'Bambang Sutrisno', action: 'APPROVE_DISCOUNT', entityType: 'Opportunity', entityId: o3.id, entityLabel: oppSeq(3) + ' — Company Profile Video 2025', newValue: JSON.stringify({ discount: '8%' }), ip: '103.11.22.51' } }),
+   284→    db.auditLog.create({ data: { userId: ratna.id, userName: 'Ratna Wijaya', action: 'CREATE', entityType: 'Brand', entityId: unicam.id, entityLabel: 'Unicam Studio', newValue: JSON.stringify({ slaHours: 8, workflowType: 'video' }), ip: '10.0.0.2' } }),
+   285→    db.auditLog.create({ data: { userId: ratna.id, userName: 'Ratna Wijaya', action: 'CREATE', entityType: 'User', entityId: andi.id, entityLabel: 'Andi Mulyana', newValue: JSON.stringify({ role: 'PRODUKSI' }), ip: '10.0.0.2' } }),
+   286→    db.auditLog.create({ data: { userId: dewi.id, userName: 'Dewi Lestari', action: 'CREATE', entityType: 'Opportunity', entityId: o2.id, entityLabel: oppSeq(2) + ' — Animasi E-Learning Kesehatan Masyarakat', newValue: JSON.stringify({ stage: 'NEW', estimatedValue: 320000000 }), ip: '103.11.22.33' } }),
+   287→    db.auditLog.create({ data: { userId: sari.id, userName: 'Sari Kusuma', action: 'UPDATE', entityType: 'Opportunity', entityId: o5.id, entityLabel: oppSeq(5) + ' — SEO & Konten Digital Penerimaan Mahasiswa', oldValue: JSON.stringify({ estimatedValue: 85000000 }), newValue: JSON.stringify({ estimatedValue: 95000000 }), ip: '103.11.22.61' } }),
+   288→  ])
+   289→
+   290→  console.log('✅ Seed selesai:')
+   291→  console.log(`   Users: 6, Brands: 4, Services: 23, Companies: 10, Contacts: 14`)
+   292→  console.log(`   Opportunities: 16, Interactions: ~26, Tasks: 11, Projects: 2, Templates: 10`)
+   293→}
+   294→
+   295→main()
+   296→  .catch((e) => { console.error(e); process.exit(1) })
+   297→  .finally(() => db.$disconnect())
+   298→

@@ -1,76 +1,108 @@
-import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { requireAuth } from "@/lib/auth";
-import { logAudit } from "@/lib/audit";
-import { mapInvoice, nextDocNumber } from "@/lib/ops";
+/* ============ /api/invoices — list + filters, create ============ */
+import { NextRequest, NextResponse } from 'next/server'
+import { db } from '@/lib/db'
+import {
+  getSessionUser, generateInvoiceCode, parseDate,
+  invoiceInclude, mapInvoice,
+} from '@/lib/crm-server'
+import { logAudit } from '@/lib/audit'
 
-/** GET /api/invoices — daftar invoice + status pembayaran. */
-export async function GET() {
-  const user = await requireAuth(["OWNER", "MANAGER", "FINANCE"]);
-  if (!user) return NextResponse.json({ error: "Tidak diizinkan" }, { status: 401 });
+export const dynamic = 'force-dynamic'
+
+/** GET ?status=&brandId= → InvoiceDTO[] desc issuedAt (payments desc paidAt). */
+export async function GET(req: NextRequest) {
+  const session = await getSessionUser()
+  if (!session) return NextResponse.json({ error: 'Belum login' }, { status: 401 })
+
+  const { searchParams } = new URL(req.url)
+  const status = searchParams.get('status') ?? ''
+  const brandId = searchParams.get('brandId') ?? ''
 
   const invoices = await db.invoice.findMany({
-    include: {
-      payments: { orderBy: { paidAt: "asc" } },
-      project: { select: { code: true, company: { select: { name: true } } } },
-      quotation: { select: { number: true } },
+    where: {
+      ...(status ? { status } : {}),
+      ...(brandId ? { brandId } : {}),
     },
-    orderBy: { issuedAt: "desc" },
-    take: 200,
-  });
+    include: invoiceInclude,
+    orderBy: { issuedAt: 'desc' },
+  })
 
-  const dtos = invoices.map((inv) =>
-    mapInvoice(inv, inv.payments, {
-      projectCode: inv.project?.code ?? null,
-      quotationNumber: inv.quotation?.number ?? null,
-      companyName: inv.project?.company?.name ?? null,
-    })
-  );
-
-  return NextResponse.json({ invoices: dtos });
+  return NextResponse.json(invoices.map(mapInvoice))
 }
 
-/** POST /api/invoices — terbitkan invoice manual (mis. pelunasan / termin). */
-export async function POST(req: Request) {
-  const user = await requireAuth(["OWNER", "FINANCE"]);
-  if (!user) return NextResponse.json({ error: "Tidak diizinkan" }, { status: 401 });
+/**
+ * POST — create invoice from an opportunity.
+ * Body: { opportunityId, quotationId?, projectId?, title, amount, taxPct?, dueDate?, notes? }
+ * brand/company/currency inherit from the opportunity. total = round(amount * (1 + taxPct/100)).
+ */
+export async function POST(req: NextRequest) {
+  const session = await getSessionUser()
+  if (!session) return NextResponse.json({ error: 'Belum login' }, { status: 401 })
 
-  const body = await req.json().catch(() => null);
-  if (!body?.title || !body?.amount || Number(body.amount) <= 0) {
-    return NextResponse.json({ error: "Judul dan nominal invoice wajib diisi" }, { status: 400 });
+  const body = await req.json().catch(() => null)
+  const opportunityId = typeof body?.opportunityId === 'string' ? body.opportunityId : ''
+  const title = typeof body?.title === 'string' ? body.title.trim() : ''
+  const amount = Number(body?.amount)
+
+  if (!opportunityId) return NextResponse.json({ error: 'Opportunity wajib dipilih' }, { status: 400 })
+  if (!title) return NextResponse.json({ error: 'Judul invoice wajib diisi' }, { status: 400 })
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return NextResponse.json({ error: 'Nilai invoice harus lebih dari 0' }, { status: 400 })
   }
 
-  let brand = "unimasi";
-  let companyName: string | null = null;
-  if (body.projectId) {
-    const project = await db.project.findUnique({ where: { id: body.projectId }, include: { company: true } });
-    if (!project) return NextResponse.json({ error: "Proyek tidak ditemukan" }, { status: 404 });
-    brand = project.brand;
-    companyName = project.company?.name ?? null;
+  const opp = await db.opportunity.findFirst({ where: { id: opportunityId, isDeleted: false } })
+  if (!opp) return NextResponse.json({ error: 'Opportunity tidak ditemukan' }, { status: 404 })
+
+  const quotationId = typeof body?.quotationId === 'string' && body.quotationId ? body.quotationId : null
+  if (quotationId) {
+    const quotation = await db.quotation.findUnique({ where: { id: quotationId }, select: { id: true } })
+    if (!quotation) return NextResponse.json({ error: 'Quotation tidak ditemukan' }, { status: 404 })
+  }
+  const projectId = typeof body?.projectId === 'string' && body.projectId ? body.projectId : null
+  if (projectId) {
+    const project = await db.project.findUnique({ where: { id: projectId }, select: { id: true } })
+    if (!project) return NextResponse.json({ error: 'Project tidak ditemukan' }, { status: 404 })
   }
 
-  const amount = Math.round(Number(body.amount));
-  const ppnPct = body.ppnPct === 0 ? 0 : 11;
-  const invoice = await db.invoice.create({
+  const rawTax = Number(body?.taxPct ?? 0)
+  const taxPct = Number.isFinite(rawTax) ? Math.min(100, Math.max(0, rawTax)) : 0
+  const total = Math.round(amount * (1 + taxPct / 100))
+  const dueDate = parseDate(body?.dueDate)
+  const notes = typeof body?.notes === 'string' && body.notes.trim() ? body.notes.trim() : null
+
+  const code = await generateInvoiceCode()
+
+  const created = await db.invoice.create({
     data: {
-      number: await nextDocNumber("INV"),
-      projectId: body.projectId ?? null,
-      leadId: body.leadId ?? null,
-      brand,
-      title: String(body.title),
+      code,
+      opportunityId: opp.id,
+      quotationId,
+      projectId,
+      brandId: opp.executingBrandId,
+      companyId: opp.companyId,
+      title,
+      status: 'UNPAID',
+      currency: opp.currency,
       amount,
-      ppnPct,
-      grandTotal: Math.round(amount * (1 + ppnPct / 100)),
-      dueDate: body.dueDate ? new Date(body.dueDate) : new Date(Date.now() + 14 * 86400000),
-      status: "UNPAID",
-      issuedAt: new Date(),
+      taxPct,
+      total,
+      paidAmount: 0,
+      dueDate,
+      notes,
     },
-  });
+    include: invoiceInclude,
+  })
 
-  await db.notification.create({
-    data: { role: "FINANCE", title: `Invoice ${invoice.number} terbit`, body: `${invoice.title} — ${invoice.grandTotal.toLocaleString("id-ID")}`, type: "SYSTEM" },
-  });
-  await logAudit({ actorName: user.name, action: "INVOICE_CREATED", entity: "Invoice", entityId: invoice.id, detail: `${invoice.number} — ${invoice.title}` });
+  await logAudit({
+    userId: session.id,
+    userName: session.name,
+    action: 'INVOICE_CREATE',
+    entityType: 'Invoice',
+    entityId: created.id,
+    entityLabel: `${code} — ${title}`,
+    newValue: { code, title, total, opportunityId: opp.id },
+    req,
+  })
 
-  return NextResponse.json({ invoice: mapInvoice(invoice, [], { companyName }) }, { status: 201 });
+  return NextResponse.json(mapInvoice(created))
 }

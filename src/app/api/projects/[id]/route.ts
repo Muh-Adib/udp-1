@@ -1,77 +1,88 @@
-import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { requireAuth } from "@/lib/auth";
-import { logAudit } from "@/lib/audit";
-import { progressFromMilestones } from "@/lib/ops";
+/* ============ /api/projects/[id] — update progress/status/milestones ============ */
+import { NextRequest, NextResponse } from 'next/server'
+import { db } from '@/lib/db'
+import { getSessionUser, mapProject, projectInclude } from '@/lib/crm-server'
+import { logAudit } from '@/lib/audit'
 
-type Ctx = { params: Promise<{ id: string }> };
+export const dynamic = 'force-dynamic'
 
-const VALID_STATUS = ["PLANNED", "BRIEFED", "IN_PROGRESS", "REVIEW", "DONE"];
-const VALID_MS_STATUS = ["PENDING", "IN_PROGRESS", "DONE"];
+/** PATCH { progress?, status?, milestoneId?, milestoneStatus? } */
+export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  const session = await getSessionUser()
+  if (!session) return NextResponse.json({ error: 'Belum login' }, { status: 401 })
 
-/**
- * PATCH /api/projects/[id]
- * body: { status?, progress?, milestoneId?, milestoneStatus? }
- * - Update status proyek (alur produksi)
- * - Toggle milestone → progress proyek dihitung ulang otomatis dari bobot milestone
- */
-export async function PATCH(req: Request, ctx: Ctx) {
-  const user = await requireAuth(["OWNER", "MANAGER", "MARKETER", "PRODUCTION"]);
-  if (!user) return NextResponse.json({ error: "Tidak diizinkan" }, { status: 401 });
+  const { id } = await ctx.params
+  const project = await db.project.findUnique({
+    where: { id },
+    include: { milestones: { orderBy: { stepOrder: 'asc' } } },
+  })
+  if (!project) return NextResponse.json({ error: 'Project tidak ditemukan' }, { status: 404 })
 
-  const { id } = await ctx.params;
-  const body = await req.json().catch(() => null);
-  const project = await db.project.findUnique({ where: { id }, include: { milestones: true } });
-  if (!project) return NextResponse.json({ error: "Proyek tidak ditemukan" }, { status: 404 });
+  const body = await req.json().catch(() => null)
+  const data: Record<string, unknown> = {}
+  const oldValue: Record<string, unknown> = {}
+  const newValue: Record<string, unknown> = {}
 
-  const data: Record<string, unknown> = {};
-
-  if (body?.milestoneId && body?.milestoneStatus) {
-    if (!VALID_MS_STATUS.includes(body.milestoneStatus)) {
-      return NextResponse.json({ error: "Status milestone tidak valid" }, { status: 400 });
-    }
-    const ms = project.milestones.find((m) => m.id === body.milestoneId);
-    if (!ms) return NextResponse.json({ error: "Milestone tidak ditemukan" }, { status: 404 });
-
-    await db.milestone.update({
-      where: { id: ms.id },
-      data: { status: body.milestoneStatus, doneAt: body.milestoneStatus === "DONE" ? new Date() : null },
-    });
-
-    // Progress = bobot milestone DONE; proyek otomatis aktif saat milestone pertama berjalan
-    const fresh = await db.project.findUnique({ where: { id }, include: { milestones: true } });
-    const progress = progressFromMilestones(fresh!.milestones);
-    data.progress = progress;
-    if (progress > 0) {
-      if (!["DONE", "REVIEW"].includes(fresh!.status)) data.status = "IN_PROGRESS";
-      if (progress >= 100 && fresh!.status !== "DONE") data.status = "REVIEW"; // semua milestone selesai → menunggu persetujuan klien
-    } else if (body.milestoneStatus === "IN_PROGRESS" && ["PLANNED"].includes(fresh!.status)) {
-      data.status = "BRIEFED"; // pekerjaan mulai berjalan
+  if (typeof body?.status === 'string' && body.status && body.status !== project.status) {
+    data.status = body.status
+    oldValue.status = project.status
+    newValue.status = body.status
+    if (body.status === 'COMPLETED') {
+      data.endDate = new Date()
+      newValue.endDate = data.endDate
     }
   }
 
-  if (body?.status !== undefined) {
-    if (!VALID_STATUS.includes(body.status)) {
-      return NextResponse.json({ error: "Status proyek tidak valid" }, { status: 400 });
+  if (typeof body?.progress === 'number') {
+    const clamped = Math.max(0, Math.min(100, Math.round(body.progress)))
+    if (clamped !== project.progress) {
+      data.progress = clamped
+      oldValue.progress = project.progress
+      newValue.progress = clamped
     }
-    data.status = body.status;
-    if (body.status === "DONE") data.progress = 100;
   }
 
-  if (body?.progress !== undefined && body?.milestoneId === undefined) {
-    data.progress = Math.min(100, Math.max(0, Math.round(Number(body.progress) || 0)));
+  /* milestone update → recompute progress = round(done/total*100) */
+  if (body?.milestoneId && typeof body?.milestoneStatus === 'string') {
+    const milestone = project.milestones.find((m) => m.id === body.milestoneId)
+    if (!milestone) return NextResponse.json({ error: 'Milestone tidak ditemukan' }, { status: 404 })
+    if (!['PENDING', 'IN_PROGRESS', 'DONE'].includes(body.milestoneStatus)) {
+      return NextResponse.json({ error: 'Status milestone tidak valid' }, { status: 400 })
+    }
+    const msData: Record<string, unknown> = { status: body.milestoneStatus }
+    if (body.milestoneStatus === 'DONE') msData.completedAt = new Date()
+    else msData.completedAt = null
+    await db.milestone.update({ where: { id: milestone.id }, data: msData })
+
+    const all = await db.milestone.findMany({ where: { projectId: id } })
+    const done = all.filter((m) => m.status === 'DONE').length
+    const progress = all.length ? Math.round((done / all.length) * 100) : 0
+    data.progress = progress
+    oldValue.milestone = { id: milestone.id, status: milestone.status }
+    newValue.milestone = { id: milestone.id, status: body.milestoneStatus }
+    if (progress !== project.progress) {
+      oldValue.progress = project.progress
+      newValue.progress = progress
+    }
   }
 
-  await db.project.update({ where: { id }, data });
+  if (Object.keys(data).length === 0) {
+    return NextResponse.json({ error: 'Tidak ada perubahan' }, { status: 400 })
+  }
 
-  const statusNow = (data.status as string) ?? project.status;
+  const updated = await db.project.update({ where: { id }, data, include: projectInclude })
+
   await logAudit({
-    actorName: user.name,
-    action: "PROJECT_UPDATED",
-    entity: "Project",
+    userId: session.id,
+    userName: session.name,
+    action: 'PROJECT_UPDATE',
+    entityType: 'Project',
     entityId: id,
-    detail: `${project.code} status=${statusNow} progress=${data.progress ?? project.progress}`,
-  });
+    entityLabel: `${project.code} — ${project.name}`,
+    oldValue,
+    newValue,
+    req,
+  })
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json(mapProject(updated))
 }

@@ -1,0 +1,1187 @@
+     1→/* ============ Sales Pipeline — Kanban + Table + Opportunity Detail ============ */
+     2→'use client'
+     3→
+     4→import React, { useCallback, useEffect, useMemo, useState } from 'react'
+     5→import { cn } from '@/lib/utils'
+     6→import { useToast } from '@/hooks/use-toast'
+     7→import { Card } from '@/components/ui/card'
+     8→import { Button } from '@/components/ui/button'
+     9→import { Input } from '@/components/ui/input'
+    10→import { Textarea } from '@/components/ui/textarea'
+    11→import { Checkbox } from '@/components/ui/checkbox'
+    12→import { Skeleton } from '@/components/ui/skeleton'
+    13→import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+    14→import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+    15→import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+    16→import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+    17→import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+    18→import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+    19→import {
+    20→  BrandChip, StageBadge, TempIcon, UserAvatar, RefreshButton, EmptyState,
+    21→} from './shared'
+    22→import { OpportunityDetailDrawer } from './opportunity-detail'
+    23→import { crmApi } from './api-client'
+    24→import { useCrmStore } from './crm-store'
+    25→import type { OpportunityDTO, Stage, Priority, CompanyDTO, ContactDTO, UserDTO, BrandDTO, ServiceDTO } from '@/lib/crm-types'
+    26→import {
+    27→  STAGES, stageMeta, LOST_REASONS, REACTIVATION_OPTIONS, CHANNELS, LEAD_SOURCES,
+    28→  PRIORITIES, TEMPERATURES, TEMPERATURES as TEMPS, formatMoney, formatDate, timeAgo,
+    29→} from '@/lib/crm-constants'
+    30→import { Search, Plus, ChevronDown, ArrowUp, ArrowDown, Download, AlertTriangle, Gauge } from 'lucide-react'
+    31→import { computeLeadScore, GRADE_META } from '@/lib/lead-score'
+    32→
+    33→const SCROLLBAR = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300'
+    34→const CURRENCIES = ['IDR', 'SGD', 'MYR', 'USD']
+    35→const FLAGS: Record<string, string> = {
+    36→  Indonesia: '🇮🇩', Singapore: '🇸🇬', Malaysia: '🇲🇾', Thailand: '🇹🇭', Vietnam: '🇻🇳',
+    37→  Philippines: '🇵🇭', India: '🇮🇳', China: '🇨🇳', Japan: '🇯🇵', 'South Korea': '🇰🇷',
+    38→  Australia: '🇦🇺', 'United States': '🇺🇸', 'United Kingdom': '🇬🇧', Germany: '🇩🇪',
+    39→  Netherlands: '🇳🇱', 'United Arab Emirates': '🇦🇪', 'Saudi Arabia': '🇸🇦', Qatar: '🇶🇦',
+    40→}
+    41→const flag = (country: string) => FLAGS[country] ?? '🌐'
+    42→
+    43→type SortState = { key: 'value' | 'close' | 'score'; dir: 'asc' | 'desc' } | null
+    44→
+    45→interface NewOppForm {
+    46→  title: string
+    47→  companyMode: 'existing' | 'new'
+    48→  companyId: string
+    49→  newCompanyName: string
+    50→  newCompanyIndustry: string
+    51→  contactMode: 'existing' | 'new'
+    52→  contactId: string
+    53→  newContactFirstName: string
+    54→  newContactEmail: string
+    55→  newContactWhatsapp: string
+    56→  sourceBrandId: string
+    57→  serviceId: string
+    58→  leadSource: string
+    59→  channel: string
+    60→  estimatedValue: string
+    61→  currency: string
+    62→  priority: Priority
+    63→  expectedCloseDate: string
+    64→  brief: string
+    65→  campaign: string
+    66→}
+    67→
+    68→const EMPTY_FORM: NewOppForm = {
+    69→  title: '',
+    70→  companyMode: 'existing',
+    71→  companyId: '',
+    72→  newCompanyName: '',
+    73→  newCompanyIndustry: '',
+    74→  contactMode: 'existing',
+    75→  contactId: '',
+    76→  newContactFirstName: '',
+    77→  newContactEmail: '',
+    78→  newContactWhatsapp: '',
+    79→  sourceBrandId: '',
+    80→  serviceId: '',
+    81→  leadSource: 'WEBSITE',
+    82→  channel: 'WEBSITE',
+    83→  estimatedValue: '',
+    84→  currency: 'IDR',
+    85→  priority: 'MEDIUM',
+    86→  expectedCloseDate: '',
+    87→  brief: '',
+    88→  campaign: '',
+    89→}
+    90→
+    91→/* ---------- Small form helpers ---------- */
+    92→function FieldLabel({ children, required }: { children: React.ReactNode; required?: boolean }) {
+    93→  return (
+    94→    <p className="mb-1 text-[11px] font-semibold text-slate-500">
+    95→      {children}{required && <span className="text-rose-500"> *</span>}
+    96→    </p>
+    97→  )
+    98→}
+    99→
+   100→function ModeToggle({ value, onChange, disableNew }: { value: 'existing' | 'new'; onChange: (m: 'existing' | 'new') => void; disableNew?: boolean }) {
+   101→  return (
+   102→    <div className="inline-flex shrink-0 rounded-lg border border-slate-200 bg-slate-100 p-0.5">
+   103→      <button
+   104→        type="button"
+   105→        onClick={() => onChange('existing')}
+   106→        className={cn('rounded-md px-2.5 py-1 text-[11px] font-medium transition', value === 'existing' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700')}
+   107→      >
+   108→        Existing
+   109→      </button>
+   110→      <button
+   111→        type="button"
+   112→        disabled={disableNew}
+   113→        onClick={() => onChange('new')}
+   114→        className={cn('rounded-md px-2.5 py-1 text-[11px] font-medium transition disabled:opacity-40', value === 'new' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700')}
+   115→      >
+   116→        Baru
+   117→      </button>
+   118→    </div>
+   119→  )
+   120→}
+   121→
+   122→/* ---------- Score badge + breakdown popover ---------- */
+   123→function ScoreBadge({ result, compact }: { result: ReturnType<typeof computeLeadScore>; compact?: boolean }) {
+   124→  const meta = GRADE_META[result.grade]
+   125→  return (
+   126→    <Popover>
+   127→      <PopoverTrigger asChild>
+   128→        <button
+   129→          onClick={(e) => e.stopPropagation()}
+   130→          className={cn(
+   131→            'inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-bold ring-1 transition hover:brightness-95',
+   132→            meta.cls, meta.ring,
+   133→          )}
+   134→          title="Lihat rincian skor lead"
+   135→        >
+   136→          {!compact && <Gauge className="h-3 w-3" />}
+   137→          {result.score}
+   138→          <span className="opacity-70">· {result.grade}</span>
+   139→        </button>
+   140→      </PopoverTrigger>
+   141→      <PopoverContent className="w-64 p-3" onClick={(e) => e.stopPropagation()}>
+   142→        <div className="flex items-center justify-between">
+   143→          <p className="text-xs font-bold text-slate-800">Rincian Skor Lead</p>
+   144→          <span className={cn('rounded-md px-1.5 py-0.5 text-[10px] font-bold ring-1', meta.cls, meta.ring)}>
+   145→            {result.score} · {meta.label}
+   146→          </span>
+   147→        </div>
+   148→        <div className="mt-2.5 space-y-1.5">
+   149→          {result.factors.map((f) => (
+   150→            <div key={f.label}>
+   151→              <div className="flex items-center justify-between text-[10px]">
+   152→                <span className="font-medium text-slate-600">{f.label}</span>
+   153→                <span className="text-slate-400">{f.points}/{f.max}{f.note ? ` · ${f.note}` : ''}</span>
+   154→              </div>
+   155→              <div className="mt-0.5 h-1 overflow-hidden rounded-full bg-slate-100">
+   156→                <div
+   157→                  className="h-full rounded-full bg-teal-500 transition-all"
+   158→                  style={{ width: `${Math.min(100, (f.points / f.max) * 100)}%` }}
+   159→                />
+   160→              </div>
+   161→            </div>
+   162→          ))}
+   163→          {result.penalties.map((f) => (
+   164→            <div key={f.label} className="flex items-center justify-between rounded-md bg-rose-50 px-1.5 py-1 text-[10px]">
+   165→              <span className="font-medium text-rose-700">{f.label}</span>
+   166→              <span className="font-bold text-rose-600">{f.points}{f.note ? ` · ${f.note}` : ''}</span>
+   167→            </div>
+   168→          ))}
+   169→        </div>
+   170→        <p className="mt-2 border-t border-slate-100 pt-1.5 text-[9px] leading-relaxed text-slate-400">
+   171→          Skor otomatis dari tahap, engagement, recency, nilai, urgensi — dikurangi sinyal perhatian.
+   172→        </p>
+   173→      </PopoverContent>
+   174→    </Popover>
+   175→  )
+   176→}
+   177→
+   178→/* ---------- Kanban card ---------- */
+   179→function PipelineCard({ o, busy, onOpen, onMove }: {
+   180→  o: OpportunityDTO
+   181→  busy: boolean
+   182→  onOpen: () => void
+   183→  onMove: (stage: Stage) => void
+   184→}) {
+   185→  const isClosed = o.stage === 'WON' || o.stage === 'LOST'
+   186→  const overdue = !isClosed && !!o.nextActionDate && new Date(o.nextActionDate).getTime() < Date.now()
+   187→  const suppressClick = React.useRef(false)
+   188→  return (
+   189→    <div
+   190→      draggable
+   191→      onDragStart={(e) => { e.dataTransfer.setData('text/plain', o.id); e.dataTransfer.effectAllowed = 'move' }}
+   192→      onClick={() => {
+   193→        if (suppressClick.current) { suppressClick.current = false; return }
+   194→        onOpen()
+   195→      }}
+   196→      className={cn(
+   197→        'group cursor-pointer rounded-xl border border-slate-200 border-l-4 bg-white p-3 shadow-sm transition hover:shadow-md',
+   198→        busy && 'pointer-events-none opacity-50',
+   199→      )}
+   200→      style={{ borderLeftColor: o.brandColor }}
+   201→    >
+   202→      <div className="flex items-start gap-1">
+   203→        <div className="min-w-0 flex-1">
+   204→          <p className="line-clamp-1 text-[13px] font-semibold text-slate-800">{o.title}</p>
+   205→          <p className="text-[10px] text-slate-400">{o.code}</p>
+   206→        </div>
+   207→        <DropdownMenu>
+   208→          <DropdownMenuTrigger asChild>
+   209→            <button
+   210→              onClick={(e) => e.stopPropagation()}
+   211→              className="rounded p-0.5 text-slate-300 transition hover:bg-slate-100 hover:text-slate-600 sm:opacity-0 sm:group-hover:opacity-100"
+   212→              title="Pindah ke…"
+   213→            >
+   214→              <ChevronDown className="h-3.5 w-3.5" />
+   215→            </button>
+   216→          </DropdownMenuTrigger>
+   217→          <DropdownMenuContent align="end" className="max-h-72 overflow-y-auto">
+   218→            <DropdownMenuLabel className="text-[11px] text-slate-400">Pindah ke…</DropdownMenuLabel>
+   219→            {STAGES.filter((s) => s.key !== o.stage).map((s) => (
+   220→              <DropdownMenuItem key={s.key} onSelect={() => { suppressClick.current = true; onMove(s.key) }}>
+   221→                <span className={cn('mr-2 h-1.5 w-1.5 rounded-full', s.dot)} />{s.label}
+   222→              </DropdownMenuItem>
+   223→            ))}
+   224→          </DropdownMenuContent>
+   225→        </DropdownMenu>
+   226→      </div>
+   227→
+   228→      <p className="truncate text-xs text-slate-500">{o.companyName} · {o.contactName}</p>
+   229→
+   230→      <div className="mt-2 flex items-center gap-1.5">
+   231→        <BrandChip name={o.brandName} color={o.brandColor} size="xs" />
+   232→        <TempIcon temperature={o.temperature} />
+   233→        {o.serviceName && <span className="truncate text-[10px] text-slate-400">· {o.serviceName}</span>}
+   234→      </div>
+   235→
+   236→      <div className="mt-2 flex items-center justify-between gap-2">
+   237→        <span className="text-sm font-bold text-slate-900">{formatMoney(o.estimatedValue, o.currency, true)}</span>
+   238→        <div className="flex items-center gap-1">
+   239→          {!isClosed && <ScoreBadge result={computeLeadScore(o)} compact />}
+   240→          <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500">{o.probability}%</span>
+   241→        </div>
+   242→      </div>
+   243→
+   244→      {o.nextAction && (
+   245→        <p className="mt-2 truncate rounded bg-amber-50 px-1.5 py-0.5 text-[11px] text-amber-700" title={o.nextAction}>
+   246→          {o.nextAction}
+   247→          {overdue && (
+   248→            <span className="ml-1 inline-flex items-center gap-0.5 whitespace-nowrap text-[10px] font-semibold text-rose-600">
+   249→              <span className="h-1 w-1 rounded-full bg-rose-500" />Terlambat
+   250→            </span>
+   251→          )}
+   252→        </p>
+   253→      )}
+   254→      {!o.nextAction && overdue && (
+   255→        <p className="mt-2 inline-flex items-center gap-1 rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-semibold text-rose-600">
+   256→          <span className="h-1 w-1 rounded-full bg-rose-500" />Terlambat
+   257→        </p>
+   258→      )}
+   259→
+   260→      <div className="mt-2 flex items-center gap-1.5 border-t border-slate-100 pt-2">
+   261→        <UserAvatar name={o.ownerName} color={o.ownerColor} size={20} />
+   262→        <span className="truncate text-[10px] font-medium text-slate-500">{o.ownerName}</span>
+   263→        <span className="ml-auto truncate text-[10px] text-slate-400">{timeAgo(o.lastInteractionAt)}</span>
+   264→        <span title={o.companyCountry} className="text-[11px] leading-none">{flag(o.companyCountry)}</span>
+   265→      </div>
+   266→    </div>
+   267→  )
+   268→}
+   269→
+   270→/* ================= Main view ================= */
+   271→export default function PipelineView({ focusOpportunityId, onConsumeFocus }: {
+   272→  focusOpportunityId: string | null
+   273→  onConsumeFocus: () => void
+   274→}) {
+   275→  const { toast } = useToast()
+   276→  const { brands, user } = useCrmStore()
+   277→
+   278→  const [opps, setOpps] = useState<OpportunityDTO[]>([])
+   279→  const [loading, setLoading] = useState(true)
+   280→  const [fetchError, setFetchError] = useState<string | null>(null)
+   281→
+   282→  /* filters */
+   283→  const [search, setSearch] = useState('')
+   284→  const [brandFilter, setBrandFilter] = useState('all')
+   285→  const [ownerFilter, setOwnerFilter] = useState('all')
+   286→  const [tempFilter, setTempFilter] = useState('all')
+   287→  const [priorityFilter, setPriorityFilter] = useState('all')
+   288→  const [view, setView] = useState<'kanban' | 'tabel'>('kanban')
+   289→
+   290→  /* owners (MARKETING only) */
+   291→  const [marketingUsers, setMarketingUsers] = useState<UserDTO[]>([])
+   292→
+   293→  /* kanban drag & drop */
+   294→  const [dragOver, setDragOver] = useState<string | null>(null)
+   295→  const [busyId, setBusyId] = useState<string | null>(null)
+   296→
+   297→  /* detail drawer */
+   298→  const [detailId, setDetailId] = useState<string | null>(null)
+   299→  const [detailOpen, setDetailOpen] = useState(false)
+   300→
+   301→  /* table */
+   302→  const [selected, setSelected] = useState<Set<string>>(new Set())
+   303→  const [sort, setSort] = useState<SortState>(null)
+   304→  const [bulkOwner, setBulkOwner] = useState('')
+   305→  const [bulkBusy, setBulkBusy] = useState(false)
+   306→
+   307→  /* stage dialogs */
+   308→  const [lostTarget, setLostTarget] = useState<OpportunityDTO | null>(null)
+   309→  const [lostReason, setLostReason] = useState('')
+   310→  const [lostNotes, setLostNotes] = useState('')
+   311→  const [lostCompetitor, setLostCompetitor] = useState('')
+   312→  const [lostReactivation, setLostReactivation] = useState('')
+   313→  const [lostFollowUp, setLostFollowUp] = useState('')
+   314→  const [wonTarget, setWonTarget] = useState<OpportunityDTO | null>(null)
+   315→  const [wonOffer, setWonOffer] = useState('')
+   316→
+   317→  /* new opportunity dialog */
+   318→  const [newOpen, setNewOpen] = useState(false)
+   319→  const [creating, setCreating] = useState(false)
+   320→  const [form, setForm] = useState<NewOppForm>(EMPTY_FORM)
+   321→  const [companies, setCompanies] = useState<CompanyDTO[]>([])
+   322→  const [companiesLoading, setCompaniesLoading] = useState(false)
+   323→  const [contacts, setContacts] = useState<ContactDTO[]>([])
+   324→  const [contactsLoading, setContactsLoading] = useState(false)
+   325→
+   326→  /* ---------- data ---------- */
+   327→  const load = useCallback(async () => {
+   328→    setLoading(true)
+   329→    try {
+   330→      const data = await crmApi.opportunities()
+   331→      setOpps(data)
+   332→      setFetchError(null)
+   333→    } catch (e) {
+   334→      setFetchError(e instanceof Error ? e.message : 'Gagal memuat pipeline')
+   335→    } finally {
+   336→      setLoading(false)
+   337→    }
+   338→  }, [])
+   339→
+   340→  useEffect(() => { void load() }, [load])
+   341→
+   342→  useEffect(() => {
+   343→    let alive = true
+   344→    crmApi.users()
+   345→      .then((us) => { if (alive) setMarketingUsers(us.filter((u) => u.isActive && u.role === 'MARKETING')) })
+   346→      .catch(() => { /* biarkan kosong */ })
+   347→    return () => { alive = false }
+   348→  }, [])
+   349→
+   350→  /* focus dari view lain (mis. related opportunity di drawer) */
+   351→  useEffect(() => {
+   352→    if (focusOpportunityId) {
+   353→      setDetailId(focusOpportunityId)
+   354→      setDetailOpen(true)
+   355→      onConsumeFocus()
+   356→    }
+   357→  }, [focusOpportunityId, onConsumeFocus])
+   358→
+   359→  /* ---------- client-side filter ---------- */
+   360→  const filtered = useMemo(() => {
+   361→    const q = search.trim().toLowerCase()
+   362→    return opps.filter((o) => {
+   363→      if (brandFilter !== 'all' && o.sourceBrandId !== brandFilter) return false
+   364→      if (ownerFilter !== 'all' && o.ownerId !== ownerFilter) return false
+   365→      if (tempFilter !== 'all' && o.temperature !== tempFilter) return false
+   366→      if (priorityFilter !== 'all' && o.priority !== priorityFilter) return false
+   367→      if (q) {
+   368→        const hay = `${o.code} ${o.title} ${o.companyName} ${o.contactName}`.toLowerCase()
+   369→        if (!hay.includes(q)) return false
+   370→      }
+   371→      return true
+   372→    })
+   373→  }, [opps, search, brandFilter, ownerFilter, tempFilter, priorityFilter])
+   374→
+   375→  /* ---------- lead scoring (rule-based, Phase 4) ---------- */
+   376→  const scoreMap = useMemo(() => {
+   377→    const m = new Map<string, ReturnType<typeof computeLeadScore>>()
+   378→    for (const o of filtered) m.set(o.id, computeLeadScore(o))
+   379→    return m
+   380→  }, [filtered])
+   381→
+   382→  const tableRows = useMemo(() => {
+   383→    const rows = [...filtered]
+   384→    if (sort) {
+   385→      rows.sort((a, b) => {
+   386→        let d = 0
+   387→        if (sort.key === 'value') {
+   388→          d = a.estimatedValue - b.estimatedValue
+   389→        } else if (sort.key === 'score') {
+   390→          d = (scoreMap.get(a.id)?.score ?? 0) - (scoreMap.get(b.id)?.score ?? 0)
+   391→        } else {
+   392→          const ta = a.expectedCloseDate ? new Date(a.expectedCloseDate).getTime() : 0
+   393→          const tb = b.expectedCloseDate ? new Date(b.expectedCloseDate).getTime() : 0
+   394→          d = ta - tb
+   395→        }
+   396→        return sort.dir === 'asc' ? d : -d
+   397→      })
+   398→    }
+   399→    return rows
+   400→  }, [filtered, sort, scoreMap])
+   401→
+   402→  /* ---------- stage moves ---------- */
+   403→  const applyStageChange = useCallback(async (id: string, stage: Stage, extra?: Record<string, unknown>, successTitle?: string) => {
+   404→    setBusyId(id)
+   405→    try {
+   406→      await crmApi.changeStage(id, { stage, ...extra })
+   407→      toast({
+   408→        title: successTitle ?? 'Stage diperbarui',
+   409→        description: `Opportunity dipindah ke ${stageMeta(stage).label}`,
+   410→      })
+   411→      await load()
+   412→    } catch (e) {
+   413→      toast({ title: 'Gagal memindahkan opportunity', description: e instanceof Error ? e.message : 'Terjadi kesalahan', variant: 'destructive' })
+   414→    } finally {
+   415→      setBusyId(null)
+   416→    }
+   417→  }, [load, toast])
+   418→
+   419→  const handleMove = useCallback((o: OpportunityDTO, target: Stage) => {
+   420→    if (target === o.stage) return
+   421→    if (target === 'LOST') {
+   422→      setLostReason(''); setLostNotes(''); setLostCompetitor(''); setLostReactivation(''); setLostFollowUp('')
+   423→      setLostTarget(o)
+   424→      return
+   425→    }
+   426→    if (target === 'WON') { setWonOffer(''); setWonTarget(o); return }
+   427→    void applyStageChange(o.id, target)
+   428→  }, [applyStageChange])
+   429→
+   430→  const submitLost = () => {
+   431→    if (!lostTarget || !lostReason) return
+   432→    const id = lostTarget.id
+   433→    setLostTarget(null)
+   434→    void applyStageChange(id, 'LOST', {
+   435→      lostReason,
+   436→      ...(lostNotes.trim() ? { lostNotes: lostNotes.trim() } : {}),
+   437→      ...(lostCompetitor.trim() ? { competitorName: lostCompetitor.trim() } : {}),
+   438→      ...(lostReactivation ? { reactivation: lostReactivation } : {}),
+   439→      ...(lostFollowUp ? { followUpDate: lostFollowUp } : {}),
+   440→    }, 'Opportunity ditandai Lost')
+   441→  }
+   442→
+   443→  const confirmWon = () => {
+   444→    if (!wonTarget) return
+   445→    const id = wonTarget.id
+   446→    const offer = Number(wonOffer)
+   447→    setWonTarget(null)
+   448→    void applyStageChange(id, 'WON', offer > 0 ? { lastOfferValue: offer } : {}, '🎉 Deal Won! Project produksi dibuat otomatis')
+   449→  }
+   450→
+   451→  /* ---------- table helpers ---------- */
+   452→  const openDetail = useCallback((id: string) => { setDetailId(id); setDetailOpen(true) }, [])
+   453→
+   454→  const toggleSort = (key: 'value' | 'close' | 'score') => {
+   455→    setSort((s) => {
+   456→      if (s?.key !== key) return { key, dir: 'desc' }
+   457→      if (s.dir === 'desc') return { key, dir: 'asc' }
+   458→      return null
+   459→    })
+   460→  }
+   461→
+   462→  const toggleRow = (id: string, checked: boolean) => {
+   463→    setSelected((prev) => { const n = new Set(prev); if (checked) n.add(id); else n.delete(id); return n })
+   464→  }
+   465→  const allChecked = filtered.length > 0 && filtered.every((o) => selected.has(o.id))
+   466→  const toggleAll = (checked: boolean) => setSelected(checked ? new Set(filtered.map((o) => o.id)) : new Set())
+   467→
+   468→  const canExport = !!user && ['SUPER_ADMIN', 'DIREKTUR', 'KEUANGAN'].includes(user.role)
+   469→
+   470→  const exportCsv = () => {
+   471→    const rows = Array.from(selected)
+   472→      .map((id) => opps.find((o) => o.id === id))
+   473→      .filter((o): o is OpportunityDTO => !!o)
+   474→    if (rows.length === 0) return
+   475→    const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`
+   476→    const lines = [
+   477→      ['Kode', 'Judul', 'Perusahaan', 'Brand', 'Stage', 'Nilai', 'Currency', 'Prob', 'Owner', 'Est Close'].join(';'),
+   478→      ...rows.map((o) => [
+   479→        o.code, o.title, o.companyName, o.brandName, stageMeta(o.stage).label,
+   480→        o.estimatedValue, o.currency, o.probability, o.ownerName, o.expectedCloseDate ?? '',
+   481→      ].map(esc).join(';')),
+   482→    ]
+   483→    const blob = new Blob(['\uFEFF' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' })
+   484→    const url = URL.createObjectURL(blob)
+   485→    const a = document.createElement('a')
+   486→    a.href = url
+   487→    a.download = 'pipeline-opportunities.csv'
+   488→    a.click()
+   489→    URL.revokeObjectURL(url)
+   490→    toast({ title: 'CSV diekspor', description: `${rows.length} opportunity diekspor ke pipeline-opportunities.csv` })
+   491→  }
+   492→
+   493→  const assignBulk = async (ownerId: string) => {
+   494→    setBulkBusy(true)
+   495→    try {
+   496→      const ids = Array.from(selected)
+   497→      for (const id of ids) {
+   498→        await crmApi.updateOpportunity(id, { ownerId })
+   499→      }
+   500→      const owner = marketingUsers.find((u) => u.id === ownerId)
+   501→      toast({ title: 'Assign selesai', description: `${ids.length} opportunity di-assign ke ${owner?.name ?? 'owner terpilih'}` })
+   502→      setSelected(new Set())
+   503→      setBulkOwner('')
+   504→      await load()
+   505→    } catch (e) {
+   506→      toast({ title: 'Gagal assign owner', description: e instanceof Error ? e.message : 'Terjadi kesalahan', variant: 'destructive' })
+   507→    } finally {
+   508→      setBulkBusy(false)
+   509→    }
+   510→  }
+   511→
+   512→  /* ---------- new opportunity ---------- */
+   513→  const openNewDialog = async (open: boolean) => {
+   514→    setNewOpen(open)
+   515→    if (open) {
+   516→      setForm(EMPTY_FORM)
+   517→      setContacts([])
+   518→      setCompaniesLoading(true)
+   519→      try {
+   520→        setCompanies(await crmApi.companies())
+   521→      } catch {
+   522→        setCompanies([])
+   523→      } finally {
+   524→        setCompaniesLoading(false)
+   525→      }
+   526→    }
+   527→  }
+   528→
+   529→  const onCompanyChange = async (id: string) => {
+   530→    setForm((f) => ({ ...f, companyId: id, contactId: '', contactMode: 'existing' }))
+   531→    setContactsLoading(true)
+   532→    try {
+   533→      const cs = await crmApi.contacts(`companyId=${id}`)
+   534→      setContacts(cs)
+   535→      if (cs.length === 0) setForm((f) => ({ ...f, contactMode: 'new' }))
+   536→    } catch {
+   537→      setContacts([])
+   538→    } finally {
+   539→      setContactsLoading(false)
+   540→    }
+   541→  }
+   542→
+   543→  const onBrandChange = (id: string) => {
+   544→    const brand = brands.find((b: BrandDTO) => b.id === id)
+   545→    setForm((f) => ({ ...f, sourceBrandId: id, serviceId: '', currency: brand?.primaryCurrency ?? f.currency }))
+   546→  }
+   547→
+   548→  const services: ServiceDTO[] = useMemo(
+   549→    () => brands.find((b: BrandDTO) => b.id === form.sourceBrandId)?.services ?? [],
+   550→    [brands, form.sourceBrandId],
+   551→  )
+   552→
+   553→  const submitNew = async () => {
+   554→    if (!form.title.trim()) { toast({ title: 'Judul opportunity wajib diisi', variant: 'destructive' }); return }
+   555→    if (!form.sourceBrandId) { toast({ title: 'Brand sumber wajib dipilih', variant: 'destructive' }); return }
+   556→    if (form.companyMode === 'existing' && !form.companyId) { toast({ title: 'Perusahaan wajib dipilih', variant: 'destructive' }); return }
+   557→    if (form.companyMode === 'new' && !form.newCompanyName.trim()) { toast({ title: 'Nama perusahaan baru wajib diisi', variant: 'destructive' }); return }
+   558→    if (form.contactMode === 'existing' && !form.contactId) { toast({ title: 'Kontak wajib dipilih', variant: 'destructive' }); return }
+   559→    if (form.contactMode === 'new' && !form.newContactFirstName.trim()) { toast({ title: 'Nama kontak baru wajib diisi', variant: 'destructive' }); return }
+   560→
+   561→    setCreating(true)
+   562→    try {
+   563→      const payload: Record<string, unknown> = {
+   564→        title: form.title.trim(),
+   565→        sourceBrandId: form.sourceBrandId,
+   566→        leadSource: form.leadSource,
+   567→        channel: form.channel,
+   568→        estimatedValue: Number(form.estimatedValue) || 0,
+   569→        currency: form.currency,
+   570→        priority: form.priority,
+   571→        ...(form.serviceId ? { serviceId: form.serviceId } : {}),
+   572→        ...(form.expectedCloseDate ? { expectedCloseDate: form.expectedCloseDate } : {}),
+   573→        ...(form.brief.trim() ? { brief: form.brief.trim() } : {}),
+   574→        ...(form.campaign.trim() ? { campaign: form.campaign.trim() } : {}),
+   575→      }
+   576→      if (form.companyMode === 'existing') {
+   577→        payload.companyId = form.companyId
+   578→      } else {
+   579→        payload.newCompany = { name: form.newCompanyName.trim(), industry: form.newCompanyIndustry.trim() || undefined }
+   580→      }
+   581→      if (form.contactMode === 'existing') {
+   582→        payload.contactId = form.contactId
+   583→      } else {
+   584→        payload.newContact = {
+   585→          firstName: form.newContactFirstName.trim(),
+   586→          email: form.newContactEmail.trim() || undefined,
+   587→          whatsapp: form.newContactWhatsapp.trim() || undefined,
+   588→        }
+   589→      }
+   590→      const created = await crmApi.createOpportunity(payload)
+   591→      toast({ title: 'Opportunity dibuat', description: `${created.code} — ${created.title} masuk stage New` })
+   592→      setNewOpen(false)
+   593→      await load()
+   594→      openDetail(created.id)
+   595→    } catch (e) {
+   596→      toast({ title: 'Gagal membuat opportunity', description: e instanceof Error ? e.message : 'Terjadi kesalahan', variant: 'destructive' })
+   597→    } finally {
+   598→      setCreating(false)
+   599→    }
+   600→  }
+   601→
+   602→  /* ---------- render ---------- */
+   603→  return (
+   604→    <div className="space-y-4">
+   605→      {/* ===== Toolbar ===== */}
+   606→      <div className="flex flex-wrap items-center gap-2">
+   607→        <div className="relative w-full sm:w-64">
+   608→          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+   609→          <Input
+   610→            value={search}
+   611→            onChange={(e) => setSearch(e.target.value)}
+   612→            placeholder="Cari kode, judul, perusahaan, kontak…"
+   613→            className="h-9 pl-8 text-sm"
+   614→          />
+   615→        </div>
+   616→
+   617→        <Select value={brandFilter} onValueChange={setBrandFilter}>
+   618→          <SelectTrigger size="sm" className="w-full sm:w-[150px]"><SelectValue /></SelectTrigger>
+   619→          <SelectContent>
+   620→            <SelectItem value="all">Semua Brand</SelectItem>
+   621→            {brands.map((b: BrandDTO) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+   622→          </SelectContent>
+   623→        </Select>
+   624→
+   625→        <Select value={ownerFilter} onValueChange={setOwnerFilter}>
+   626→          <SelectTrigger size="sm" className="w-full sm:w-[150px]"><SelectValue /></SelectTrigger>
+   627→          <SelectContent>
+   628→            <SelectItem value="all">Semua Owner</SelectItem>
+   629→            {marketingUsers.map((u) => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
+   630→          </SelectContent>
+   631→        </Select>
+   632→
+   633→        <Select value={tempFilter} onValueChange={setTempFilter}>
+   634→          <SelectTrigger size="sm" className="w-full sm:w-[130px]"><SelectValue /></SelectTrigger>
+   635→          <SelectContent>
+   636→            <SelectItem value="all">Semua Suhu</SelectItem>
+   637→            {TEMPS.map((t) => <SelectItem key={t.key} value={t.key}>{t.emoji} {t.label}</SelectItem>)}
+   638→          </SelectContent>
+   639→        </Select>
+   640→
+   641→        <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+   642→          <SelectTrigger size="sm" className="w-full sm:w-[130px]"><SelectValue /></SelectTrigger>
+   643→          <SelectContent>
+   644→            <SelectItem value="all">Semua Prioritas</SelectItem>
+   645→            {PRIORITIES.map((p) => <SelectItem key={p.key} value={p.key}>{p.label}</SelectItem>)}
+   646→          </SelectContent>
+   647→        </Select>
+   648→
+   649→        <div className="ml-auto flex items-center gap-2">
+   650→          <div className="flex rounded-lg border border-slate-200 bg-white p-0.5">
+   651→            <button
+   652→              onClick={() => setView('kanban')}
+   653→              className={cn('rounded-md px-3 py-1.5 text-xs font-medium transition', view === 'kanban' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800')}
+   654→            >
+   655→              Kanban
+   656→            </button>
+   657→            <button
+   658→              onClick={() => setView('tabel')}
+   659→              className={cn('rounded-md px-3 py-1.5 text-xs font-medium transition', view === 'tabel' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800')}
+   660→            >
+   661→              Tabel
+   662→            </button>
+   663→          </div>
+   664→          <Button onClick={() => void openNewDialog(true)} className="h-9 gap-1.5 bg-slate-900 text-white hover:bg-slate-800">
+   665→            <Plus className="h-4 w-4" /><span className="hidden sm:inline">Opportunity</span>
+   666→          </Button>
+   667→          <RefreshButton onClick={() => void load()} loading={loading} />
+   668→        </div>
+   669→      </div>
+   670→
+   671→      {/* ===== Error ===== */}
+   672→      {fetchError && (
+   673→        <Alert variant="destructive">
+   674→          <AlertTriangle className="h-4 w-4" />
+   675→          <AlertTitle>Gagal memuat pipeline</AlertTitle>
+   676→          <AlertDescription className="flex flex-wrap items-center gap-3">
+   677→            <span>{fetchError}</span>
+   678→            <Button variant="outline" size="sm" onClick={() => void load()}>Coba lagi</Button>
+   679→          </AlertDescription>
+   680→        </Alert>
+   681→      )}
+   682→
+   683→      {/* ===== Loading skeleton ===== */}
+   684→      {loading && opps.length === 0 && !fetchError && (
+   685→        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+   686→          {Array.from({ length: 8 }).map((_, i) => (
+   687→            <div key={i} className="rounded-xl border border-slate-200 bg-white p-4">
+   688→              <Skeleton className="h-4 w-2/3" />
+   689→              <Skeleton className="mt-2 h-3 w-1/2" />
+   690→              <Skeleton className="mt-4 h-5 w-24" />
+   691→              <Skeleton className="mt-4 h-8 w-full rounded-lg" />
+   692→            </div>
+   693→          ))}
+   694→        </div>
+   695→      )}
+   696→
+   697→      {!loading && opps.length === 0 && !fetchError && (
+   698→        <EmptyState
+   699→          title="Belum ada opportunity"
+   700→          description="Buat opportunity pertama lewat tombol “+ Opportunity”, atau tambahkan lead baru dari Lead Inbox."
+   701→          action={
+   702→            <Button size="sm" className="bg-slate-900 hover:bg-slate-800" onClick={() => void openNewDialog(true)}>
+   703→              <Plus className="mr-1.5 h-4 w-4" />Opportunity
+   704→            </Button>
+   705→          }
+   706→        />
+   707→      )}
+   708→
+   709→      {opps.length > 0 && (
+   710→        <>
+   711→          {/* ===== Kanban ===== */}
+   712→          {view === 'kanban' && (
+   713→            <div className="flex gap-3 overflow-x-auto pb-4">
+   714→              {STAGES.map((stage) => {
+   715→                const items = filtered.filter((o) => o.stage === stage.key)
+   716→                const sum = items.reduce((acc, o) => acc + o.estimatedValue, 0)
+   717→                return (
+   718→                  <div
+   719→                    key={stage.key}
+   720→                    onDragOver={(e) => { e.preventDefault(); setDragOver(stage.key) }}
+   721→                    onDragLeave={() => setDragOver((cur) => (cur === stage.key ? null : cur))}
+   722→                    onDrop={(e) => {
+   723→                      e.preventDefault()
+   724→                      setDragOver(null)
+   725→                      const id = e.dataTransfer.getData('text/plain')
+   726→                      const opp = opps.find((x) => x.id === id)
+   727→                      if (opp) handleMove(opp, stage.key)
+   728→                    }}
+   729→                    className={cn(
+   730→                      'flex w-[290px] shrink-0 flex-col rounded-xl border bg-slate-50/60 transition-colors',
+   731→                      dragOver === stage.key ? 'border-teal-400 bg-teal-50/40' : 'border-slate-200',
+   732→                    )}
+   733→                  >
+   734→                    <div className="flex items-center gap-2 border-b border-slate-200/70 px-3 py-2.5">
+   735→                      <span className={cn('h-2 w-2 rounded-full', stage.dot)} />
+   736→                      <span className="text-xs font-semibold text-slate-700">{stage.label}</span>
+   737→                      <span className="rounded-full bg-slate-200/70 px-1.5 text-[10px] font-bold text-slate-600">{items.length}</span>
+   738→                      <span className="ml-auto whitespace-nowrap text-[10px] font-semibold text-slate-500">{formatMoney(sum, 'IDR', true)}</span>
+   739→                    </div>
+   740→                    <div className={cn('min-h-[120px] max-h-[calc(100vh-320px)] flex-1 space-y-2 overflow-y-auto p-2', SCROLLBAR)}>
+   741→                      {items.map((o) => (
+   742→                        <PipelineCard
+   743→                          key={o.id}
+   744→                          o={o}
+   745→                          busy={busyId === o.id}
+   746→                          onOpen={() => openDetail(o.id)}
+   747→                          onMove={(s) => handleMove(o, s)}
+   748→                        />
+   749→                      ))}
+   750→                      {items.length === 0 && (
+   751→                        <p className="py-8 text-center text-[11px] text-slate-300">Tarik kartu ke sini</p>
+   752→                      )}
+   753→                    </div>
+   754→                  </div>
+   755→                )
+   756→              })}
+   757→            </div>
+   758→          )}
+   759→
+   760→          {/* ===== Table ===== */}
+   761→          {view === 'tabel' && (
+   762→            <div className="space-y-3">
+   763→              {selected.size > 0 && (
+   764→                <div className="flex flex-wrap items-center gap-2 rounded-xl border border-teal-200 bg-teal-50/60 p-3">
+   765→                  <span className="text-sm font-semibold text-teal-900">{selected.size} dipilih</span>
+   766→                  <div className="flex items-center gap-2">
+   767→                    <span className="text-xs text-slate-500">Assign ke:</span>
+   768→                    <Select value={bulkOwner || 'none'} onValueChange={(v) => { if (v !== 'none') { setBulkOwner(v); void assignBulk(v) } }}>
+   769→                      <SelectTrigger size="sm" className="w-[160px]" disabled={bulkBusy}>
+   770→                        <SelectValue placeholder={bulkBusy ? 'Menugaskan…' : 'Pilih owner'} />
+   771→                      </SelectTrigger>
+   772→                      <SelectContent>
+   773→                        <SelectItem value="none" disabled>Pilih owner…</SelectItem>
+   774→                        {marketingUsers.map((u) => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
+   775→                      </SelectContent>
+   776→                    </Select>
+   777→                  </div>
+   778→                  {canExport && (
+   779→                    <Button variant="outline" size="sm" className="gap-1.5" onClick={exportCsv}>
+   780→                      <Download className="h-3.5 w-3.5" />Export CSV
+   781→                    </Button>
+   782→                  )}
+   783→                  <Button variant="ghost" size="sm" className="ml-auto" onClick={() => setSelected(new Set())}>Bersihkan</Button>
+   784→                </div>
+   785→              )}
+   786→
+   787→              <Card className="overflow-hidden rounded-xl border-slate-200 py-0">
+   788→                <div className="overflow-x-auto">
+   789→                  <Table className="min-w-[1120px]">
+   790→                    <TableHeader>
+   791→                      <TableRow className="bg-slate-50 hover:bg-slate-50">
+   792→                        <TableHead className="w-10">
+   793→                          <Checkbox checked={allChecked} onCheckedChange={(v) => toggleAll(v === true)} aria-label="Pilih semua baris" />
+   794→                        </TableHead>
+   795→                        <TableHead className="text-xs">Kode</TableHead>
+   796→                        <TableHead className="text-xs">Judul</TableHead>
+   797→                        <TableHead className="text-xs">Brand</TableHead>
+   798→                        <TableHead className="text-xs">Service</TableHead>
+   799→                        <TableHead className="text-xs">Stage</TableHead>
+   800→                        <TableHead className="text-xs">
+   801→                          <button onClick={() => toggleSort('score')} className="inline-flex items-center gap-1 font-medium hover:text-slate-900">
+   802→                            Skor
+   803→                            {sort?.key === 'score' && (sort.dir === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />)}
+   804→                          </button>
+   805→                        </TableHead>
+   806→                        <TableHead className="text-xs">
+   807→                          <button onClick={() => toggleSort('value')} className="inline-flex items-center gap-1 font-medium hover:text-slate-900">
+   808→                            Nilai
+   809→                            {sort?.key === 'value' && (sort.dir === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />)}
+   810→                          </button>
+   811→                        </TableHead>
+   812→                        <TableHead className="text-xs">Prob. %</TableHead>
+   813→                        <TableHead className="text-xs">
+   814→                          <button onClick={() => toggleSort('close')} className="inline-flex items-center gap-1 font-medium hover:text-slate-900">
+   815→                            Est. Close
+   816→                            {sort?.key === 'close' && (sort.dir === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />)}
+   817→                          </button>
+   818→                        </TableHead>
+   819→                        <TableHead className="text-xs">Owner</TableHead>
+   820→                        <TableHead className="text-xs">Update</TableHead>
+   821→                      </TableRow>
+   822→                    </TableHeader>
+   823→                    <TableBody>
+   824→                      {tableRows.length === 0 && (
+   825→                        <TableRow>
+   826→                          <TableCell colSpan={12} className="py-10 text-center text-sm text-slate-400">
+   827→                            Tidak ada opportunity yang cocok dengan filter.
+   828→                          </TableCell>
+   829→                        </TableRow>
+   830→                      )}
+   831→                      {tableRows.map((o) => {
+   832→                        const closePast = o.expectedCloseDate && o.stage !== 'WON' && o.stage !== 'LOST' && new Date(o.expectedCloseDate).getTime() < Date.now()
+   833→                        return (
+   834→                          <TableRow key={o.id} onClick={() => openDetail(o.id)} className="cursor-pointer">
+   835→                            <TableCell onClick={(e) => e.stopPropagation()}>
+   836→                              <Checkbox checked={selected.has(o.id)} onCheckedChange={(v) => toggleRow(o.id, v === true)} aria-label={`Pilih ${o.code}`} />
+   837→                            </TableCell>
+   838→                            <TableCell className="whitespace-nowrap font-mono text-[11px] text-slate-400">{o.code}</TableCell>
+   839→                            <TableCell className="max-w-[230px]">
+   840→                              <p className="line-clamp-1 text-[13px] font-medium text-slate-800">{o.title}</p>
+   841→                              <p className="truncate text-[11px] text-slate-400">{o.companyName} · {o.contactName}</p>
+   842→                            </TableCell>
+   843→                            <TableCell><BrandChip name={o.brandName} color={o.brandColor} size="xs" /></TableCell>
+   844→                            <TableCell className="text-xs text-slate-500">{o.serviceName ?? '—'}</TableCell>
+   845→                            <TableCell><StageBadge stage={o.stage} /></TableCell>
+   846→                            <TableCell>
+   847→                              {o.stage === 'WON' || o.stage === 'LOST' ? (
+   848→                                <span className="text-[11px] text-slate-300">—</span>
+   849→                              ) : (
+   850→                                <ScoreBadge result={scoreMap.get(o.id) ?? computeLeadScore(o)} />
+   851→                              )}
+   852→                            </TableCell>
+   853→                            <TableCell className="whitespace-nowrap text-[13px] font-bold text-slate-800">{formatMoney(o.estimatedValue, o.currency, true)}</TableCell>
+   854→                            <TableCell><span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500">{o.probability}%</span></TableCell>
+   855→                            <TableCell className={cn('whitespace-nowrap text-xs', closePast ? 'font-semibold text-rose-600' : 'text-slate-600')}>
+   856→                              {formatDate(o.expectedCloseDate)}
+   857→                            </TableCell>
+   858→                            <TableCell>
+   859→                              <div className="flex items-center gap-1.5">
+   860→                                <UserAvatar name={o.ownerName} color={o.ownerColor} size={22} />
+   861→                                <span className="max-w-[110px] truncate text-[11px] text-slate-600">{o.ownerName}</span>
+   862→                              </div>
+   863→                            </TableCell>
+   864→                            <TableCell className="whitespace-nowrap text-[11px] text-slate-400">{timeAgo(o.lastInteractionAt ?? o.stageUpdatedAt)}</TableCell>
+   865→                          </TableRow>
+   866→                        )
+   867→                      })}
+   868→                    </TableBody>
+   869→                  </Table>
+   870→                </div>
+   871→              </Card>
+   872→            </div>
+   873→          )}
+   874→        </>
+   875→      )}
+   876→
+   877→      {/* ===== Detail drawer ===== */}
+   878→      <OpportunityDetailDrawer
+   879→        opportunityId={detailId}
+   880→        open={detailOpen}
+   881→        onClose={() => setDetailOpen(false)}
+   882→        onChanged={load}
+   883→      />
+   884→
+   885→      {/* ===== Dialog: Lost reason (kanban drop) ===== */}
+   886→      <Dialog open={!!lostTarget} onOpenChange={(o) => { if (!o) setLostTarget(null) }}>
+   887→        <DialogContent className={cn('max-h-[85vh] overflow-y-auto sm:max-w-md', SCROLLBAR)}>
+   888→          <DialogHeader>
+   889→            <DialogTitle>Tandai Lost — {lostTarget?.code}</DialogTitle>
+   890→            <DialogDescription>Pilih alasan utama kenapa deal ini lost untuk analitik funnel.</DialogDescription>
+   891→          </DialogHeader>
+   892→          <div className="space-y-3">
+   893→            <Select value={lostReason || undefined} onValueChange={setLostReason}>
+   894→              <SelectTrigger className="w-full"><SelectValue placeholder="Alasan lost *" /></SelectTrigger>
+   895→              <SelectContent>
+   896→                {LOST_REASONS.map((r) => <SelectItem key={r.key} value={r.key}>{r.label}</SelectItem>)}
+   897→              </SelectContent>
+   898→            </Select>
+   899→            <Textarea
+   900→              value={lostNotes}
+   901→              onChange={(e) => setLostNotes(e.target.value)}
+   902→              placeholder="Catatan tambahan (opsional)…"
+   903→              className="min-h-[64px] resize-none text-sm"
+   904→            />
+   905→            <Input
+   906→              value={lostCompetitor}
+   907→              onChange={(e) => setLostCompetitor(e.target.value)}
+   908→              placeholder="Kompetitor (opsional)"
+   909→              className="text-sm"
+   910→            />
+   911→            <Select value={lostReactivation || 'none'} onValueChange={(v) => setLostReactivation(v === 'none' ? '' : v)}>
+   912→              <SelectTrigger className="w-full"><SelectValue placeholder="Rencana reaktivasi" /></SelectTrigger>
+   913→              <SelectContent>
+   914→                <SelectItem value="none">— Tidak ada rencana —</SelectItem>
+   915→                {REACTIVATION_OPTIONS.map((r) => <SelectItem key={r.key} value={r.key}>{r.label}</SelectItem>)}
+   916→              </SelectContent>
+   917→            </Select>
+   918→            <div>
+   919→              <p className="mb-1 text-xs text-slate-500">Tanggal follow-up (opsional)</p>
+   920→              <Input type="date" value={lostFollowUp} onChange={(e) => setLostFollowUp(e.target.value)} className="text-sm" />
+   921→            </div>
+   922→          </div>
+   923→          <DialogFooter>
+   924→            <Button variant="outline" onClick={() => setLostTarget(null)}>Batal</Button>
+   925→            <Button variant="destructive" disabled={!lostReason} onClick={submitLost}>Tandai Lost</Button>
+   926→          </DialogFooter>
+   927→        </DialogContent>
+   928→      </Dialog>
+   929→
+   930→      {/* ===== Dialog: Confirm WON (kanban drop) ===== */}
+   931→      <Dialog open={!!wonTarget} onOpenChange={(o) => { if (!o) setWonTarget(null) }}>
+   932→        <DialogContent className="sm:max-w-md">
+   933→          <DialogHeader>
+   934→            <DialogTitle>Tandai WON?</DialogTitle>
+   935→            <DialogDescription>Project akan dibuat otomatis dengan milestone sesuai workflow brand{wonTarget ? ` (${wonTarget.brandName})` : ''}.</DialogDescription>
+   936→          </DialogHeader>
+   937→          <div>
+   938→            <p className="mb-1 text-xs text-slate-500">Nilai final / last offer (opsional — finalize nilai deal)</p>
+   939→            <Input
+   940→              type="number"
+   941→              min={0}
+   942→              value={wonOffer}
+   943→              onChange={(e) => setWonOffer(e.target.value)}
+   944→              placeholder={wonTarget ? String(wonTarget.estimatedValue) : '0'}
+   945→              className="text-sm"
+   946→            />
+   947→          </div>
+   948→          <DialogFooter>
+   949→            <Button variant="outline" onClick={() => setWonTarget(null)}>Batal</Button>
+   950→            <Button className="bg-emerald-600 hover:bg-emerald-700" onClick={confirmWon}>Ya, Tandai WON</Button>
+   951→          </DialogFooter>
+   952→        </DialogContent>
+   953→      </Dialog>
+   954→
+   955→      {/* ===== Dialog: New Opportunity ===== */}
+   956→      <Dialog open={newOpen} onOpenChange={(o) => void openNewDialog(o)}>
+   957→        <DialogContent className={cn('max-h-[88vh] overflow-y-auto sm:max-w-2xl', SCROLLBAR)}>
+   958→          <DialogHeader>
+   959→            <DialogTitle>Opportunity Baru</DialogTitle>
+   960→            <DialogDescription>Buat opportunity manual — pakai perusahaan & kontak existing, atau buat data baru.</DialogDescription>
+   961→          </DialogHeader>
+   962→
+   963→          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+   964→            <div className="sm:col-span-2">
+   965→              <FieldLabel required>Judul</FieldLabel>
+   966→              <Input
+   967→                value={form.title}
+   968→                onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+   969→                placeholder="Misal: Video profil perusahaan 2026"
+   970→                className="text-sm"
+   971→              />
+   972→            </div>
+   973→
+   974→            {/* Perusahaan */}
+   975→            <div className="rounded-xl border border-slate-200 p-3 sm:col-span-2">
+   976→              <div className="mb-2 flex items-center justify-between gap-2">
+   977→                <FieldLabel required>Perusahaan</FieldLabel>
+   978→                <ModeToggle
+   979→                  value={form.companyMode}
+   980→                  onChange={(m) => setForm((f) => ({
+   981→                    ...f,
+   982→                    companyMode: m,
+   983→                    companyId: m === 'new' ? '' : f.companyId,
+   984→                    contactMode: m === 'new' ? 'new' : f.contactMode,
+   985→                    contactId: m === 'new' ? '' : f.contactId,
+   986→                  }))}
+   987→                />
+   988→              </div>
+   989→              {form.companyMode === 'existing' ? (
+   990→                <Select value={form.companyId || undefined} onValueChange={(v) => void onCompanyChange(v)}>
+   991→                  <SelectTrigger className="w-full">
+   992→                    <SelectValue placeholder={companiesLoading ? 'Memuat perusahaan…' : 'Pilih perusahaan'} />
+   993→                  </SelectTrigger>
+   994→                  <SelectContent className="max-h-64">
+   995→                    {companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name} · {c.country}</SelectItem>)}
+   996→                  </SelectContent>
+   997→                </Select>
+   998→              ) : (
+   999→                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+  1000→                  <Input
+  1001→                    value={form.newCompanyName}
+  1002→                    onChange={(e) => setForm((f) => ({ ...f, newCompanyName: e.target.value }))}
+  1003→                    placeholder="Nama perusahaan *"
+  1004→                    className="text-sm"
+  1005→                  />
+  1006→                  <Input
+  1007→                    value={form.newCompanyIndustry}
+  1008→                    onChange={(e) => setForm((f) => ({ ...f, newCompanyIndustry: e.target.value }))}
+  1009→                    placeholder="Industri (opsional)"
+  1010→                    className="text-sm"
+  1011→                  />
+  1012→                </div>
+  1013→              )}
+  1014→            </div>
+  1015→
+  1016→            {/* Kontak */}
+  1017→            <div className="rounded-xl border border-slate-200 p-3 sm:col-span-2">
+  1018→              <div className="mb-2 flex items-center justify-between gap-2">
+  1019→                <FieldLabel required>Kontak</FieldLabel>
+  1020→                <ModeToggle
+  1021→                  value={form.contactMode}
+  1022→                  disableNew={false}
+  1023→                  onChange={(m) => setForm((f) => ({ ...f, contactMode: m, contactId: m === 'new' ? '' : f.contactId }))}
+  1024→                />
+  1025→              </div>
+  1026→              {form.contactMode === 'existing' ? (
+  1027→                form.companyMode === 'new' ? (
+  1028→                  <p className="text-xs text-slate-400">Perusahaan baru — kontak akan dibuat baru juga.</p>
+  1029→                ) : contactsLoading ? (
+  1030→                  <p className="text-xs text-slate-400">Memuat kontak…</p>
+  1031→                ) : contacts.length === 0 ? (
+  1032→                  <p className="text-xs text-slate-400">Perusahaan ini belum punya kontak — buat kontak baru.</p>
+  1033→                ) : (
+  1034→                  <Select value={form.contactId || undefined} onValueChange={(v) => setForm((f) => ({ ...f, contactId: v }))}>
+  1035→                    <SelectTrigger className="w-full"><SelectValue placeholder="Pilih kontak" /></SelectTrigger>
+  1036→                    <SelectContent className="max-h-64">
+  1037→                      {contacts.map((c) => (
+  1038→                        <SelectItem key={c.id} value={c.id}>
+  1039→                          {c.fullName}{c.position ? ` — ${c.position}` : ''}
+  1040→                        </SelectItem>
+  1041→                      ))}
+  1042→                    </SelectContent>
+  1043→                  </Select>
+  1044→                )
+  1045→              ) : (
+  1046→                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+  1047→                  <Input
+  1048→                    value={form.newContactFirstName}
+  1049→                    onChange={(e) => setForm((f) => ({ ...f, newContactFirstName: e.target.value }))}
+  1050→                    placeholder="Nama depan *"
+  1051→                    className="text-sm"
+  1052→                  />
+  1053→                  <Input
+  1054→                    type="email"
+  1055→                    value={form.newContactEmail}
+  1056→                    onChange={(e) => setForm((f) => ({ ...f, newContactEmail: e.target.value }))}
+  1057→                    placeholder="Email (opsional)"
+  1058→                    className="text-sm"
+  1059→                  />
+  1060→                  <Input
+  1061→                    value={form.newContactWhatsapp}
+  1062→                    onChange={(e) => setForm((f) => ({ ...f, newContactWhatsapp: e.target.value }))}
+  1063→                    placeholder="WhatsApp (opsional)"
+  1064→                    className="text-sm"
+  1065→                  />
+  1066→                </div>
+  1067→              )}
+  1068→            </div>
+  1069→
+  1070→            {/* Brand + service */}
+  1071→            <div>
+  1072→              <FieldLabel required>Brand Sumber</FieldLabel>
+  1073→              <Select value={form.sourceBrandId || undefined} onValueChange={onBrandChange}>
+  1074→                <SelectTrigger className="w-full"><SelectValue placeholder="Pilih brand" /></SelectTrigger>
+  1075→                <SelectContent>
+  1076→                  {brands.map((b: BrandDTO) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+  1077→                </SelectContent>
+  1078→              </Select>
+  1079→            </div>
+  1080→            <div>
+  1081→              <FieldLabel>Service</FieldLabel>
+  1082→              <Select
+  1083→                value={form.serviceId || undefined}
+  1084→                onValueChange={(v) => setForm((f) => ({ ...f, serviceId: v }))}
+  1085→                disabled={!form.sourceBrandId}
+  1086→              >
+  1087→                <SelectTrigger className="w-full"><SelectValue placeholder={form.sourceBrandId ? 'Pilih service' : 'Pilih brand dulu'} /></SelectTrigger>
+  1088→                <SelectContent>
+  1089→                  {services.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+  1090→                </SelectContent>
+  1091→              </Select>
+  1092→            </div>
+  1093→
+  1094→            {/* Lead source + channel */}
+  1095→            <div>
+  1096→              <FieldLabel required>Sumber Lead</FieldLabel>
+  1097→              <Select value={form.leadSource} onValueChange={(v) => setForm((f) => ({ ...f, leadSource: v }))}>
+  1098→                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+  1099→                <SelectContent>
+  1100→                  {LEAD_SOURCES.map((s) => <SelectItem key={s.key} value={s.key}>{s.label}</SelectItem>)}
+  1101→                </SelectContent>
+  1102→              </Select>
+  1103→            </div>
+  1104→            <div>
+  1105→              <FieldLabel required>Kanal</FieldLabel>
+  1106→              <Select value={form.channel} onValueChange={(v) => setForm((f) => ({ ...f, channel: v }))}>
+  1107→                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+  1108→                <SelectContent>
+  1109→                  {CHANNELS.map((c) => <SelectItem key={c.key} value={c.key}>{c.label}</SelectItem>)}
+  1110→                </SelectContent>
+  1111→              </Select>
+  1112→            </div>
+  1113→
+  1114→            {/* Value + currency */}
+  1115→            <div>
+  1116→              <FieldLabel>Nilai Estimasi</FieldLabel>
+  1117→              <Input
+  1118→                type="number"
+  1119→                min={0}
+  1120→                value={form.estimatedValue}
+  1121→                onChange={(e) => setForm((f) => ({ ...f, estimatedValue: e.target.value }))}
+  1122→                placeholder="0"
+  1123→                className="text-sm"
+  1124→              />
+  1125→            </div>
+  1126→            <div>
+  1127→              <FieldLabel>Currency</FieldLabel>
+  1128→              <Select value={form.currency} onValueChange={(v) => setForm((f) => ({ ...f, currency: v }))}>
+  1129→                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+  1130→                <SelectContent>
+  1131→                  {CURRENCIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+  1132→                </SelectContent>
+  1133→              </Select>
+  1134→            </div>
+  1135→
+  1136→            {/* Priority + expected close */}
+  1137→            <div>
+  1138→              <FieldLabel>Prioritas</FieldLabel>
+  1139→              <Select value={form.priority} onValueChange={(v) => setForm((f) => ({ ...f, priority: v as Priority }))}>
+  1140→                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+  1141→                <SelectContent>
+  1142→                  {PRIORITIES.map((p) => <SelectItem key={p.key} value={p.key}>{p.label}</SelectItem>)}
+  1143→                </SelectContent>
+  1144→              </Select>
+  1145→            </div>
+  1146→            <div>
+  1147→              <FieldLabel>Est. Close Date</FieldLabel>
+  1148→              <Input
+  1149→                type="date"
+  1150→                value={form.expectedCloseDate}
+  1151→                onChange={(e) => setForm((f) => ({ ...f, expectedCloseDate: e.target.value }))}
+  1152→                className="text-sm"
+  1153→              />
+  1154→            </div>
+  1155→
+  1156→            <div className="sm:col-span-2">
+  1157→              <FieldLabel>Brief</FieldLabel>
+  1158→              <Textarea
+  1159→                value={form.brief}
+  1160→                onChange={(e) => setForm((f) => ({ ...f, brief: e.target.value }))}
+  1161→                placeholder="Ringkasan kebutuhan client…"
+  1162→                className="min-h-[72px] resize-none text-sm"
+  1163→              />
+  1164→            </div>
+  1165→            <div className="sm:col-span-2">
+  1166→              <FieldLabel>Campaign (opsional)</FieldLabel>
+  1167→              <Input
+  1168→                value={form.campaign}
+  1169→                onChange={(e) => setForm((f) => ({ ...f, campaign: e.target.value }))}
+  1170→                placeholder="Misal: Ramadhan Campaign 2026"
+  1171→                className="text-sm"
+  1172→              />
+  1173→            </div>
+  1174→          </div>
+  1175→
+  1176→          <DialogFooter>
+  1177→            <Button variant="outline" onClick={() => setNewOpen(false)}>Batal</Button>
+  1178→            <Button className="bg-slate-900 hover:bg-slate-800" disabled={creating} onClick={() => void submitNew()}>
+  1179→              {creating ? 'Membuat…' : 'Buat Opportunity'}
+  1180→            </Button>
+  1181→          </DialogFooter>
+  1182→        </DialogContent>
+  1183→      </Dialog>
+  1184→    </div>
+  1185→  )
+  1186→}
+  1187→

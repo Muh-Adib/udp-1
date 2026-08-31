@@ -1,0 +1,1272 @@
+     1→/* ============ Quotations View — Penawaran resmi per brand ============ */
+     2→'use client'
+     3→
+     4→import React, { useCallback, useEffect, useMemo, useState } from 'react'
+     5→import { crmApi, financeApi, portalApi } from '@/components/crm/api-client'
+     6→import { useCrmStore } from '@/components/crm/crm-store'
+     7→import { useToast } from '@/hooks/use-toast'
+     8→import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+     9→import { Button } from '@/components/ui/button'
+    10→import { Card } from '@/components/ui/card'
+    11→import {
+    12→  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+    13→} from '@/components/ui/dialog'
+    14→import { Input } from '@/components/ui/input'
+    15→import { Label } from '@/components/ui/label'
+    16→import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+    17→import { Separator } from '@/components/ui/separator'
+    18→import { Skeleton } from '@/components/ui/skeleton'
+    19→import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+    20→import { Textarea } from '@/components/ui/textarea'
+    21→import { BrandChip, EmptyState, RefreshButton, SectionHeader, downloadCsv } from '@/components/crm/shared'
+    22→import { PrintOverlay, QuotationPrintBody } from '@/components/crm/print-document'
+    23→import { daysUntil, formatDate, formatMoney, timeAgo } from '@/lib/crm-constants'
+    24→import type { OpportunityDTO, PortalCommentDTO, QuotationDTO, QuotationDetailDTO, QuotationStatus } from '@/lib/crm-types'
+    25→import { cn } from '@/lib/utils'
+    26→import {
+    27→  AlertCircle, BadgeCheck, CheckCircle2, Clock, Download, FileText, Loader2, MessageSquare, Pencil, Plus,
+    28→  Printer, Search, Send, Trash2, X, XCircle,
+    29→} from 'lucide-react'
+    30→
+    31→/* ================= Local constants & helpers ================= */
+    32→
+    33→const SCROLLBAR = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300'
+    34→
+    35→const MAX_COMMENT_LEN = 2000
+    36→
+    37→/** Label role untuk bubble diskusi (Bahasa Indonesia) */
+    38→const ROLE_LABEL: Record<string, string> = {
+    39→  CLIENT: 'Client',
+    40→  MARKETING: 'Marketing',
+    41→  DIREKTUR: 'Direktur',
+    42→  KEUANGAN: 'Keuangan',
+    43→  PRODUKSI: 'Produksi',
+    44→  SUPER_ADMIN: 'Admin',
+    45→}
+    46→
+    47→/** Stage opportunity yang boleh dibuatkan penawaran */
+    48→const CREATE_STAGES = new Set<string>(['ESTIMATION', 'PROPOSAL_SENT', 'NEGOTIATION', 'VERBAL_AGREEMENT', 'QUALIFIED', 'DISCOVERY'])
+    49→
+    50→const STATUS_META: Record<QuotationStatus, { label: string; cls: string }> = {
+    51→  DRAFT: { label: 'Draft', cls: 'bg-slate-100 text-slate-600' },
+    52→  SENT: { label: 'Terkirim', cls: 'bg-amber-50 text-amber-700' },
+    53→  ACCEPTED: { label: 'Disetujui', cls: 'bg-emerald-50 text-emerald-700' },
+    54→  REJECTED: { label: 'Ditolak', cls: 'bg-rose-50 text-rose-700' },
+    55→  EXPIRED: { label: 'Kedaluwarsa', cls: 'bg-slate-100 text-slate-400 line-through' },
+    56→}
+    57→
+    58→const errMsg = (e: unknown) => (e instanceof Error ? e.message : 'Terjadi kesalahan')
+    59→
+    60→const toNum = (v: string) => {
+    61→  const n = Number(v)
+    62→  return Number.isFinite(n) ? n : 0
+    63→}
+    64→
+    65→interface EditorItem { description: string; qty: string; unitPrice: string }
+    66→
+    67→const emptyItem = (): EditorItem => ({ description: '', qty: '1', unitPrice: '' })
+    68→
+    69→/** Tanggal hari ini +14 hari dalam format input date (YYYY-MM-DD, lokal) */
+    70→function defaultValidUntil(): string {
+    71→  const d = new Date(Date.now() + 14 * 86400000)
+    72→  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    73→}
+    74→
+    75→/** Kalkulasi total live (rumus sama dengan server: semua dibulatkan) */
+    76→function computeTotals(items: EditorItem[], discountPct: string, taxPct: string) {
+    77→  const subtotal = items.reduce((sum, it) => sum + Math.round(toNum(it.qty) * toNum(it.unitPrice)), 0)
+    78→  const dp = Math.min(100, Math.max(0, toNum(discountPct)))
+    79→  const tp = Math.max(0, toNum(taxPct))
+    80→  const discountAmount = Math.round((subtotal * dp) / 100)
+    81→  const taxAmount = Math.round(((subtotal - discountAmount) * tp) / 100)
+    82→  return { subtotal, discountPct: dp, discountAmount, taxPct: tp, taxAmount, total: subtotal - discountAmount + taxAmount }
+    83→}
+    84→
+    85→/** Mata uang yang paling banyak muncul (fallback IDR) — untuk KPI nilai gabungan */
+    86→function dominantCurrency(list: QuotationDTO[]): string {
+    87→  const counts = new Map<string, number>()
+    88→  list.forEach((q) => counts.set(q.currency, (counts.get(q.currency) ?? 0) + 1))
+    89→  let best = 'IDR'
+    90→  let bestN = 0
+    91→  counts.forEach((n, cur) => {
+    92→    if (n > bestN) { best = cur; bestN = n }
+    93→  })
+    94→  return best
+    95→}
+    96→
+    97→/* ================= Local atoms ================= */
+    98→
+    99→function StatusBadge({ status }: { status: QuotationStatus }) {
+   100→  const meta = STATUS_META[status] ?? STATUS_META.DRAFT
+   101→  return <span className={cn('inline-flex items-center whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-medium', meta.cls)}>{meta.label}</span>
+   102→}
+   103→
+   104→function VersionChip({ version }: { version: number }) {
+   105→  return <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">v{version}</span>
+   106→}
+   107→
+   108→function KpiCard({ label, value, sub, icon: Icon, tone, ring }: {
+   109→  label: string; value: string; sub?: string; icon: React.ElementType; tone: string; ring?: boolean
+   110→}) {
+   111→  return (
+   112→    <Card className={cn('gap-0 rounded-xl p-4', ring && 'ring-2 ring-orange-400')}>
+   113→      <div className="flex items-start justify-between gap-2">
+   114→        <div className="min-w-0">
+   115→          <p className="truncate text-xs font-medium text-slate-500">{label}</p>
+   116→          <p className="mt-1 text-lg font-bold text-slate-900 sm:text-xl">{value}</p>
+   117→          {sub && <p className="mt-0.5 truncate text-[11px] text-slate-400">{sub}</p>}
+   118→        </div>
+   119→        <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-lg', tone)}>
+   120→          <Icon className="h-4.5 w-4.5" />
+   121→        </div>
+   122→      </div>
+   123→    </Card>
+   124→  )
+   125→}
+   126→
+   127→function QuotationCard({ q, onOpen }: { q: QuotationDTO; onOpen: () => void }) {
+   128→  const dv = daysUntil(q.validUntil)
+   129→  const expired = dv !== null && dv < 0
+   130→  return (
+   131→    <Card
+   132→      role="button"
+   133→      tabIndex={0}
+   134→      onClick={onOpen}
+   135→      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen() } }}
+   136→      aria-label={`Detail penawaran ${q.code}`}
+   137→      className="cursor-pointer gap-0 rounded-xl p-4 transition-all hover:-translate-y-0.5 hover:border-teal-300 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500"
+   138→    >
+   139→      <div className="flex items-center justify-between gap-2">
+   140→        <div className="flex min-w-0 items-center gap-1.5">
+   141→          <span className="font-mono text-xs text-slate-400">{q.code}</span>
+   142→          {q.version > 1 && <VersionChip version={q.version} />}
+   143→        </div>
+   144→        <StatusBadge status={q.status} />
+   145→      </div>
+   146→
+   147→      <h3 className="mt-2 line-clamp-1 font-semibold text-slate-900">{q.title}</h3>
+   148→      <p className="mt-0.5 truncate text-xs text-slate-500">{q.companyName} · {q.opportunityCode}</p>
+   149→
+   150→      <div className="mt-2.5"><BrandChip name={q.brandName} color={q.brandColor} size="xs" /></div>
+   151→
+   152→      <div className="mt-3 flex flex-wrap items-end justify-between gap-2">
+   153→        <div className="min-w-0">
+   154→          <p className="text-lg font-bold text-slate-900">{formatMoney(q.total, q.currency, true)}</p>
+   155→          {q.discountPct > 0 && (
+   156→            <div className="mt-1 flex flex-wrap items-center gap-1.5">
+   157→              <span className="rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">Diskon {q.discountPct}%</span>
+   158→              {q.status === 'SENT' && !q.discountApprovedById && (
+   159→                <span className="rounded-md bg-orange-50 px-1.5 py-0.5 text-[10px] font-semibold text-orange-700 ring-1 ring-orange-200">Menunggu approval Direktur</span>
+   160→              )}
+   161→              {q.discountApprovedById && (
+   162→                <span className="rounded-md bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
+   163→                  Disetujui {q.discountApprovedByName}
+   164→                </span>
+   165→              )}
+   166→            </div>
+   167→          )}
+   168→        </div>
+   169→        <div className="text-right">
+   170→          <p className={cn('text-[11px]', expired && q.status === 'SENT' ? 'font-semibold text-rose-600' : 'text-slate-400')}>
+   171→            Berlaku s.d. {formatDate(q.validUntil)}
+   172→          </p>
+   173→          <p className="text-[11px] text-slate-400">
+   174→            {q.decidedAt ? `Diputuskan ${timeAgo(q.decidedAt)}` : q.sentAt ? `Dikirim ${timeAgo(q.sentAt)}` : `Dibuat ${timeAgo(q.createdAt)}`}
+   175→          </p>
+   176→        </div>
+   177→      </div>
+   178→    </Card>
+   179→  )
+   180→}
+   181→
+   182→/** Editor item baris (dipakai dialog create & edit) */
+   183→function ItemsEditor({ items, onChange, currency, disabled }: {
+   184→  items: EditorItem[]; onChange: (next: EditorItem[]) => void; currency: string; disabled?: boolean
+   185→}) {
+   186→  const update = (idx: number, patch: Partial<EditorItem>) => onChange(items.map((it, i) => (i === idx ? { ...it, ...patch } : it)))
+   187→  return (
+   188→    <div className="space-y-2">
+   189→      <Label>Item Penawaran</Label>
+   190→      {items.map((it, idx) => (
+   191→        <div key={idx} className="rounded-lg border border-slate-200 bg-slate-50/50 p-2.5">
+   192→          <div className="flex items-center gap-2">
+   193→            <Input
+   194→              placeholder="Deskripsi layanan…"
+   195→              value={it.description}
+   196→              disabled={disabled}
+   197→              onChange={(e) => update(idx, { description: e.target.value })}
+   198→              className="h-8 flex-1 bg-white text-sm"
+   199→            />
+   200→            <Button
+   201→              type="button"
+   202→              variant="ghost"
+   203→              size="icon"
+   204→              disabled={disabled || items.length <= 1}
+   205→              onClick={() => onChange(items.filter((_, i) => i !== idx))}
+   206→              className="h-8 w-8 shrink-0 text-slate-400 hover:text-rose-600"
+   207→              title="Hapus item"
+   208→              aria-label="Hapus item"
+   209→            >
+   210→              <X className="h-4 w-4" />
+   211→            </Button>
+   212→          </div>
+   213→          <div className="mt-2 flex items-center gap-2">
+   214→            <Input
+   215→              type="number" min={0} step="any" placeholder="Qty" aria-label="Qty"
+   216→              value={it.qty} disabled={disabled}
+   217→              onChange={(e) => update(idx, { qty: e.target.value })}
+   218→              className="h-8 w-20 bg-white text-sm"
+   219→            />
+   220→            <span className="text-xs text-slate-400">×</span>
+   221→            <Input
+   222→              type="number" min={0} step="any" placeholder="Harga satuan" aria-label="Harga satuan"
+   223→              value={it.unitPrice} disabled={disabled}
+   224→              onChange={(e) => update(idx, { unitPrice: e.target.value })}
+   225→              className="h-8 min-w-0 flex-1 bg-white text-sm"
+   226→            />
+   227→            <span className="w-28 shrink-0 text-right text-xs font-semibold text-slate-700">
+   228→              {formatMoney(Math.round(toNum(it.qty) * toNum(it.unitPrice)), currency, true)}
+   229→            </span>
+   230→          </div>
+   231→        </div>
+   232→      ))}
+   233→      <Button
+   234→        type="button" variant="outline" size="sm" disabled={disabled}
+   235→        onClick={() => onChange([...items, emptyItem()])} className="gap-1.5"
+   236→      >
+   237→        <Plus className="h-3.5 w-3.5" /> Tambah Item
+   238→      </Button>
+   239→    </div>
+   240→  )
+   241→}
+   242→
+   243→/** Blok total live (dialog create/edit) */
+   244→function TotalsPreview({ totals, currency }: { totals: ReturnType<typeof computeTotals>; currency: string }) {
+   245→  return (
+   246→    <div className="ml-auto w-full max-w-[260px] space-y-1.5 rounded-xl bg-slate-50 p-3 text-sm">
+   247→      <div className="flex items-center justify-between gap-4">
+   248→        <span className="text-slate-500">Subtotal</span>
+   249→        <span className="font-medium text-slate-800">{formatMoney(totals.subtotal, currency)}</span>
+   250→      </div>
+   251→      {totals.discountPct > 0 && (
+   252→        <div className="flex items-center justify-between gap-4 text-amber-700">
+   253→          <span>Diskon ({totals.discountPct}%)</span>
+   254→          <span className="font-medium">-{formatMoney(totals.discountAmount, currency)}</span>
+   255→        </div>
+   256→      )}
+   257→      <div className="flex items-center justify-between gap-4">
+   258→        <span className="text-slate-500">PPN ({totals.taxPct}%)</span>
+   259→        <span className="font-medium text-slate-800">+{formatMoney(totals.taxAmount, currency)}</span>
+   260→      </div>
+   261→      <Separator className="bg-slate-200" />
+   262→      <div className="flex items-center justify-between gap-4">
+   263→        <span className="font-semibold text-slate-900">TOTAL</span>
+   264→        <span className="text-base font-bold text-slate-900">{formatMoney(totals.total, currency)}</span>
+   265→      </div>
+   266→    </div>
+   267→  )
+   268→}
+   269→
+   270→function InfoLine({ label, value }: { label: string; value: string }) {
+   271→  return (
+   272→    <div className="flex flex-wrap items-center gap-x-1.5">
+   273→      <span className="text-slate-400">{label}:</span>
+   274→      <span className="font-medium text-slate-600">{value}</span>
+   275→    </div>
+   276→  )
+   277→}
+   278→
+   279→/* ================= Diskusi Client (thread komentar penawaran — R11) ================= */
+   280→
+   281→/** Bubble komentar: staff kiri (putih), client kanan (teal agar mudah dibedakan staff) */
+   282→function CommentBubble({ c }: { c: PortalCommentDTO }) {
+   283→  return (
+   284→    <div className={cn('flex w-full', c.isClient ? 'justify-end' : 'justify-start')}>
+   285→      <div
+   286→        className={cn(
+   287→          'max-w-[85%] rounded-2xl px-3.5 py-2.5 shadow-sm',
+   288→          c.isClient
+   289→            ? 'rounded-br-md bg-teal-600 text-white'
+   290→            : 'rounded-bl-md border border-slate-200 bg-white text-slate-800',
+   291→        )}
+   292→      >
+   293→        <p className={cn('text-[11px] font-semibold', c.isClient ? 'text-white/80' : 'text-slate-500')}>
+   294→          {c.userName} · {ROLE_LABEL[c.userRole] ?? c.userRole}
+   295→        </p>
+   296→        <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-relaxed">{c.body}</p>
+   297→        <p className={cn('mt-1 text-right text-[10px]', c.isClient ? 'text-white/60' : 'text-slate-400')}>
+   298→          {formatDate(c.createdAt, true)}
+   299→        </p>
+   300→      </div>
+   301→    </div>
+   302→  )
+   303→}
+   304→
+   305→/** Seksi diskusi client di dialog detail penawaran — staff dapat membalas (identitas di-set server dari session) */
+   306→function DiscussionSection({ quotationId }: { quotationId: string }) {
+   307→  const { toast } = useToast()
+   308→  const [comments, setComments] = useState<PortalCommentDTO[] | null>(null)
+   309→  const [draft, setDraft] = useState('')
+   310→  const [sending, setSending] = useState(false)
+   311→  const listRef = React.useRef<HTMLDivElement>(null)
+   312→
+   313→  const loadComments = React.useCallback(async () => {
+   314→    try {
+   315→      const list = await portalApi.comments('QUOTATION', quotationId)
+   316→      setComments(list)
+   317→      requestAnimationFrame(() => {
+   318→        const el = listRef.current
+   319→        if (el) el.scrollTop = el.scrollHeight
+   320→      })
+   321→    } catch (e) {
+   322→      toast({ variant: 'destructive', title: 'Gagal memuat diskusi', description: errMsg(e) })
+   323→      setComments([])
+   324→    }
+   325→  }, [quotationId, toast])
+   326→
+   327→  React.useEffect(() => { void loadComments() }, [loadComments])
+   328→
+   329→  const send = async () => {
+   330→    const body = draft.trim()
+   331→    if (!body || sending || body.length > MAX_COMMENT_LEN) return
+   332→    setSending(true)
+   333→    try {
+   334→      const created = await portalApi.addComment({ entityType: 'QUOTATION', entityId: quotationId, body })
+   335→      setComments((prev) => [...(prev ?? []), created])
+   336→      setDraft('')
+   337→      toast({ title: 'Balasan terkirim' })
+   338→    } catch (e) {
+   339→      toast({ variant: 'destructive', title: 'Gagal mengirim balasan', description: errMsg(e) })
+   340→    } finally {
+   341→      setSending(false)
+   342→    }
+   343→  }
+   344→
+   345→  const canSend = draft.trim().length > 0 && draft.length <= MAX_COMMENT_LEN && !sending
+   346→
+   347→  return (
+   348→    <section aria-label="Diskusi client" className="overflow-hidden rounded-xl border border-slate-200">
+   349→      {/* Header */}
+   350→      <div className="flex items-center justify-between gap-2 border-b border-slate-100 bg-white px-4 py-3">
+   351→        <div className="flex min-w-0 items-center gap-2">
+   352→          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-slate-900 text-white">
+   353→            <MessageSquare className="h-3.5 w-3.5" />
+   354→          </span>
+   355→          <h3 className="text-sm font-semibold text-slate-900">Diskusi Client</h3>
+   356→        </div>
+   357→        {comments && comments.length > 0 && (
+   358→          <span className="inline-flex shrink-0 items-center rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+   359→            {comments.length} pesan
+   360→          </span>
+   361→        )}
+   362→      </div>
+   363→
+   364→      {/* Daftar pesan */}
+   365→      <div ref={listRef} className={cn('max-h-64 space-y-3 overflow-y-auto bg-slate-50/60 px-4 py-3', SCROLLBAR)}>
+   366→        {comments === null ? (
+   367→          <div className="space-y-3 py-1">
+   368→            <Skeleton className="h-12 w-3/4 rounded-2xl" />
+   369→            <Skeleton className="ml-auto h-10 w-1/2 rounded-2xl" />
+   370→            <Skeleton className="h-12 w-2/3 rounded-2xl" />
+   371→          </div>
+   372→        ) : comments.length === 0 ? (
+   373→          <div className="py-6 text-center">
+   374→            <MessageSquare className="mx-auto h-5 w-5 text-slate-300" />
+   375→            <p className="mt-1.5 text-xs font-medium text-slate-500">Belum ada pesan dari client</p>
+   376→            <p className="mt-0.5 text-[11px] text-slate-400">Pertanyaan client tentang penawaran ini akan tampil di sini.</p>
+   377→          </div>
+   378→        ) : (
+   379→          comments.map((c) => <CommentBubble key={c.id} c={c} />)
+   380→        )}
+   381→      </div>
+   382→
+   383→      {/* Input balasan */}
+   384→      <div className="border-t border-slate-100 bg-white px-4 py-3">
+   385→        <div className="flex items-end gap-2">
+   386→          <Textarea
+   387→            value={draft}
+   388→            onChange={(e) => setDraft(e.target.value)}
+   389→            onKeyDown={(e) => {
+   390→              if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+   391→                e.preventDefault()
+   392→                if (canSend) void send()
+   393→              }
+   394→            }}
+   395→            placeholder="Tulis balasan untuk client…"
+   396→            aria-label="Tulis balasan"
+   397→            rows={1}
+   398→            className="max-h-24 min-h-[2.5rem] resize-none"
+   399→          />
+   400→          <Button
+   401→            onClick={() => void send()}
+   402→            disabled={!canSend}
+   403→            className="h-10 shrink-0 gap-1.5 bg-slate-900 text-white hover:bg-slate-800"
+   404→          >
+   405→            {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+   406→            Kirim
+   407→          </Button>
+   408→        </div>
+   409→        {draft.length > 1800 && (
+   410→          <p className={cn('mt-1 text-right text-[10px]', draft.length > MAX_COMMENT_LEN ? 'font-semibold text-rose-600' : 'text-slate-400')}>
+   411→            {draft.length}/{MAX_COMMENT_LEN}
+   412→          </p>
+   413→        )}
+   414→      </div>
+   415→    </section>
+   416→  )
+   417→}
+   418→
+   419→/* ================= Main view ================= */
+   420→
+   421→export default function QuotationsView() {
+   422→  const { user, brands } = useCrmStore()
+   423→  const { toast } = useToast()
+   424→
+   425→  /* ----- list state ----- */
+   426→  const [quotations, setQuotations] = useState<QuotationDTO[]>([])
+   427→  const [loading, setLoading] = useState(true)
+   428→  const [error, setError] = useState<string | null>(null)
+   429→  const [search, setSearch] = useState('')
+   430→  const [statusFilter, setStatusFilter] = useState('ALL')
+   431→  const [brandFilter, setBrandFilter] = useState('ALL')
+   432→
+   433→  /* ----- detail dialog state ----- */
+   434→  const [detailOpen, setDetailOpen] = useState(false)
+   435→  const [printOpen, setPrintOpen] = useState(false)
+   436→  const [detailId, setDetailId] = useState<string | null>(null)
+   437→  const [detail, setDetail] = useState<QuotationDetailDTO | null>(null)
+   438→  const [detailLoading, setDetailLoading] = useState(false)
+   439→  const [detailError, setDetailError] = useState<string | null>(null)
+   440→  const [busy, setBusy] = useState<string | null>(null)
+   441→  const [editOpen, setEditOpen] = useState(false)
+   442→
+   443→  /* ----- edit form state ----- */
+   444→  const [editTitle, setEditTitle] = useState('')
+   445→  const [editItems, setEditItems] = useState<EditorItem[]>([emptyItem()])
+   446→  const [editDiscountPct, setEditDiscountPct] = useState('0')
+   447→  const [editTaxPct, setEditTaxPct] = useState('11')
+   448→  const [editValidUntil, setEditValidUntil] = useState('')
+   449→  const [editNotes, setEditNotes] = useState('')
+   450→
+   451→  /* ----- create dialog state ----- */
+   452→  const [createOpen, setCreateOpen] = useState(false)
+   453→  const [opps, setOpps] = useState<OpportunityDTO[]>([])
+   454→  const [oppsLoading, setOppsLoading] = useState(false)
+   455→  const [oppId, setOppId] = useState('NONE')
+   456→  const [newTitle, setNewTitle] = useState('')
+   457→  const [newItems, setNewItems] = useState<EditorItem[]>([emptyItem()])
+   458→  const [newDiscountPct, setNewDiscountPct] = useState('0')
+   459→  const [newTaxPct, setNewTaxPct] = useState('11')
+   460→  const [newValidUntil, setNewValidUntil] = useState(defaultValidUntil())
+   461→  const [newNotes, setNewNotes] = useState('')
+   462→
+   463→  /* ----- role helpers ----- */
+   464→  const role = user?.role
+   465→  const canCreate = !!role && role !== 'KEUANGAN'
+   466→  const canExport = !!role && role !== 'PRODUKSI'
+   467→  const canSend = role === 'MARKETING' || role === 'SUPER_ADMIN' || role === 'DIREKTUR'
+   468→  const canEdit = canSend
+   469→  const canApprove = role === 'DIREKTUR' || role === 'SUPER_ADMIN'
+   470→  const canInvoice = !!role && role !== 'PRODUKSI'
+   471→
+   472→  /* ----- loaders ----- */
+   473→  const reload = useCallback(async (silent = false) => {
+   474→    if (!silent) setLoading(true)
+   475→    try {
+   476→      const data = await financeApi.quotations()
+   477→      setQuotations(data)
+   478→      setError(null)
+   479→    } catch (e) {
+   480→      setError(errMsg(e))
+   481→    } finally {
+   482→      if (!silent) setLoading(false)
+   483→    }
+   484→  }, [])
+   485→
+   486→  useEffect(() => { void reload() }, [reload])
+   487→
+   488→  const loadDetail = useCallback(async (id: string, silent = false) => {
+   489→    if (!silent) setDetailLoading(true)
+   490→    try {
+   491→      const d = await financeApi.quotation(id)
+   492→      setDetail(d)
+   493→      setDetailError(null)
+   494→    } catch (e) {
+   495→      setDetailError(errMsg(e))
+   496→    } finally {
+   497→      if (!silent) setDetailLoading(false)
+   498→    }
+   499→  }, [])
+   500→
+   501→  const openDetail = useCallback((id: string) => {
+   502→    setDetail(null)
+   503→    setDetailError(null)
+   504→    setDetailId(id)
+   505→    setDetailOpen(true)
+   506→    void loadDetail(id)
+   507→  }, [loadDetail])
+   508→
+   509→  /* ----- derived data ----- */
+   510→  const sentList = useMemo(() => quotations.filter((q) => q.status === 'SENT'), [quotations])
+   511→  const acceptedList = useMemo(() => quotations.filter((q) => q.status === 'ACCEPTED'), [quotations])
+   512→  const discountPendingCount = useMemo(
+   513→    () => sentList.filter((q) => q.discountPct > 0 && !q.discountApprovedById).length,
+   514→    [sentList],
+   515→  )
+   516→  const sumOf = (list: QuotationDTO[]) => list.reduce((s, q) => s + q.total, 0)
+   517→
+   518→  const filtered = useMemo(() => {
+   519→    const kw = search.trim().toLowerCase()
+   520→    return quotations.filter((item) => {
+   521→      if (statusFilter !== 'ALL' && item.status !== statusFilter) return false
+   522→      if (brandFilter !== 'ALL' && item.brandId !== brandFilter) return false
+   523→      if (!kw) return true
+   524→      return [item.code, item.title, item.companyName, item.opportunityCode]
+   525→        .some((f) => f?.toLowerCase().includes(kw))
+   526→    })
+   527→  }, [quotations, search, statusFilter, brandFilter])
+   528→
+   529→  const resetFilters = () => { setSearch(''); setStatusFilter('ALL'); setBrandFilter('ALL') }
+   530→
+   531→  /* ----- detail actions ----- */
+   532→  const handleStatus = async (q: QuotationDetailDTO, next: Extract<QuotationStatus, 'SENT' | 'ACCEPTED' | 'REJECTED'>) => {
+   533→    setBusy(next)
+   534→    try {
+   535→      await financeApi.changeQuotationStatus(q.id, next)
+   536→      if (next === 'SENT') toast({ title: 'Penawaran terkirim ke client', description: `${q.code} kini berstatus Terkirim — menunggu keputusan client.` })
+   537→      if (next === 'ACCEPTED') toast({ title: 'Client menerima penawaran', description: `${q.code} disetujui — nilai opportunity diperbarui otomatis oleh sistem.` })
+   538→      if (next === 'REJECTED') toast({ title: 'Client menolak penawaran', description: `${q.code} ditandai Ditolak — evaluasi tawaran sebelum revisi berikutnya.` })
+   539→      await Promise.all([loadDetail(q.id, true), reload(true)])
+   540→    } catch (e) {
+   541→      toast({ variant: 'destructive', title: 'Gagal mengubah status penawaran', description: errMsg(e) })
+   542→    } finally {
+   543→      setBusy(null)
+   544→    }
+   545→  }
+   546→
+   547→  const handleApproveDiscount = async (q: QuotationDetailDTO) => {
+   548→    setBusy('approve')
+   549→    try {
+   550→      await financeApi.approveDiscount(q.id)
+   551→      toast({
+   552→        title: 'Diskon disetujui — tercatat di audit log',
+   553→        description: `Diskon ${q.discountPct}% pada ${q.code} disetujui oleh ${user?.name ?? 'Direktur'}.`,
+   554→      })
+   555→      await Promise.all([loadDetail(q.id, true), reload(true)])
+   556→    } catch (e) {
+   557→      toast({ variant: 'destructive', title: 'Gagal menyetujui diskon', description: errMsg(e) })
+   558→    } finally {
+   559→      setBusy(null)
+   560→    }
+   561→  }
+   562→
+   563→  const handleDeleteQuotation = async (q: QuotationDetailDTO) => {
+   564→    setBusy('delete')
+   565→    try {
+   566→      await financeApi.deleteQuotation(q.id)
+   567→      toast({ title: 'Penawaran draft dihapus', description: `${q.code} — ${q.title} telah dihapus dan tercatat di audit log.` })
+   568→      setDetail(null)
+   569→      setDetailOpen(false)
+   570→      reload(true)
+   571→    } catch (e) {
+   572→      toast({ variant: 'destructive', title: 'Gagal menghapus penawaran', description: errMsg(e) })
+   573→    } finally {
+   574→      setBusy(null)
+   575→    }
+   576→  }
+   577→
+   578→  const handleCreateInvoice = async (q: QuotationDetailDTO) => {
+   579→    setBusy('invoice')
+   580→    try {
+   581→      const inv = await financeApi.createInvoice({
+   582→        opportunityId: q.opportunityId,
+   583→        quotationId: q.id,
+   584→        title: `${q.title} — Invoice`,
+   585→        amount: q.total,
+   586→        taxPct: 0,
+   587→        notes: `Dari ${q.code}`,
+   588→      })
+   589→      toast({
+   590→        title: `Invoice ${inv.code} dibuat — lanjut ke modul Finance`,
+   591→        description: `Nilai ${formatMoney(inv.total, inv.currency, true)} untuk ${q.companyName}.`,
+   592→      })
+   593→      await Promise.all([loadDetail(q.id, true), reload(true)])
+   594→    } catch (e) {
+   595→      toast({ variant: 'destructive', title: 'Gagal membuat invoice', description: errMsg(e) })
+   596→    } finally {
+   597→      setBusy(null)
+   598→    }
+   599→  }
+   600→
+   601→  /* ----- edit dialog ----- */
+   602→  const openEdit = () => {
+   603→    if (!detail) return
+   604→    setEditTitle(detail.title)
+   605→    setEditItems(
+   606→      detail.items.length
+   607→        ? detail.items.map((it) => ({ description: it.description, qty: String(it.qty), unitPrice: String(it.unitPrice) }))
+   608→        : [emptyItem()],
+   609→    )
+   610→    setEditDiscountPct(String(detail.discountPct))
+   611→    setEditTaxPct(String(detail.taxPct))
+   612→    setEditValidUntil(detail.validUntil ? detail.validUntil.slice(0, 10) : '')
+   613→    setEditNotes(detail.notes ?? '')
+   614→    setEditOpen(true)
+   615→  }
+   616→
+   617→  const submitEdit = async () => {
+   618→    if (!detail) return
+   619→    const clean = editItems.map((it) => ({ description: it.description.trim(), qty: toNum(it.qty), unitPrice: toNum(it.unitPrice) }))
+   620→    if (clean.some((it) => !it.description || it.qty <= 0)) {
+   621→      toast({ variant: 'destructive', title: 'Item belum lengkap', description: 'Setiap item wajib punya deskripsi dan qty lebih dari 0.' })
+   622→      return
+   623→    }
+   624→    const totals = computeTotals(editItems, editDiscountPct, editTaxPct)
+   625→    setBusy('edit')
+   626→    try {
+   627→      const saved = await financeApi.updateQuotation(detail.id, {
+   628→        title: editTitle.trim() || undefined,
+   629→        items: clean,
+   630→        discountPct: totals.discountPct,
+   631→        taxPct: totals.taxPct,
+   632→        validUntil: editValidUntil || null,
+   633→        notes: editNotes.trim() || undefined,
+   634→      })
+   635→      setDetail(saved)
+   636→      setEditOpen(false)
+   637→      toast({
+   638→        title: `Penawaran ${saved.code} disimpan`,
+   639→        description: saved.version > detail.version ? `Mengubah penawaran terkirim menaikkan versi otomatis ke v${saved.version}.` : 'Perubahan penawaran tersimpan.',
+   640→      })
+   641→      await reload(true)
+   642→    } catch (e) {
+   643→      toast({ variant: 'destructive', title: 'Gagal menyimpan penawaran', description: errMsg(e) })
+   644→    } finally {
+   645→      setBusy(null)
+   646→    }
+   647→  }
+   648→
+   649→  /* ----- create dialog ----- */
+   650→  const openCreate = useCallback(async () => {
+   651→    setCreateOpen(true)
+   652→    setOppId('NONE')
+   653→    setNewTitle('')
+   654→    setNewItems([emptyItem()])
+   655→    setNewDiscountPct('0')
+   656→    setNewTaxPct('11')
+   657→    setNewValidUntil(defaultValidUntil())
+   658→    setNewNotes('')
+   659→    setOppsLoading(true)
+   660→    try {
+   661→      const data = await crmApi.opportunities()
+   662→      setOpps(data.filter((o) => CREATE_STAGES.has(o.stage)))
+   663→    } catch (e) {
+   664→      toast({ variant: 'destructive', title: 'Gagal memuat daftar opportunity', description: errMsg(e) })
+   665→      setOpps([])
+   666→    } finally {
+   667→      setOppsLoading(false)
+   668→    }
+   669→  }, [toast])
+   670→
+   671→  const handleSelectOpp = (id: string) => {
+   672→    setOppId(id)
+   673→    const opp = opps.find((o) => o.id === id)
+   674→    if (opp) {
+   675→      setNewTitle(`${opp.title} — Penawaran`)
+   676→      setNewItems([{
+   677→        description: opp.serviceName || 'Layanan utama',
+   678→        qty: '1',
+   679→        unitPrice: String(opp.estimatedValue > 0 ? opp.estimatedValue : 0),
+   680→      }])
+   681→    }
+   682→  }
+   683→
+   684→  const submitCreate = async () => {
+   685→    if (oppId === 'NONE') {
+   686→      toast({ variant: 'destructive', title: 'Opportunity belum dipilih', description: 'Pilih opportunity sumber untuk penawaran ini.' })
+   687→      return
+   688→    }
+   689→    const clean = newItems.map((it) => ({ description: it.description.trim(), qty: toNum(it.qty), unitPrice: toNum(it.unitPrice) }))
+   690→    if (clean.some((it) => !it.description || it.qty <= 0)) {
+   691→      toast({ variant: 'destructive', title: 'Item belum lengkap', description: 'Setiap item wajib punya deskripsi dan qty lebih dari 0.' })
+   692→      return
+   693→    }
+   694→    const totals = computeTotals(newItems, newDiscountPct, newTaxPct)
+   695→    setBusy('create')
+   696→    try {
+   697→      const created = await financeApi.createQuotation({
+   698→        opportunityId: oppId,
+   699→        title: newTitle.trim() || undefined,
+   700→        items: clean,
+   701→        discountPct: totals.discountPct,
+   702→        taxPct: totals.taxPct,
+   703→        validUntil: newValidUntil || undefined,
+   704→        notes: newNotes.trim() || undefined,
+   705→      })
+   706→      toast({ title: `Penawaran ${created.code} dibuat`, description: 'Status Draft — kirim ke client saat sudah siap.' })
+   707→      setCreateOpen(false)
+   708→      await reload(true)
+   709→    } catch (e) {
+   710→      toast({ variant: 'destructive', title: 'Gagal membuat penawaran', description: errMsg(e) })
+   711→    } finally {
+   712→      setBusy(null)
+   713→    }
+   714→  }
+   715→
+   716→  const selectedOpp = opps.find((o) => o.id === oppId) ?? null
+   717→  const createCurrency = selectedOpp?.currency ?? 'IDR'
+   718→  const editCurrency = detail?.currency ?? 'IDR'
+   719→
+   720→  /* ================= render ================= */
+   721→  return (
+   722→    <div className="space-y-4 sm:space-y-5">
+   723→      {/* Header */}
+   724→      <SectionHeader
+   725→        title="Quotations"
+   726→        description="Penawaran resmi per brand — numbering otomatis QUO-YYYY-####, versioning, dan approval diskon Direktur"
+   727→        action={
+   728→          <div className="flex flex-wrap items-center gap-2">
+   729→            <RefreshButton onClick={() => void reload()} loading={loading} />
+   730→            {canExport && (
+   731→              <Button
+   732→                variant="outline"
+   733→                onClick={() => downloadCsv(
+   734→                  `quotations-${new Date().toISOString().slice(0, 10)}.csv`,
+   735→                  ['Kode', 'Judul', 'Perusahaan', 'Brand', 'Status', 'Versi', 'Subtotal', 'Diskon %', 'PPN %', 'Total', 'Currency', 'Valid Until', 'Dibuat'],
+   736→                  filtered.map((q) => [q.code, q.title, q.companyName, q.brandName, q.status, q.version, q.subtotal, q.discountPct, q.taxPct, q.total, q.currency, q.validUntil ?? '', q.createdAt]),
+   737→                )}
+   738→                className="gap-1.5"
+   739→              >
+   740→                <Download className="h-4 w-4" /> Export CSV
+   741→              </Button>
+   742→            )}
+   743→            {canCreate && (
+   744→              <Button onClick={() => void openCreate()} className="gap-1.5 bg-slate-900 text-white hover:bg-slate-800">
+   745→                <Plus className="h-4 w-4" /> Buat Penawaran
+   746→              </Button>
+   747→            )}
+   748→          </div>
+   749→        }
+   750→      />
+   751→
+   752→      {error ? (
+   753→        <Alert variant="destructive">
+   754→          <AlertCircle className="h-4 w-4" />
+   755→          <AlertTitle>Gagal memuat penawaran</AlertTitle>
+   756→          <AlertDescription>
+   757→            <p>{error}</p>
+   758→            <Button size="sm" variant="outline" className="mt-1" onClick={() => void reload()}>Coba lagi</Button>
+   759→          </AlertDescription>
+   760→        </Alert>
+   761→      ) : (
+   762→        <>
+   763→          {/* KPI mini-row */}
+   764→          {loading ? (
+   765→            <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
+   766→              {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-[76px] rounded-xl" />)}
+   767→            </div>
+   768→          ) : (
+   769→            <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
+   770→              <KpiCard
+   771→                label="Nilai Terkirim"
+   772→                value={formatMoney(sumOf(sentList), dominantCurrency(sentList), true)}
+   773→                sub={`${sentList.length} penawaran berstatus terkirim`}
+   774→                icon={Send}
+   775→                tone="bg-teal-50 text-teal-700"
+   776→              />
+   777→              <KpiCard
+   778→                label="Nilai Disetujui"
+   779→                value={formatMoney(sumOf(acceptedList), dominantCurrency(acceptedList), true)}
+   780→                sub={`${acceptedList.length} penawaran diterima client`}
+   781→                icon={CheckCircle2}
+   782→                tone="bg-emerald-50 text-emerald-700"
+   783→              />
+   784→              <KpiCard
+   785→                label="Menunggu Keputusan"
+   786→                value={String(sentList.length)}
+   787→                sub="penawaran menunggu balasan client"
+   788→                icon={Clock}
+   789→                tone="bg-amber-50 text-amber-700"
+   790→              />
+   791→              <KpiCard
+   792→                label="Menunggu Approval Diskon"
+   793→                value={String(discountPendingCount)}
+   794→                sub="diskon > 0 belum disetujui Direktur"
+   795→                icon={BadgeCheck}
+   796→                tone="bg-orange-50 text-orange-700"
+   797→                ring={discountPendingCount > 0}
+   798→              />
+   799→            </div>
+   800→          )}
+   801→
+   802→          {/* Toolbar */}
+   803→          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+   804→            <div className="relative flex-1 sm:min-w-[220px] sm:max-w-xs">
+   805→              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+   806→              <Input
+   807→                value={search}
+   808→                onChange={(e) => setSearch(e.target.value)}
+   809→                placeholder="Cari kode, judul, perusahaan…"
+   810→                aria-label="Cari penawaran"
+   811→                className="pl-8"
+   812→              />
+   813→            </div>
+   814→            <Select value={statusFilter} onValueChange={setStatusFilter}>
+   815→              <SelectTrigger className="w-full sm:w-[160px]" aria-label="Filter status">
+   816→                <SelectValue />
+   817→              </SelectTrigger>
+   818→              <SelectContent>
+   819→                <SelectItem value="ALL">Semua Status</SelectItem>
+   820→                <SelectItem value="DRAFT">Draft</SelectItem>
+   821→                <SelectItem value="SENT">Terkirim</SelectItem>
+   822→                <SelectItem value="ACCEPTED">Disetujui</SelectItem>
+   823→                <SelectItem value="REJECTED">Ditolak</SelectItem>
+   824→                <SelectItem value="EXPIRED">Kedaluwarsa</SelectItem>
+   825→              </SelectContent>
+   826→            </Select>
+   827→            <Select value={brandFilter} onValueChange={setBrandFilter}>
+   828→              <SelectTrigger className="w-full sm:w-[170px]" aria-label="Filter brand">
+   829→                <SelectValue />
+   830→              </SelectTrigger>
+   831→              <SelectContent>
+   832→                <SelectItem value="ALL">Semua Brand</SelectItem>
+   833→                {brands.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+   834→              </SelectContent>
+   835→            </Select>
+   836→            <RefreshButton onClick={() => void reload()} loading={loading} />
+   837→          </div>
+   838→
+   839→          {/* List */}
+   840→          {loading ? (
+   841→            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+   842→              {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-44 rounded-xl" />)}
+   843→            </div>
+   844→          ) : quotations.length === 0 ? (
+   845→            <EmptyState
+   846→              icon={<FileText className="h-6 w-6" />}
+   847→              title="Belum ada penawaran"
+   848→              description="Buat penawaran resmi dari opportunity yang sudah masuk tahap estimasi — numbering, versi, dan approval diskon dikelola otomatis."
+   849→              action={canCreate ? (
+   850→                <Button onClick={() => void openCreate()} className="gap-1.5 bg-slate-900 text-white hover:bg-slate-800">
+   851→                  <Plus className="h-4 w-4" /> Buat penawaran pertama
+   852→                </Button>
+   853→              ) : undefined}
+   854→            />
+   855→          ) : filtered.length === 0 ? (
+   856→            <EmptyState
+   857→              icon={<Search className="h-6 w-6" />}
+   858→              title="Tidak ada penawaran sesuai filter"
+   859→              description="Coba ubah kata kunci pencarian atau reset filter status dan brand."
+   860→              action={<Button variant="outline" size="sm" onClick={resetFilters}>Reset filter</Button>}
+   861→            />
+   862→          ) : (
+   863→            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+   864→              {filtered.map((q) => (
+   865→                <QuotationCard key={q.id} q={q} onOpen={() => openDetail(q.id)} />
+   866→              ))}
+   867→            </div>
+   868→          )}
+   869→        </>
+   870→      )}
+   871→
+   872→      {/* ================= Detail Dialog ================= */}
+   873→      <Dialog
+   874→        open={detailOpen}
+   875→        onOpenChange={(o) => { setDetailOpen(o); if (!o) { setDetail(null); setDetailError(null); setDetailId(null); setEditOpen(false) } }}
+   876→      >
+   877→        <DialogContent className={cn('max-h-[90vh] max-w-2xl overflow-y-auto', SCROLLBAR)} onInteractOutside={(e) => { if (printOpen) e.preventDefault() }}>
+   878→          <DialogHeader className="text-left">
+   879→            <div className="flex flex-wrap items-center gap-2">
+   880→              {detail && <span className="font-mono text-xs text-slate-400">{detail.code}</span>}
+   881→              {detail && detail.version > 1 && <VersionChip version={detail.version} />}
+   882→              {detail && <StatusBadge status={detail.status} />}
+   883→            </div>
+   884→            <DialogTitle className="text-left text-base leading-snug">
+   885→              {detail?.title ?? 'Memuat penawaran…'}
+   886→            </DialogTitle>
+   887→            <DialogDescription className="text-left">
+   888→              {detail ? `${detail.companyName} · ${detail.opportunityCode}` : 'Mengambil detail dari server…'}
+   889→            </DialogDescription>
+   890→            {detail && <div className="mt-0.5"><BrandChip name={detail.brandName} color={detail.brandColor} size="xs" /></div>}
+   891→          </DialogHeader>
+   892→
+   893→          {detailLoading && (
+   894→            <div className="space-y-3">
+   895→              <Skeleton className="h-8 w-full rounded-lg" />
+   896→              <Skeleton className="h-8 w-full rounded-lg" />
+   897→              <Skeleton className="h-24 w-full rounded-lg" />
+   898→              <Skeleton className="h-16 w-2/3 rounded-lg" />
+   899→            </div>
+   900→          )}
+   901→
+   902→          {detailError && (
+   903→            <Alert variant="destructive">
+   904→              <AlertCircle className="h-4 w-4" />
+   905→              <AlertTitle>Gagal memuat detail penawaran</AlertTitle>
+   906→              <AlertDescription>
+   907→                <p>{detailError}</p>
+   908→                <Button size="sm" variant="outline" className="mt-1" onClick={() => detailId && void loadDetail(detailId)}>Coba lagi</Button>
+   909→              </AlertDescription>
+   910→            </Alert>
+   911→          )}
+   912→
+   913→          {detail && (
+   914→            <div className="space-y-4">
+   915→              {/* Line items */}
+   916→              <div className="overflow-hidden rounded-xl border border-slate-200">
+   917→                <div className={cn('max-h-64 overflow-y-auto', SCROLLBAR)}>
+   918→                  <Table>
+   919→                    <TableHeader>
+   920→                      <TableRow className="bg-slate-50">
+   921→                        <TableHead>Deskripsi</TableHead>
+   922→                        <TableHead className="text-right">Qty</TableHead>
+   923→                        <TableHead className="text-right">Harga Satuan</TableHead>
+   924→                        <TableHead className="text-right">Jumlah</TableHead>
+   925→                      </TableRow>
+   926→                    </TableHeader>
+   927→                    <TableBody>
+   928→                      {detail.items.map((it) => (
+   929→                        <TableRow key={it.id}>
+   930→                          <TableCell className="max-w-[240px] font-medium text-slate-700">{it.description}</TableCell>
+   931→                          <TableCell className="text-right text-slate-600">{it.qty}</TableCell>
+   932→                          <TableCell className="text-right text-slate-600">{formatMoney(it.unitPrice, detail.currency)}</TableCell>
+   933→                          <TableCell className="text-right font-semibold text-slate-800">{formatMoney(it.lineTotal, detail.currency)}</TableCell>
+   934→                        </TableRow>
+   935→                      ))}
+   936→                    </TableBody>
+   937→                  </Table>
+   938→                </div>
+   939→              </div>
+   940→
+   941→              {/* Totals */}
+   942→              <div className="ml-auto w-full max-w-[280px] space-y-1.5 text-sm">
+   943→                <div className="flex items-center justify-between gap-4">
+   944→                  <span className="text-slate-500">Subtotal</span>
+   945→                  <span className="font-medium text-slate-800">{formatMoney(detail.subtotal, detail.currency)}</span>
+   946→                </div>
+   947→                {detail.discountPct > 0 && (
+   948→                  <div className="flex items-center justify-between gap-4 text-amber-700">
+   949→                    <span>Diskon ({detail.discountPct}%)</span>
+   950→                    <span className="font-medium">-{formatMoney(detail.discountAmount, detail.currency)}</span>
+   951→                  </div>
+   952→                )}
+   953→                <div className="flex items-center justify-between gap-4">
+   954→                  <span className="text-slate-500">PPN ({detail.taxPct}%)</span>
+   955→                  <span className="font-medium text-slate-800">+{formatMoney(detail.taxAmount, detail.currency)}</span>
+   956→                </div>
+   957→                <Separator />
+   958→                <div className="flex items-center justify-between gap-4">
+   959→                  <span className="font-semibold text-slate-900">TOTAL</span>
+   960→                  <span className="text-lg font-bold text-slate-900">{formatMoney(detail.total, detail.currency)}</span>
+   961→                </div>
+   962→              </div>
+   963→
+   964→              {/* Validity + notes */}
+   965→              <div className="space-y-2 text-xs">
+   966→                <p className={cn(
+   967→                  (daysUntil(detail.validUntil) ?? 1) < 0 && detail.status === 'SENT' ? 'font-semibold text-rose-600' : 'text-slate-500',
+   968→                )}>
+   969→                  Berlaku s.d. {formatDate(detail.validUntil)}
+   970→                </p>
+   971→                {detail.notes && (
+   972→                  <div className="rounded-lg bg-slate-50 p-2.5">
+   973→                    <p className="font-medium text-slate-500">Catatan</p>
+   974→                    <p className="mt-0.5 whitespace-pre-wrap text-slate-600">{detail.notes}</p>
+   975→                  </div>
+   976→                )}
+   977→              </div>
+   978→
+   979→              {/* Audit-ish info */}
+   980→              <div className="grid grid-cols-1 gap-x-6 gap-y-1.5 rounded-xl bg-slate-50 p-3 text-xs sm:grid-cols-2">
+   981→                <InfoLine label="Dibuat oleh" value={`${detail.createdByName ?? '—'} · ${formatDate(detail.createdAt)}`} />
+   982→                <InfoLine label="Dikirim" value={detail.sentAt ? formatDate(detail.sentAt, true) : '—'} />
+   983→                <InfoLine label="Keputusan client" value={detail.decidedAt ? formatDate(detail.decidedAt, true) : '—'} />
+   984→                <InfoLine
+   985→                  label="Approval diskon"
+   986→                  value={detail.discountApprovedByName ? `${detail.discountApprovedByName} · ${formatDate(detail.discountApprovedAt)}` : '—'}
+   987→                />
+   988→              </div>
+   989→            </div>
+   990→          )}
+   991→
+   992→          {/* Diskusi Client (thread komentar — R11) */}
+   993→          {detail && <DiscussionSection quotationId={detail.id} />}
+   994→
+   995→          {/* Action bar (role-aware) */}
+   996→          {detail && (
+   997→            <DialogFooter className="flex-row flex-wrap gap-2 border-t border-slate-100 pt-3 sm:justify-end">
+   998→              <Button
+   999→                variant="outline"
+  1000→                onClick={() => setPrintOpen(true)}
+  1001→                disabled={busy !== null}
+  1002→                className="gap-1.5"
+  1003→              >
+  1004→                <Printer className="h-4 w-4" /> Cetak / PDF
+  1005→              </Button>
+  1006→              {detail.status === 'DRAFT' && canSend && (
+  1007→                <>
+  1008→                  <Button
+  1009→                    onClick={() => void handleStatus(detail, 'SENT')}
+  1010→                    disabled={busy !== null}
+  1011→                    className="gap-1.5 bg-slate-900 text-white hover:bg-slate-800"
+  1012→                  >
+  1013→                    {busy === 'SENT' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+  1014→                    Kirim Penawaran
+  1015→                  </Button>
+  1016→                  <Button variant="ghost" onClick={openEdit} disabled={busy !== null} className="gap-1.5">
+  1017→                    <Pencil className="h-4 w-4" /> Edit
+  1018→                  </Button>
+  1019→                  <Button
+  1020→                    variant="ghost"
+  1021→                    onClick={() => void handleDeleteQuotation(detail)}
+  1022→                    disabled={busy !== null}
+  1023→                    className="gap-1.5 text-rose-600 hover:bg-rose-50 hover:text-rose-700"
+  1024→                  >
+  1025→                    {busy === 'delete' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+  1026→                    Hapus
+  1027→                  </Button>
+  1028→                </>
+  1029→              )}
+  1030→
+  1031→              {detail.status === 'SENT' && canEdit && (
+  1032→                <Button variant="ghost" onClick={openEdit} disabled={busy !== null} className="gap-1.5">
+  1033→                  <Pencil className="h-4 w-4" /> Edit
+  1034→                </Button>
+  1035→              )}
+  1036→
+  1037→              {detail.status === 'SENT' && (
+  1038→                <>
+  1039→                  <Button
+  1040→                    variant="outline"
+  1041→                    onClick={() => void handleStatus(detail, 'ACCEPTED')}
+  1042→                    disabled={busy !== null}
+  1043→                    className="gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+  1044→                  >
+  1045→                    {busy === 'ACCEPTED' ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+  1046→                    Client Menerima
+  1047→                  </Button>
+  1048→                  <Button
+  1049→                    variant="outline"
+  1050→                    onClick={() => void handleStatus(detail, 'REJECTED')}
+  1051→                    disabled={busy !== null}
+  1052→                    className="gap-1.5 border-rose-300 text-rose-700 hover:bg-rose-50"
+  1053→                  >
+  1054→                    {busy === 'REJECTED' ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}
+  1055→                    Client Menolak
+  1056→                  </Button>
+  1057→                </>
+  1058→              )}
+  1059→
+  1060→              {detail.status === 'SENT' && detail.discountPct > 0 && !detail.discountApprovedById && canApprove && (
+  1061→                <Button
+  1062→                  onClick={() => void handleApproveDiscount(detail)}
+  1063→                  disabled={busy !== null}
+  1064→                  className="gap-1.5 bg-amber-500 text-white transition-colors hover:bg-emerald-600"
+  1065→                >
+  1066→                  {busy === 'approve' ? <Loader2 className="h-4 w-4 animate-spin" /> : <BadgeCheck className="h-4 w-4" />}
+  1067→                  Setujui Diskon {detail.discountPct}%
+  1068→                </Button>
+  1069→              )}
+  1070→
+  1071→              {detail.status === 'ACCEPTED' && canInvoice && (
+  1072→                <Button onClick={() => void handleCreateInvoice(detail)} disabled={busy !== null} className="gap-1.5">
+  1073→                  {busy === 'invoice' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+  1074→                  Buat Invoice
+  1075→                </Button>
+  1076→              )}
+  1077→            </DialogFooter>
+  1078→          )}
+  1079→        </DialogContent>
+  1080→      </Dialog>
+  1081→
+  1082→      {/* ================= Print Overlay ================= */}
+  1083→      {detail && (
+  1084→        <PrintOverlay open={printOpen} docTitle={`${detail.code} — ${detail.title}`} onClose={() => setPrintOpen(false)}>
+  1085→          <QuotationPrintBody q={detail} />
+  1086→        </PrintOverlay>
+  1087→      )}
+  1088→
+  1089→      {/* ================= Edit Dialog ================= */}
+  1090→      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+  1091→        <DialogContent className={cn('max-h-[90vh] max-w-2xl overflow-y-auto', SCROLLBAR)}>
+  1092→          <DialogHeader className="text-left">
+  1093→            <DialogTitle className="text-left">Edit Penawaran</DialogTitle>
+  1094→            <DialogDescription className="text-left">
+  1095→              {detail?.code} — {detail?.status === 'SENT'
+  1096→                ? 'Mengubah penawaran terkirim menaikkan versi otomatis.'
+  1097→                : 'Perbarui judul, item, diskon, dan masa berlaku penawaran.'}
+  1098→            </DialogDescription>
+  1099→          </DialogHeader>
+  1100→
+  1101→          <div className="space-y-4">
+  1102→            <div className="space-y-1.5">
+  1103→              <Label htmlFor="quo-edit-title">Judul Penawaran</Label>
+  1104→              <Input
+  1105→                id="quo-edit-title"
+  1106→                value={editTitle}
+  1107→                disabled={busy !== null}
+  1108→                onChange={(e) => setEditTitle(e.target.value)}
+  1109→                placeholder="Judul penawaran"
+  1110→              />
+  1111→            </div>
+  1112→
+  1113→            <ItemsEditor items={editItems} onChange={setEditItems} currency={editCurrency} disabled={busy !== null} />
+  1114→
+  1115→            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+  1116→              <div className="space-y-1.5">
+  1117→                <Label htmlFor="quo-edit-disc">Diskon (%)</Label>
+  1118→                <Input
+  1119→                  id="quo-edit-disc" type="number" min={0} max={100} step="any"
+  1120→                  value={editDiscountPct} disabled={busy !== null}
+  1121→                  onChange={(e) => setEditDiscountPct(e.target.value)}
+  1122→                />
+  1123→                <p className="text-[11px] text-amber-600">Diskon &gt; 0 memerlukan approval Direktur.</p>
+  1124→              </div>
+  1125→              <div className="space-y-1.5">
+  1126→                <Label htmlFor="quo-edit-tax">PPN (%)</Label>
+  1127→                <Input
+  1128→                  id="quo-edit-tax" type="number" min={0} step="any"
+  1129→                  value={editTaxPct} disabled={busy !== null}
+  1130→                  onChange={(e) => setEditTaxPct(e.target.value)}
+  1131→                />
+  1132→              </div>
+  1133→            </div>
+  1134→
+  1135→            <div className="space-y-1.5">
+  1136→              <Label htmlFor="quo-edit-valid">Berlaku Hingga</Label>
+  1137→              <Input
+  1138→                id="quo-edit-valid" type="date"
+  1139→                value={editValidUntil} disabled={busy !== null}
+  1140→                onChange={(e) => setEditValidUntil(e.target.value)}
+  1141→              />
+  1142→            </div>
+  1143→
+  1144→            <div className="space-y-1.5">
+  1145→              <Label htmlFor="quo-edit-notes">Catatan</Label>
+  1146→              <Textarea
+  1147→                id="quo-edit-notes" rows={2}
+  1148→                value={editNotes} disabled={busy !== null}
+  1149→                onChange={(e) => setEditNotes(e.target.value)}
+  1150→                placeholder="Catatan untuk client (opsional)"
+  1151→              />
+  1152→            </div>
+  1153→
+  1154→            <TotalsPreview totals={computeTotals(editItems, editDiscountPct, editTaxPct)} currency={editCurrency} />
+  1155→          </div>
+  1156→
+  1157→          <DialogFooter>
+  1158→            <Button variant="outline" onClick={() => setEditOpen(false)} disabled={busy !== null}>Batal</Button>
+  1159→            <Button onClick={() => void submitEdit()} disabled={busy !== null} className="gap-1.5">
+  1160→              {busy === 'edit' && <Loader2 className="h-4 w-4 animate-spin" />}
+  1161→              Simpan Perubahan
+  1162→            </Button>
+  1163→          </DialogFooter>
+  1164→        </DialogContent>
+  1165→      </Dialog>
+  1166→
+  1167→      {/* ================= Create Dialog ================= */}
+  1168→      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+  1169→        <DialogContent className={cn('max-h-[90vh] max-w-2xl overflow-y-auto', SCROLLBAR)}>
+  1170→          <DialogHeader className="text-left">
+  1171→            <DialogTitle className="text-left">Buat Penawaran</DialogTitle>
+  1172→            <DialogDescription className="text-left">
+  1173→              Pilih opportunity, susun item, dan atur diskon — numbering QUO-YYYY-#### dibuat otomatis per brand.
+  1174→            </DialogDescription>
+  1175→          </DialogHeader>
+  1176→
+  1177→          <div className="space-y-4">
+  1178→            <div className="space-y-1.5">
+  1179→              <Label>Opportunity</Label>
+  1180→              {oppsLoading ? (
+  1181→                <div className="flex h-9 items-center gap-2 rounded-md border border-input px-3 text-sm text-slate-400">
+  1182→                  <Loader2 className="h-4 w-4 animate-spin" /> Memuat opportunity…
+  1183→                </div>
+  1184→              ) : opps.length === 0 ? (
+  1185→                <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 p-3 text-xs text-slate-500">
+  1186→                  Belum ada opportunity pada tahap layak penawaran (Discovery s.d. Verbal Agreement). Dorong lead lewat pipeline terlebih dahulu.
+  1187→                </div>
+  1188→              ) : (
+  1189→                <Select value={oppId} onValueChange={handleSelectOpp}>
+  1190→                  <SelectTrigger aria-label="Pilih opportunity">
+  1191→                    <SelectValue placeholder="Pilih opportunity…" />
+  1192→                  </SelectTrigger>
+  1193→                  <SelectContent className={cn('max-h-64', SCROLLBAR)}>
+  1194→                    <SelectItem value="NONE" disabled>Pilih opportunity…</SelectItem>
+  1195→                    {opps.map((o) => (
+  1196→                      <SelectItem key={o.id} value={o.id}>
+  1197→                        {o.code} · {o.title} — {o.companyName}
+  1198→                      </SelectItem>
+  1199→                    ))}
+  1200→                  </SelectContent>
+  1201→                </Select>
+  1202→              )}
+  1203→            </div>
+  1204→
+  1205→            <div className="space-y-1.5">
+  1206→              <Label htmlFor="quo-new-title">Judul Penawaran</Label>
+  1207→              <Input
+  1208→                id="quo-new-title"
+  1209→                value={newTitle}
+  1210→                disabled={busy !== null}
+  1211→                onChange={(e) => setNewTitle(e.target.value)}
+  1212→                placeholder="Otterisasi dari judul opportunity"
+  1213→              />
+  1214→            </div>
+  1215→
+  1216→            <ItemsEditor items={newItems} onChange={setNewItems} currency={createCurrency} disabled={busy !== null} />
+  1217→
+  1218→            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+  1219→              <div className="space-y-1.5">
+  1220→                <Label htmlFor="quo-new-disc">Diskon (%)</Label>
+  1221→                <Input
+  1222→                  id="quo-new-disc" type="number" min={0} max={100} step="any"
+  1223→                  value={newDiscountPct} disabled={busy !== null}
+  1224→                  onChange={(e) => setNewDiscountPct(e.target.value)}
+  1225→                />
+  1226→                <p className="text-[11px] text-amber-600">Diskon &gt; 0 memerlukan approval Direktur.</p>
+  1227→              </div>
+  1228→              <div className="space-y-1.5">
+  1229→                <Label htmlFor="quo-new-tax">PPN (%)</Label>
+  1230→                <Input
+  1231→                  id="quo-new-tax" type="number" min={0} step="any"
+  1232→                  value={newTaxPct} disabled={busy !== null}
+  1233→                  onChange={(e) => setNewTaxPct(e.target.value)}
+  1234→                />
+  1235→              </div>
+  1236→            </div>
+  1237→
+  1238→            <div className="space-y-1.5">
+  1239→              <Label htmlFor="quo-new-valid">Berlaku Hingga</Label>
+  1240→              <Input
+  1241→                id="quo-new-valid" type="date"
+  1242→                value={newValidUntil} disabled={busy !== null}
+  1243→                onChange={(e) => setNewValidUntil(e.target.value)}
+  1244→              />
+  1245→            </div>
+  1246→
+  1247→            <div className="space-y-1.5">
+  1248→              <Label htmlFor="quo-new-notes">Catatan</Label>
+  1249→              <Textarea
+  1250→                id="quo-new-notes" rows={2}
+  1251→                value={newNotes} disabled={busy !== null}
+  1252→                onChange={(e) => setNewNotes(e.target.value)}
+  1253→                placeholder="Catatan untuk client (opsional)"
+  1254→              />
+  1255→            </div>
+  1256→
+  1257→            <TotalsPreview totals={computeTotals(newItems, newDiscountPct, newTaxPct)} currency={createCurrency} />
+  1258→          </div>
+  1259→
+  1260→          <DialogFooter>
+  1261→            <Button variant="outline" onClick={() => setCreateOpen(false)} disabled={busy !== null}>Batal</Button>
+  1262→            <Button onClick={() => void submitCreate()} disabled={busy !== null || oppsLoading} className="gap-1.5">
+  1263→              {busy === 'create' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+  1264→              Buat Penawaran
+  1265→            </Button>
+  1266→          </DialogFooter>
+  1267→        </DialogContent>
+  1268→      </Dialog>
+  1269→    </div>
+  1270→  )
+  1271→}
+  1272→

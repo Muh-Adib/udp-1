@@ -7,377 +7,504 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ============================================================
+// MULTI-BRAND CRM — Company/Contact-centric foundation
+// ============================================================
+
 model User {
-  id           String   @id @default(cuid())
-  name         String
-  email        String   @unique
-  passwordHash String
-  role         String // OWNER | MANAGER | MARKETER | PRODUCTION | FINANCE | CLIENT
-  companyId    String? // hanya untuk role CLIENT
-  active       Boolean  @default(true)
-  createdAt    DateTime @default(now())
-
-  company  Company? @relation(fields: [companyId], references: [id])
-  leads    Lead[]   @relation("AssigneeLeads")
-  messages LeadMessage[] @relation("SenderMessages")
-  briefs   Brief[]  @relation("BriefCreator")
-}
-
-model Company {
-  id        String   @id @default(cuid())
-  name      String
-  email     String?
-  phone     String?
-  createdAt DateTime @default(now())
-
-  users    User[]
-  contacts Contact[]
-  leads    Lead[]
-  projects Project[]
-}
-
-model Contact {
   id          String   @id @default(cuid())
+  email       String   @unique
   name        String
-  position    String? // jabatan (mis. Purchasing Manager)
-  companyName String? // nama perusahaan teks bebas (lead mancanegara belum tentu punya record Company)
-  country     String   @default("Indonesia")
-  email       String?
-  phone       String? // format internasional tanpa tanda + (mis. 628123…, 442079…)
-  igUsername  String?
-  source      String   @default("manual") // kanal pertama kali dikenal: whatsapp | email | instagram | web | manual
-  companyId   String?
-  notes       String?
+  role        String   @default("MARKETING") // SUPER_ADMIN | DIREKTUR | MARKETING | KEUANGAN | PRODUKSI | CLIENT
+  title       String?
+  avatarColor String   @default("#10b981")
+  isActive    Boolean  @default(true)
+  companyId   String?  // khusus role CLIENT — client hanya melihat data company ini
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  company Company? @relation(fields: [companyId], references: [id])
-  leads   Lead[]
-
-  @@index([phone])
-  @@index([email])
-  @@index([igUsername])
+  brandAccess        UserBrandAccess[]
+  ownedCompanies     Company[]       @relation("CompanyOwner")
+  ownedOpportunities Opportunity[]   @relation("OppOwner")
+  assignedTasks      Task[]
+  notes              Note[]
+  respondedInteractions Interaction[] @relation("Responder")
+  managedProjects    Project[]       @relation("ProjectManager")
+  auditLogs          AuditLog[]
+  createdQuotations  Quotation[]     @relation("QuotationCreator")
+  approvedQuotations Quotation[]     @relation("QuotationApprover")
+  recordedPayments   Payment[]       @relation("PaymentRecorder")
+  preparedBriefs     Brief[]         @relation("BriefPreparer")
+  createdEstimations Estimation[]    @relation("EstimationCreator")
+  portalComments     PortalComment[] @relation("PortalCommentAuthor")
+  clientOfCompany    Company?        @relation("CompanyClients", fields: [companyId], references: [id])
 }
 
-model Lead {
-  id         String   @id @default(cuid())
-  code       String   @unique // LD-XXXXXX
-  subject    String
-  brand      String // unimasi | segia | erfo | unicam
-  channel    String // whatsapp | email | instagram | web | manual
-  status     String   @default("NEW") // NEW | FOLLOW_UP | QUOTED | WON | LOST (ringkasan, tersinkron dari stage)
-  stage      String   @default("NEW") // NEW | QUALIFIED | PROPOSAL | NEGOTIATION | WON | LOST (tahap funnel)
-  estValue   Int      @default(0) // estimasi nilai deal (Rp)
-  score      Int      @default(0)
-  contactId  String
-  companyId  String?
-  assigneeId String?
-  sourceRef  String? // campaign / halaman web / nomor / alamat email
-  lostReason String?
-  firstInAt  DateTime? // pesan masuk pertama
-  firstOutAt DateTime? // balasan pertama (SLA)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+model UserBrandAccess {
+  id        String  @id @default(cuid())
+  userId    String
+  brandId   String
+  canManage Boolean @default(false)
 
-  contact    Contact     @relation(fields: [contactId], references: [id])
-  company    Company?    @relation(fields: [companyId], references: [id])
-  assignee   User?       @relation("AssigneeLeads", fields: [assigneeId], references: [id])
-  messages   LeadMessage[]
-  quotations Quotation[]
-  projects   Project[]
-  briefs     Brief[]
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  brand Brand @relation(fields: [brandId], references: [id], onDelete: Cascade)
 
-  @@index([status])
-  @@index([stage])
-  @@index([channel])
-  @@index([createdAt])
+  @@unique([userId, brandId])
 }
 
-// ============ BRIEF & ESTIMASI PRODUKSI ============
+model Brand {
+  id              String  @id @default(cuid())
+  name            String
+  slug            String  @unique
+  tagline         String?
+  description     String?
+  color           String  @default("#10b981")
+  website         String?
+  /* Identitas kontak brand — dipakai di kop dokumen (quotation/invoice) & identifikasi kanal masuk */
+  email           String?
+  phone           String?
+  instagram       String?
+  address         String?
+  primaryCurrency String  @default("IDR")
+  invoicePrefix   String  @default("INV")
+  quotationPrefix String  @default("QUO")
+  slaHours        Int     @default(4)
+  workflowType    String  @default("generic") // website | video | animation | livestream | generic
+  isActive        Boolean @default(true)
 
-model Brief {
-  id           String    @id @default(cuid())
-  code         String    @unique // BRF-0001
-  leadId       String
-  brand        String
-  title        String
-  objective    String // tujuan kampanye / pekerjaan
-  audience     String? // target audiens
-  deliverables String    @default("") // daftar output yang diminta (multiline)
-  references   String? // link referensi (mendrive dsb)
-  deadline     DateTime?
-  notes        String?
-  status       String    @default("DRAFT") // DRAFT | SUBMITTED | ESTIMATED | QUOTED
-  createdById  String?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-
-  lead        Lead           @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  createdBy   User?          @relation("BriefCreator", fields: [createdById], references: [id])
-  estimates   WorkEstimate[]
-  project     Project?
-
-  @@index([status])
-  @@index([leadId])
+  services    Service[]
+  brandAccess UserBrandAccess[]
+  sourceOpportunities    Opportunity[] @relation("SourceBrand")
+  executingOpportunities Opportunity[] @relation("ExecutingBrand")
+  interactions Interaction[]
+  projects     Project[]
+  templates    FollowUpTemplate[]
+  quotations   Quotation[]
+  invoices     Invoice[]
 }
 
-model WorkEstimate {
-  id            String   @id @default(cuid())
-  briefId       String
-  itemsJson     String   @default("[]") // [{task, qty, unit, hours, cost}]
-  totalHours    Int      @default(0)
-  totalCost     Int      @default(0)
-  notes         String?
-  status        String   @default("SUBMITTED") // SUBMITTED
-  createdById   String?
-  createdByName String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+model Service {
+  id          String  @id @default(cuid())
+  brandId     String
+  name        String
+  category    String  @default("Umum")
+  description String?
+  isActive    Boolean @default(true)
 
-  brief Brief @relation(fields: [briefId], references: [id], onDelete: Cascade)
-
-  @@index([briefId])
+  brand         Brand         @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  opportunities Opportunity[]
 }
 
-model Deliverable {
-  id             String   @id @default(cuid())
-  projectId      String
-  name           String
-  type           String   @default("LINK") // FILE | LINK
-  url            String? // untuk LINK: Google Drive / URL lainnya
-  filePath       String? // untuk FILE: path fisik di server
-  fileName       String?
-  mimeType       String?
-  sizeLabel      String?
-  milestoneLabel String? // opsional: milestone terkait
-  note           String?
-  uploadedByName String
-  createdAt      DateTime @default(now())
-
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-
-  @@index([projectId])
-}
-
-model LeadMessage {
-  id         String   @id @default(cuid())
-  leadId     String
-  direction  String // IN | OUT | NOTE
-  channel    String // whatsapp | email | instagram | web | internal
-  body       String
-  externalId String?  @unique // id pesan dari provider (dedupe webhook)
-  senderId   String?
-  senderName String
-  createdAt  DateTime @default(now())
-
-  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  sender User?  @relation("SenderMessages", fields: [senderId], references: [id])
-
-  @@index([leadId])
-}
-
-model ChannelConfig {
-  id            String    @id @default(cuid())
-  type          String    @unique // whatsapp | email | instagram | web
-  name          String
-  enabled       Boolean   @default(false)
-  configJson    String    @default("{}") // kredensial & opsi per kanal (disimpan terenkripsi ringan)
-  apiKey        String?   @unique // untuk kanal web & auth webhook
-  webhookSecret String? // verifikasi webhook (verify token / signature)
-  lastEventAt   DateTime?
-  eventCount    Int       @default(0)
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-}
-
-model Notification {
-  id        String   @id @default(cuid())
-  role      String? // broadcast ke role (OWNER/MANAGER/MARKETER); null = semua staff
-  userId    String? // notifikasi personal
-  title     String
-  body      String
-  type      String   @default("INFO") // NEW_LEAD | SLA | SYSTEM
-  link      String?
-  read      Boolean  @default(false)
+model Company {
+  id       String   @id @default(cuid())
+  name     String
+  industry String?
+  website  String?
+  country  String   @default("Indonesia")
+  city     String?
+  address  String?
+  size     String? // Small | Medium | Enterprise | Government | NGO
+  taxId    String?
+  currency String   @default("IDR")
+  tags     String   @default("") // comma separated
+  notes    String?
+  ownerId  String?
+  isDeleted Boolean @default(false)
   createdAt DateTime @default(now())
-
-  @@index([read])
-}
-
-model AuditLog {
-  id        String   @id @default(cuid())
-  actorName String
-  action    String
-  entity    String
-  entityId  String?
-  detail    String?
-  createdAt DateTime @default(now())
-
-  @@index([createdAt])
-}
-
-model AppSetting {
-  key       String   @id
-  value     String
   updatedAt DateTime @updatedAt
+
+  owner         User?     @relation("CompanyOwner", fields: [ownerId], references: [id])
+  clientUsers   User[]    @relation("CompanyClients")
+  contacts      Contact[]
+  opportunities Opportunity[]
+  interactions  Interaction[]
+  projects      Project[]
+  quotations    Quotation[]
+  invoices      Invoice[]
+  portalComments PortalComment[]
 }
 
-// ============ IDENTITAS BRAND (KOP SURAT & DOKUMEN) ============
+model Contact {
+  id               String  @id @default(cuid())
+  companyId        String?
+  firstName        String
+  lastName         String?
+  position         String?
+  email            String?
+  altEmail         String?
+  whatsapp         String?
+  phone            String?
+  country          String  @default("Indonesia")
+  city             String?
+  timezone         String  @default("Asia/Jakarta")
+  language         String  @default("id") // id | en
+  preferredChannel String  @default("WHATSAPP") // WHATSAPP|EMAIL|PHONE|INSTAGRAM|WEBSITE
+  linkedin         String?
+  consentStatus    String  @default("GRANTED") // GRANTED|PENDING|REVOKED
+  tags             String  @default("")
+  isPrimary        Boolean @default(false)
+  isDeleted        Boolean @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
-model BrandProfile {
-  id             String   @id @default(cuid())
-  brand          String   @unique // unimasi | segia | erfo | unicam
-  name           String // nama brand tampil di kop surat
-  tagline        String   @default("")
-  logoPath       String?  // path file logo di folder uploads/
-  address        String   @default("")
-  phone          String   @default("")
-  email          String   @default("")
-  instagram      String   @default("") // akun Instagram resmi brand (mis. @unimasi.id)
-  website        String   @default("")
-  primaryColor   String   @default("#059669") // warna identitas (hex)
-  letterheadNote String   @default("") // baris legal/izin di bawah kop
-  footerNote     String   @default("") // teks footer dokumen (alamat lengkap dsb)
-  bankInfo       String   @default("") // rekening pembayaran pada penawaran/invoice
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-
-  @@index([brand])
+  company      Company?      @relation(fields: [companyId], references: [id])
+  opportunities Opportunity[]
+  interactions  Interaction[]
 }
 
-// ============ SECURE LINK (DISTRIBUSI DOKUMEN AMAN) ============
+model Opportunity {
+  id                String    @id @default(cuid())
+  code              String    @unique
+  title             String
+  companyId         String
+  contactId         String
+  sourceBrandId     String
+  executingBrandId  String
+  serviceId         String?
+  leadSource        String    @default("WEBSITE") // WEBSITE|WHATSAPP|INSTAGRAM|EMAIL|REFERRAL|COLD_CALL|EVENT
+  channel           String    @default("WEBSITE") // first inbound channel
+  campaign          String?
+  brief             String?
+  needs             String?
+  targetAudience    String?
+  deliverables      String?
+  deadline          DateTime?
+  estimatedValue    Float     @default(0)
+  currency          String    @default("IDR")
+  probability       Int       @default(20)
+  expectedCloseDate DateTime?
+  ownerId           String
+  priority          String    @default("MEDIUM") // LOW|MEDIUM|HIGH|URGENT
+  stage             String    @default("NEW")
+  temperature       String    @default("WARM") // HOT|WARM|COLD
+  competitorName    String?
+  nextAction        String?
+  nextActionDate    DateTime?
+  lostReason        String?
+  lostNotes         String?
+  lastOfferValue    Float?
+  reactivation      String? // REOFFER_30|REOFFER_90|BUDGET_PERIOD|CROSS_SELL|SMALLER_PACKAGE|ALTERNATIVE_SERVICE
+  followUpDate      DateTime?
+  nurtureTrack      String?
+  wonAt             DateTime?
+  lostAt            DateTime?
+  stageUpdatedAt    DateTime  @default(now())
+  isDeleted         Boolean   @default(false)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
-model SecureLink {
+  company        Company    @relation(fields: [companyId], references: [id])
+  contact        Contact    @relation(fields: [contactId], references: [id])
+  sourceBrand    Brand      @relation("SourceBrand", fields: [sourceBrandId], references: [id])
+  executingBrand Brand      @relation("ExecutingBrand", fields: [executingBrandId], references: [id])
+  service        Service?   @relation(fields: [serviceId], references: [id])
+  owner          User       @relation("OppOwner", fields: [ownerId], references: [id])
+  interactions   Interaction[]
+  tasks          Task[]
+  notes          Note[]
+  projects       Project[]
+  quotations     Quotation[]
+  invoices       Invoice[]
+  briefs         Brief[]
+  estimations    Estimation[]
+}
+
+model Interaction {
+  id                String    @id @default(cuid())
+  opportunityId     String?
+  contactId         String
+  companyId         String?
+  brandId           String
+  channel           String // WHATSAPP|EMAIL|INSTAGRAM|WEBSITE|PHONE|MEETING
+  direction         String // IN|OUT
+  externalMessageId String?
+  subject           String?
+  body              String
+  attachmentName    String?
+  respondedById     String?
+  respondedAt       DateTime?
+  status            String    @default("DELIVERED") // SENT|DELIVERED|READ
+  originalLink      String?
+  sentAt            DateTime  @default(now())
+  createdAt         DateTime  @default(now())
+
+  opportunity Opportunity? @relation(fields: [opportunityId], references: [id])
+  contact     Contact      @relation(fields: [contactId], references: [id])
+  company     Company?     @relation(fields: [companyId], references: [id])
+  brand       Brand        @relation(fields: [brandId], references: [id])
+  responder   User?        @relation("Responder", fields: [respondedById], references: [id])
+}
+
+model Task {
   id            String    @id @default(cuid())
-  token         String    @unique // token acak URL-safe (24+ char) — /s/<token>
-  title         String // label dokumen yang tampil ke penerima
-  targetType    String // QUOTATION | BRIEF | DELIVERABLE
-  targetId      String
-  leadId        String? // riwayat kirim per lead
-  projectId     String?
-  brand         String    @default("unimasi") // brand kop dokumen
-  passwordHash  String // scrypt salt:hash — password tidak pernah dikirim ulang oleh server
-  active        Boolean   @default(true) // bisa dicabut kapan saja
-  expiresAt     DateTime? // opsional: kedaluwarsa otomatis
-  accessCount   Int       @default(0) // berapa kali dokumen dibuka penerima
-  lastAccessAt  DateTime?
-  createdById   String?
-  createdByName String?
+  title         String
+  description   String?
+  opportunityId String?
+  assigneeId    String
+  dueDate       DateTime?
+  status        String    @default("OPEN") // OPEN|IN_PROGRESS|DONE|CANCELLED
+  priority      String    @default("MEDIUM") // LOW|MEDIUM|HIGH|URGENT
+  type          String    @default("FOLLOW_UP") // FOLLOW_UP|MEETING|BRIEF|INTERNAL|OTHER
+  completedAt   DateTime?
   createdAt     DateTime  @default(now())
 
-  @@index([leadId])
-  @@index([targetType, targetId])
+  opportunity Opportunity? @relation(fields: [opportunityId], references: [id])
+  assignee    User         @relation(fields: [assigneeId], references: [id])
 }
 
-// ============ KEUANGAN & PRODUKSI ============
+model Note {
+  id            String   @id @default(cuid())
+  body          String
+  opportunityId String
+  authorId      String
+  visibility    String   @default("INTERNAL") // INTERNAL | DIRECTOR
+  createdAt     DateTime @default(now())
 
-model Quotation {
-  id           String    @id @default(cuid())
-  number       String    @unique // QT-0001
-  leadId       String
-  brand        String
-  title        String
-  itemsJson    String    @default("[]") // [{desc, qty, price}]
-  subtotal     Int       @default(0)
-  discountPct  Int       @default(0)
-  ppnPct       Int       @default(11)
-  grandTotal   Int       @default(0)
-  status       String    @default("DRAFT") // DRAFT | SENT | APPROVED | REJECTED
-  notes        String?
-  sentAt       DateTime?
-  decidedAt    DateTime?
-  decidedNote  String?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-
-  lead      Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  invoices  Invoice[]
-  projects  Project[]
-
-  @@index([status])
-  @@index([leadId])
+  opportunity Opportunity @relation(fields: [opportunityId], references: [id])
+  author      User        @relation(fields: [authorId], references: [id])
 }
 
 model Project {
-  id          String    @id @default(cuid())
-  code        String    @unique // PRJ-0001
-  name        String
-  brand       String
-  companyId   String?
-  leadId      String?
-  quotationId String?
-  briefId     String? @unique
-  status      String    @default("PLANNED") // PLANNED | BRIEFED | IN_PROGRESS | REVIEW | DONE
-  progress    Int       @default(0) // 0-100
-  budget      Int       @default(0)
-  managerName String?
-  startDate   DateTime?
-  dueDate     DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id            String    @id @default(cuid())
+  name          String
+  code          String    @unique
+  opportunityId String    @unique
+  companyId     String
+  brandId       String
+  managerId     String?
+  status        String    @default("PLANNING") // PLANNING|IN_PROGRESS|REVIEW|COMPLETED|ON_HOLD
+  progress      Int       @default(0)
+  workflowType  String    @default("generic")
+  budget        Float     @default(0)
+  startDate     DateTime?
+  endDate       DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
-  company    Company?    @relation(fields: [companyId], references: [id])
-  lead       Lead?       @relation(fields: [leadId], references: [id])
-  quotation  Quotation?  @relation(fields: [quotationId], references: [id])
-  brief      Brief?      @relation(fields: [briefId], references: [id])
-  milestones Milestone[]
-  invoices   Invoice[]
-  deliverables Deliverable[]
-
-  @@index([status])
-  @@index([brand])
+  opportunity Opportunity @relation(fields: [opportunityId], references: [id])
+  company     Company     @relation(fields: [companyId], references: [id])
+  brand       Brand       @relation(fields: [brandId], references: [id])
+  manager     User?       @relation("ProjectManager", fields: [managerId], references: [id])
+  milestones  Milestone[]
+  invoices    Invoice[]
 }
 
 model Milestone {
-  id        String    @id @default(cuid())
-  projectId String
-  title     String
-  orderIdx  Int       @default(0)
-  weight    Int       @default(0) // bobot % terhadap progress project
-  status    String    @default("PENDING") // PENDING | IN_PROGRESS | DONE
-  dueDate   DateTime?
-  doneAt    DateTime?
-  createdAt DateTime  @default(now())
+  id          String    @id @default(cuid())
+  projectId   String
+  name        String
+  stepOrder   Int       @default(0)
+  status      String    @default("PENDING") // PENDING|IN_PROGRESS|DONE
+  dueDate     DateTime?
+  completedAt DateTime?
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
 
-  @@index([projectId])
+model FollowUpTemplate {
+  id        String  @id @default(cuid())
+  brandId   String
+  name      String
+  step      Int     @default(1)
+  delayDays Int     @default(1)
+  channel   String  @default("WHATSAPP") // WHATSAPP|EMAIL|WHATSAPP_EMAIL
+  language  String  @default("id") // id | en
+  subject   String?
+  body      String
+  purpose   String?
+  isActive  Boolean @default(true)
+
+  brand Brand @relation(fields: [brandId], references: [id])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  userId      String?
+  userName    String?
+  action      String // CREATE|UPDATE|DELETE|STAGE_CHANGE|MERGE|LOGIN|LOGOUT|RESTORE
+  entityType  String
+  entityId    String?
+  entityLabel String?
+  oldValue    String? // JSON string
+  newValue    String? // JSON string
+  ip          String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+}
+
+// ============ FASE 2 — Komersial: Quotation, Invoice, Payment ============
+
+model Quotation {
+  id                String    @id @default(cuid())
+  code              String    @unique
+  opportunityId     String
+  brandId           String
+  companyId         String
+  title             String
+  status            String    @default("DRAFT") // DRAFT|SENT|ACCEPTED|REJECTED|EXPIRED
+  version           Int       @default(1)
+  currency          String    @default("IDR")
+  subtotal          Float     @default(0)
+  discountPct       Float     @default(0)
+  discountAmount    Float     @default(0)
+  taxPct            Float     @default(11)
+  taxAmount         Float     @default(0)
+  total             Float     @default(0)
+  validUntil        DateTime?
+  notes             String?
+  discountApprovedById String?
+  discountApprovedAt   DateTime?
+  sentAt            DateTime?
+  decidedAt         DateTime?
+  createdById       String
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  items       QuotationItem[]
+  opportunity Opportunity @relation(fields: [opportunityId], references: [id])
+  brand       Brand       @relation(fields: [brandId], references: [id])
+  company     Company     @relation(fields: [companyId], references: [id])
+  createdBy   User        @relation("QuotationCreator", fields: [createdById], references: [id])
+  approvedBy  User?       @relation("QuotationApprover", fields: [discountApprovedById], references: [id])
+  invoices    Invoice[]
+}
+
+model QuotationItem {
+  id          String @id @default(cuid())
+  quotationId String
+  description String
+  qty         Float  @default(1)
+  unitPrice   Float  @default(0)
+  sortOrder   Int    @default(0)
+
+  quotation Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
 }
 
 model Invoice {
-  id          String    @id @default(cuid())
-  number      String    @unique // INV-0001
-  projectId   String?
-  quotationId String?
-  leadId      String?
-  brand       String
-  title       String
-  amount      Int       @default(0) // dpp sebelum PPN
-  ppnPct      Int       @default(11)
-  grandTotal  Int       @default(0)
-  dueDate     DateTime?
-  status      String    @default("UNPAID") // UNPAID | PARTIAL | PAID | OVERDUE (OVERDUE dihitung saat baca)
-  issuedAt    DateTime  @default(now())
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id            String    @id @default(cuid())
+  code          String    @unique
+  quotationId   String?
+  opportunityId String
+  projectId     String?
+  brandId       String
+  companyId     String
+  title         String
+  status        String    @default("UNPAID") // UNPAID|PARTIAL|PAID|CANCELLED
+  currency      String    @default("IDR")
+  amount        Float     @default(0)
+  taxPct        Float     @default(0)
+  total         Float     @default(0)
+  paidAmount    Float     @default(0)
+  dueDate       DateTime?
+  issuedAt      DateTime  @default(now())
+  notes         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
-  project   Project?  @relation(fields: [projectId], references: [id])
-  quotation Quotation? @relation(fields: [quotationId], references: [id])
-  payments  Payment[]
-
-  @@index([status])
-  @@index([projectId])
+  quotation   Quotation? @relation(fields: [quotationId], references: [id])
+  opportunity Opportunity @relation(fields: [opportunityId], references: [id])
+  project     Project?    @relation(fields: [projectId], references: [id])
+  brand       Brand       @relation(fields: [brandId], references: [id])
+  company     Company     @relation(fields: [companyId], references: [id])
+  payments    Payment[]
 }
 
 model Payment {
-  id        String   @id @default(cuid())
-  invoiceId String
-  amount    Int
-  method    String   @default("TRANSFER") // TRANSFER | CASH | QRIS | OTHER
-  note      String?
-  paidAt    DateTime @default(now())
+  id            String   @id @default(cuid())
+  invoiceId     String
+  amount        Float
+  method        String   @default("TRANSFER") // TRANSFER|CASH|QRIS|OTHER
+  reference     String?
+  paidAt        DateTime @default(now())
+  note          String?
+  recordedById  String?
+  createdAt     DateTime @default(now())
 
-  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  invoice    Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  recordedBy User?   @relation("PaymentRecorder", fields: [recordedById], references: [id])
+}
 
-  @@index([invoiceId])
+// ============ FASE 2 — Brief & Estimation (cost breakdown + margin) ============
+
+model Brief {
+  id             String    @id @default(cuid())
+  opportunityId  String    @unique
+  serviceScope   String?
+  objectives     String?
+  targetAudience String?
+  keyMessages    String?
+  deliverables   String?
+  timeline       String?
+  references     String?
+  budgetRange    String?
+  constraints    String?
+  status         String    @default("DRAFT") // DRAFT|FINAL
+  preparedById   String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  opportunity Opportunity @relation(fields: [opportunityId], references: [id])
+  preparedBy  User?       @relation("BriefPreparer", fields: [preparedById], references: [id])
+}
+
+model Estimation {
+  id                  String   @id @default(cuid())
+  opportunityId       String   @unique
+  currency            String   @default("IDR")
+  status              String   @default("DRAFT") // DRAFT|FINAL
+  internalCost        Float    @default(0) // sum item INTERNAL
+  externalCost        Float    @default(0) // sum item non-INTERNAL non-%
+  subtotalCost        Float    @default(0)
+  contingencyPct      Float    @default(5)
+  contingencyAmount   Float    @default(0)
+  managementFeePct    Float    @default(10)
+  managementFeeAmount Float    @default(0)
+  totalCost           Float    @default(0)
+  targetMarginPct     Float    @default(30)
+  sellingPrice        Float    @default(0) // totalCost / (1 - targetMargin/100)
+  taxPct              Float    @default(11)
+  taxAmount           Float    @default(0)
+  priceWithTax        Float    @default(0)
+  notes               String?
+  createdById         String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  items       EstimationItem[]
+  opportunity Opportunity @relation(fields: [opportunityId], references: [id])
+  createdBy   User?       @relation("EstimationCreator", fields: [createdById], references: [id])
+}
+
+model EstimationItem {
+  id           String  @id @default(cuid())
+  estimationId String
+  category     String  // INTERNAL|FREELANCE|EQUIPMENT|TRANSPORT|ACCOMMODATION|TALENT|LOCATION|SOFTWARE|HOSTING|OTHER
+  description  String
+  qty          Float   @default(1)
+  unit         String  @default("unit")
+  unitCost     Float   @default(0)
+  days         Float?  // durasi (hari) utk labor/equipment — lineTotal = qty × unitCost × days
+  sortOrder    Int     @default(0)
+
+  estimation Estimation @relation(fields: [estimationId], references: [id], onDelete: Cascade)
+}
+
+/* R11 — thread diskusi per dokumen portal (quotation/invoice/project) */
+model PortalComment {
+  id         String   @id @default(cuid())
+  entityType String   // QUOTATION | INVOICE | PROJECT
+  entityId   String
+  companyId  String
+  userId     String?
+  userName   String
+  userRole   String   // snapshot role saat komentar dibuat
+  body       String
+  createdAt  DateTime @default(now())
+
+  company Company @relation(fields: [companyId], references: [id])
+  user    User?   @relation("PortalCommentAuthor", fields: [userId], references: [id])
+
+  @@index([entityType, entityId])
 }

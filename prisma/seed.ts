@@ -1,499 +1,513 @@
-import { PrismaClient } from "@prisma/client";
-import { randomBytes, scryptSync } from "crypto";
-import { mkdirSync, writeFileSync } from "fs";
-import path from "path";
+/* Seed data untuk Multi-Brand CRM — Grupa Kreasi Media */
+import { PrismaClient, Prisma } from '@prisma/client'
 
-const db = new PrismaClient();
+const db = new PrismaClient()
 
-function hashPassword(password: string): string {
-  const salt = randomBytes(16).toString("hex");
-  return `${salt}:${scryptSync(password, salt, 64).toString("hex")}`;
+const d = (days: number, hour = 9, min = 0) => {
+  const dt = new Date()
+  dt.setDate(dt.getDate() + days)
+  dt.setHours(hour, min, 0, 0)
+  return dt
 }
 
-function ago(days: number, hours = 0): Date {
-  return new Date(Date.now() - days * 86400000 - hours * 3600000);
-}
+const STAGES = ['NEW','CONTACT_ATTEMPTED','CONNECTED','QUALIFIED','DISCOVERY','ESTIMATION','PROPOSAL_SENT','NEGOTIATION','VERBAL_AGREEMENT','WON','LOST','NURTURE'] as const
 
 async function main() {
-  console.log("Seeding UDP CRM — PT. Unicam Digital Pictvres...");
+  console.log('🌱 Seeding Multi-Brand CRM...')
 
-  // Wipe urut
-  await db.auditLog.deleteMany();
-  await db.notification.deleteMany();
-  await db.payment.deleteMany();
-  await db.invoice.deleteMany();
-  await db.deliverable.deleteMany();
-  await db.workEstimate.deleteMany();
-  await db.brief.deleteMany();
-  await db.milestone.deleteMany();
-  await db.project.deleteMany();
-  await db.quotation.deleteMany();
-  await db.leadMessage.deleteMany();
-  await db.lead.deleteMany();
-  await db.contact.deleteMany();
-  await db.user.deleteMany();
-  await db.company.deleteMany();
-  await db.channelConfig.deleteMany();
-  await db.appSetting.deleteMany();
+  // clean (order matters)
+  await db.auditLog.deleteMany()
+  await db.payment.deleteMany()
+  await db.invoice.deleteMany()
+  await db.quotationItem.deleteMany()
+  await db.quotation.deleteMany()
+  await db.estimationItem.deleteMany()
+  await db.estimation.deleteMany()
+  await db.brief.deleteMany()
+  await db.milestone.deleteMany()
+  await db.project.deleteMany()
+  await db.followUpTemplate.deleteMany()
+  await db.note.deleteMany()
+  await db.task.deleteMany()
+  await db.interaction.deleteMany()
+  await db.opportunity.deleteMany()
+  await db.contact.deleteMany()
+  await db.company.deleteMany()
+  await db.service.deleteMany()
+  await db.brand.deleteMany()
+  await db.userBrandAccess.deleteMany()
+  await db.user.deleteMany()
 
-  // Perusahaan klien
-  const ptMaju = await db.company.create({ data: { name: "PT Maju Bersama Nusantara", email: "procurement@majubersama.co.id", phone: "0215567788" } });
-  const kopiKita = await db.company.create({ data: { name: "Kopi Kita Group", email: "marketing@kopikita.id" } });
-  const sinarJaya = await db.company.create({ data: { name: "PT Sinar Jaya Agro", email: "ga@pt-sinarjaya.co.id" } });
+  /* ---------------- USERS ---------------- */
+  const [ratna, bambang, dewi, fajar, sari, andi] = await Promise.all([
+    db.user.create({ data: { email: 'ratna@grupakreasi.id', name: 'Ratna Wijaya', role: 'SUPER_ADMIN', title: 'Super Admin', avatarColor: '#0ea5a4' } }),
+    db.user.create({ data: { email: 'bambang@grupakreasi.id', name: 'Bambang Sutrisno', role: 'DIREKTUR', title: 'Direktur Utama', avatarColor: '#f59e0b' } }),
+    db.user.create({ data: { email: 'dewi@grupakreasi.id', name: 'Dewi Lestari', role: 'MARKETING', title: 'Marketing Lead', avatarColor: '#8b5cf6' } }),
+    db.user.create({ data: { email: 'fajar@grupakreasi.id', name: 'Fajar Pratama', role: 'MARKETING', title: 'Marketing Executive', avatarColor: '#f43f5e' } }),
+    db.user.create({ data: { email: 'sari@grupakreasi.id', name: 'Sari Kusuma', role: 'KEUANGAN', title: 'Finance Manager', avatarColor: '#ec4899' } }),
+    db.user.create({ data: { email: 'andi@grupakreasi.id', name: 'Andi Mulyana', role: 'PRODUKSI', title: 'Production Manager', avatarColor: '#84cc16' } }),
+  ])
 
-  // Users (domain UDP)
-  await db.user.createMany({
-    data: [
-      { name: "Andra Wijaya", email: "owner@udp.co.id", passwordHash: hashPassword("owner123"), role: "OWNER" },
-      { name: "Sinta Maharani", email: "manager@udp.co.id", passwordHash: hashPassword("manager123"), role: "MANAGER" },
-      { name: "Dewi Anggraini", email: "marketing@udp.co.id", passwordHash: hashPassword("marketing123"), role: "MARKETER" },
-      { name: "Rizky Hakim", email: "marketing2@udp.co.id", passwordHash: hashPassword("marketing123"), role: "MARKETER" },
-      { name: "Putri Larasati", email: "finance@udp.co.id", passwordHash: hashPassword("finance123"), role: "FINANCE" },
-      { name: "Bayu Aji Saputra", email: "produksi@udp.co.id", passwordHash: hashPassword("produksi123"), role: "PRODUCTION" },
-      { name: "Bapak Hendra (Klien)", email: "klien@majubersama.co.id", passwordHash: hashPassword("klien123"), role: "CLIENT", companyId: ptMaju.id },
-      { name: "Bu Ratna (Klien)", email: "klien@kopikita.id", passwordHash: hashPassword("klien123"), role: "CLIENT", companyId: kopiKita.id },
-    ],
-  });
+  /* ---------------- BRANDS + SERVICES ---------------- */
+  const unimasi = await db.brand.create({ data: {
+    name: 'Unimasi', slug: 'unimasi', color: '#f59e0b', tagline: 'Animation & Visual Learning Studio',
+    description: 'Animasi company profile, pembelajaran, infografis, program/produk, sosialisasi, dan marketing.',
+    website: 'https://www.unimasi.com', slaHours: 6, workflowType: 'animation',
+  }})
+  const segia = await db.brand.create({ data: {
+    name: 'Segia Tech', slug: 'segia-tech', color: '#10b981', tagline: 'Digital Product & Growth Agency',
+    description: 'Website, SEO, UI/UX, dan produksi konten digital.',
+    website: 'https://www.segiatech.com', slaHours: 4, workflowType: 'website',
+  }})
+  const erfo = await db.brand.create({ data: {
+    name: 'Erfo Multimedia', slug: 'erfo-multimedia', color: '#f43f5e', tagline: 'Documentation & Live Production',
+    description: 'Foto/video dokumentasi, shooting, live streaming, drone, video AI, dan video 360.',
+    website: 'https://www.erfomultimedia.com', slaHours: 3, workflowType: 'video',
+  }})
+  const unicam = await db.brand.create({ data: {
+    name: 'Unicam Studio', slug: 'unicam-studio', color: '#8b5cf6', tagline: 'Creative Media & Immersive Experience',
+    description: 'Corporate video, animasi 2D/3D, AI video, AR/VR, virtual tour, immersive experience, projection mapping.',
+    website: 'https://www.unicamstudio.com', slaHours: 8, workflowType: 'video',
+  }})
 
-  const dewi = await db.user.findFirst({ where: { email: "marketing@udp.co.id" } });
-  const rizky = await db.user.findFirst({ where: { email: "marketing2@udp.co.id" } });
+  const svc = async (brandId: string, name: string, category: string) =>
+    db.service.create({ data: { brandId, name, category } })
 
-  // Konfigurasi kanal
-  await db.channelConfig.createMany({
-    data: [
-      {
-        type: "whatsapp",
-        name: "WhatsApp Business",
-        enabled: true,
-        configJson: JSON.stringify({ displayName: "UDP WA Bisnis", phoneNumber: "+62 811-2200-345", phoneNumberId: "118234567890123", accessToken: "EAAG-demo-token-xxxx", apiVersion: "v21.0" }),
-        webhookSecret: randomBytes(12).toString("hex"),
-      },
-      {
-        type: "email",
-        name: "Email Inquiry",
-        enabled: true,
-        configJson: JSON.stringify({ displayName: "Sales & Inquiry UDP", inboundAddress: "leads@udp.co.id", forwardingRule: "Forward semua ke webhook CRM", smtpHost: "smtp.udp.co.id", smtpUser: "crm@udp.co.id" }),
-        webhookSecret: randomBytes(12).toString("hex"),
-      },
-      {
-        type: "instagram",
-        name: "Instagram DM",
-        enabled: false,
-        configJson: JSON.stringify({ displayName: "DM UDP", igUsernames: "@unimasi_id, @segiatech, @erfomultimedia, @unicamstudio", igAccountId: "", accessToken: "" }),
-        webhookSecret: randomBytes(12).toString("hex"),
-      },
-      {
-        type: "web",
-        name: "Form Kontak Web",
-        enabled: true,
-        configJson: JSON.stringify({ displayName: "Form Website udp.co.id", siteUrls: "https://udp.co.id, https://unimasi.id", defaultBrand: "unimasi" }),
-        apiKey: `udp_${randomBytes(16).toString("hex")}`,
-        webhookSecret: randomBytes(12).toString("hex"),
-      },
-    ],
-  });
+  const [sWeb, sLanding, sSeo, sUiux, sContent, sMaint,
+    sCpAnim, sElearn, sInfo, sProd, sSos, sMotion,
+    sDok, sShooting, sLive, sDrone, sAiVid, sV360,
+    sCorpVid, sAnim2d3d, sArvr, sVtour, sProjMap] = await Promise.all([
+    svc(segia.id, 'Company Website', 'Web Development'),
+    svc(segia.id, 'Landing Page', 'Web Development'),
+    svc(segia.id, 'SEO Optimization', 'Digital Growth'),
+    svc(segia.id, 'UI/UX Design', 'Design'),
+    svc(segia.id, 'Produksi Konten Digital', 'Content'),
+    svc(segia.id, 'Web Maintenance', 'Web Development'),
+    svc(unimasi.id, 'Company Profile Animation', 'Animation'),
+    svc(unimasi.id, 'E-Learning Animation', 'Animation'),
+    svc(unimasi.id, 'Infographic Animation', 'Animation'),
+    svc(unimasi.id, 'Product/Program Animation', 'Animation'),
+    svc(unimasi.id, 'Sosialisasi & Kampanye', 'Animation'),
+    svc(unimasi.id, 'Motion Graphics Marketing', 'Animation'),
+    svc(erfo.id, 'Dokumentasi Foto/Video', 'Documentation'),
+    svc(erfo.id, 'Shooting Iklan', 'Production'),
+    svc(erfo.id, 'Live Streaming', 'Live Production'),
+    svc(erfo.id, 'Drone Videography', 'Production'),
+    svc(erfo.id, 'Video AI', 'Production'),
+    svc(erfo.id, 'Video 360', 'Immersive'),
+    svc(unicam.id, 'Corporate Video', 'Video Production'),
+    svc(unicam.id, 'Animasi 2D/3D', 'Animation'),
+    svc(unicam.id, 'AR/VR Experience', 'Immersive'),
+    svc(unicam.id, 'Virtual Tour', 'Immersive'),
+    svc(unicam.id, 'Projection Mapping', 'Immersive'),
+  ])
 
-  await db.appSetting.create({ data: { key: "firstResponseSlaHours", value: "2" } });
+  await Promise.all([
+    db.userBrandAccess.create({ data: { userId: dewi.id, brandId: unimasi.id, canManage: true } }),
+    db.userBrandAccess.create({ data: { userId: dewi.id, brandId: unicam.id, canManage: true } }),
+    db.userBrandAccess.create({ data: { userId: dewi.id, brandId: segia.id } }),
+    db.userBrandAccess.create({ data: { userId: fajar.id, brandId: segia.id, canManage: true } }),
+    db.userBrandAccess.create({ data: { userId: fajar.id, brandId: erfo.id, canManage: true } }),
+    db.userBrandAccess.create({ data: { userId: fajar.id, brandId: unicam.id } }),
+    db.userBrandAccess.create({ data: { userId: bambang.id, brandId: unimasi.id } }),
+    db.userBrandAccess.create({ data: { userId: bambang.id, brandId: segia.id } }),
+    db.userBrandAccess.create({ data: { userId: bambang.id, brandId: erfo.id } }),
+    db.userBrandAccess.create({ data: { userId: bambang.id, brandId: unicam.id } }),
+  ])
 
-  // ===== Kontak =====
-  const c1 = await db.contact.create({ data: { name: "Rangga Prasetyo", phone: "6281324457788", source: "whatsapp" } });
-  const c2 = await db.contact.create({ data: { name: "Melisa Tanujaya", email: "melisa.tanjaya@pt-sinarjaya.co.id", source: "email", companyId: sinarJaya.id } });
-  const c3 = await db.contact.create({ data: { name: "dinda.artworld", igUsername: "dinda.artworld", source: "instagram" } });
-  const c4 = await db.contact.create({ data: { name: "Budi Santoso", email: "budi.santoso@gmail.com", phone: "6281299007171", source: "web", companyId: kopiKita.id } });
-  const c5 = await db.contact.create({ data: { name: "Hendra Gunawan", email: "hendra@majubersama.co.id", phone: "62811772233", source: "email", companyId: ptMaju.id } });
-  const c6 = await db.contact.create({ data: { name: "Ratna Sari", email: "ratna@kopikita.id", phone: "6281777654321", source: "whatsapp", companyId: kopiKita.id } });
-  const c7 = await db.contact.create({ data: { name: "Yoga Pratama", email: "yoga@tokoselalu.id", source: "web" } });
+  /* ---------------- COMPANIES ---------------- */
+  const mkCompany = (data: Parameters<typeof db.company.create>[0]['data']) => db.company.create({ data })
+  const [nusantara, kemenkes, sentosa, bumi, swg, cakrawala, maju, hotelier, yayasan, tekno] = await Promise.all([
+    mkCompany({ name: 'PT Nusantara Sejahtera', industry: 'FMCG', website: 'https://nusantarasejahtera.co.id', country: 'Indonesia', city: 'Jakarta', size: 'Enterprise', currency: 'IDR', tags: 'fmcg,retail', ownerId: dewi.id, address: 'Jl. Gatot Subroto Kav. 12, Jakarta Selatan' }),
+    mkCompany({ name: 'Kementerian Kesehatan RI', industry: 'Government', website: 'https://kemkes.go.id', country: 'Indonesia', city: 'Jakarta', size: 'Government', currency: 'IDR', tags: 'government,kesehatan', ownerId: dewi.id }),
+    mkCompany({ name: 'Bank Sentosa', industry: 'Banking', website: 'https://banksentosa.co.id', country: 'Indonesia', city: 'Jakarta', size: 'Enterprise', currency: 'IDR', tags: 'banking,finance', ownerId: fajar.id }),
+    mkCompany({ name: 'PT Bumi Energi Nusantara', industry: 'Energy', website: 'https://bumienergi.co.id', country: 'Indonesia', city: 'Balikpapan', size: 'Enterprise', currency: 'IDR', tags: 'energy,mining', ownerId: dewi.id }),
+    mkCompany({ name: 'Singapore Wellness Group', industry: 'Healthcare', website: 'https://sgwellness.sg', country: 'Singapore', city: 'Singapore', size: 'Medium', currency: 'SGD', tags: 'healthcare,regional', ownerId: fajar.id }),
+    mkCompany({ name: 'Universitas Cakrawala', industry: 'Education', website: 'https://cakrawala.ac.id', country: 'Indonesia', city: 'Bandung', size: 'Medium', currency: 'IDR', tags: 'education', ownerId: dewi.id }),
+    mkCompany({ name: 'PT Maju Pangan Indonesia', industry: 'Food & Beverage', website: 'https://majupangan.co.id', country: 'Indonesia', city: 'Surabaya', size: 'Medium', currency: 'IDR', tags: 'fnb,ekspor', ownerId: fajar.id }),
+    mkCompany({ name: 'Global Hotelier Group', industry: 'Hospitality', website: 'https://globalhotelier.com', country: 'Malaysia', city: 'Kuala Lumpur', size: 'Enterprise', currency: 'MYR', tags: 'hospitality,regional', ownerId: fajar.id }),
+    mkCompany({ name: 'Yayasan Peduli Lingkungan', industry: 'NGO', country: 'Indonesia', city: 'Jakarta', size: 'NGO', currency: 'IDR', tags: 'ngo,lingkungan', ownerId: dewi.id }),
+    mkCompany({ name: 'PT Tekno Presisi', industry: 'Manufacturing', website: 'https://teknopresisi.co.id', country: 'Indonesia', city: 'Bekasi', size: 'Medium', currency: 'IDR', tags: 'manufacturing,otomotif', ownerId: dewi.id }),
+  ])
 
-  // ===== Leads (funnel lengkap) =====
-  const l1 = await db.lead.create({
-    data: {
-      code: "LD-000001", subject: "Pembuatan website company profile", brand: "unimasi", channel: "whatsapp",
-      status: "FOLLOW_UP", stage: "QUALIFIED", estValue: 15000000, score: 65, contactId: c1.id, assigneeId: dewi?.id,
-      firstInAt: ago(1, 6), firstOutAt: ago(1, 4), sourceRef: "+62 811-2200-345",
-    },
-  });
-  await db.leadMessage.createMany({
-    data: [
-      { leadId: l1.id, direction: "IN", channel: "whatsapp", body: "Halo, saya mau tanya untuk pembuatan website company profile perusahaan kami. Estimasi budget berapa ya?", senderName: "Rangga Prasetyo", createdAt: ago(1, 6) },
-      { leadId: l1.id, direction: "OUT", channel: "whatsapp", body: "Selamat siang Pak Rangga! Terima kasih sudah menghubungi UDP. Untuk company profile kami punya paket mulai 15 juta. Boleh tahu kebutuhan halaman & fiturnya?", senderName: "Dewi Anggraini", createdAt: ago(1, 4) },
-      { leadId: l1.id, direction: "IN", channel: "whatsapp", body: "Kira-kira 5-7 halaman, ada katalog produk juga. Kalau paket yang 15 juta termasuk maintenance?", senderName: "Rangga Prasetyo", createdAt: ago(0, 5) },
-    ],
-  });
+  /* ---------------- CLIENT PORTAL USER ---------------- */
+  const clientUser = await db.user.create({ data: {
+    email: 'daniel.oei@banksentosa.co.id', name: 'Daniel Oei', role: 'CLIENT',
+    title: 'Digital Banking Division Head', avatarColor: '#14b8a6', companyId: sentosa.id,
+  }})
+  console.log(`   Client portal user: ${clientUser.email} (Bank Sentosa)`)
 
-  const l2 = await db.lead.create({
-    data: {
-      code: "LD-000002", subject: "Redesign website corporate & SEO bulanan", brand: "segia", channel: "email",
-      status: "QUOTED", stage: "PROPOSAL", estValue: 45000000, score: 80, contactId: c2.id, assigneeId: rizky?.id,
-      firstInAt: ago(6), firstOutAt: ago(5, 22), sourceRef: "leads@udp.co.id",
-    },
-  });
-  await db.leadMessage.createMany({
-    data: [
-      { leadId: l2.id, direction: "IN", channel: "email", body: "Selamat pagi Tim UDP,\n\nKami PT Sinar Jaya mencari vendor untuk redesign website corporate & SEO bulanan. Mohon kirim company profile dan portofolio.\n\nTerima kasih,\nMelisa", senderName: "Melisa Tanujaya", createdAt: ago(6) },
-      { leadId: l2.id, direction: "OUT", channel: "email", body: "Selamat pagi Bu Melisa,\n\nTerima kasih atas ketertarikannya. Kami kirimkan portofolio & studi kasus SEO kami untuk 3 klien FMCG. Apakah minggu ini bisa jadwalkan meeting online 30 menit?\n\nSalam,\nRizky", senderName: "Rizky Hakim", createdAt: ago(5, 22) },
-    ],
-  });
+  /* ---------------- CONTACTS ---------------- */
+  const mkContact = (data: Parameters<typeof db.contact.create>[0]['data']) => db.contact.create({ data })
+  const [hendra, maya, rina, jonathan, budi, profSari, ahmad, linda, dedi, ratih, kevin, sinta, daniel, clara] = await Promise.all([
+    mkContact({ companyId: nusantara.id, firstName: 'Hendra', lastName: 'Gunawan', position: 'Marketing Director', email: 'hendra.gunawan@nusantarasejahtera.co.id', whatsapp: '+6281234567890', phone: '+62215551001', isPrimary: true, tags: 'decision-maker' }),
+    mkContact({ companyId: nusantara.id, firstName: 'Maya', lastName: 'Anggraini', position: 'Brand Manager', email: 'maya.a@nusantarasejahtera.co.id', whatsapp: '+6281234567891', preferredChannel: 'EMAIL' }),
+    mkContact({ companyId: kemenkes.id, firstName: 'Rina', lastName: 'Salim', position: 'Kepala Biro Informasi Publik', email: 'rina.salim@kemkes.go.id', whatsapp: '+6281298765432', isPrimary: true, preferredChannel: 'EMAIL', tags: 'government,pap' }),
+    mkContact({ companyId: swg.id, firstName: 'Jonathan', lastName: 'Tan', position: 'Head of Marketing', email: 'jonathan.tan@sgwellness.sg', whatsapp: '+6591234567', country: 'Singapore', timezone: 'Asia/Singapore', language: 'en', isPrimary: true }),
+    mkContact({ companyId: bumi.id, firstName: 'Budi', lastName: 'Santoso', position: 'IT & Digital Manager', email: 'budi.santoso@bumienergi.co.id', whatsapp: '+6281377788899', city: 'Balikpapan', isPrimary: true }),
+    mkContact({ companyId: cakrawala.id, firstName: 'Sari', lastName: 'Wulandari', position: 'Direktur Pemasaran & Admisi', email: 'sari.w@cakrawala.ac.id', whatsapp: '+6281555443322', city: 'Bandung', isPrimary: true }),
+    mkContact({ companyId: sentosa.id, firstName: 'Ahmad', lastName: 'Fauzi', position: 'Digital Banking Manager', email: 'ahmad.fauzi@banksentosa.co.id', whatsapp: '+6281199223344', isPrimary: true, tags: 'warm-referral' }),
+    mkContact({ companyId: hotelier.id, firstName: 'Linda', lastName: 'Halim', position: 'Marcom Head', email: 'linda.halim@globalhotelier.com', whatsapp: '+60123456789', country: 'Malaysia', timezone: 'Asia/Kuala_Lumpur', language: 'en', isPrimary: true }),
+    mkContact({ companyId: yayasan.id, firstName: 'Dedi', lastName: 'Kurniawan', position: 'Sekretaris Yayasan', email: 'dedi@pedulilingkungan.or.id', whatsapp: '+6281777665544', isPrimary: true }),
+    mkContact({ companyId: maju.id, firstName: 'Ratih', lastName: 'Puspita', position: 'Product Manager', email: 'ratih.p@majupangan.co.id', whatsapp: '+6281333221100', city: 'Surabaya', isPrimary: true }),
+    mkContact({ companyId: tekno.id, firstName: 'Kevin', lastName: 'Wijaya', position: 'Owner', email: 'kevin@teknopresisi.co.id', whatsapp: '+6281888997766', isPrimary: true, tags: 'repeat-client' }),
+    mkContact({ companyId: kemenkes.id, firstName: 'Sinta', lastName: 'Maharani', position: 'PR Manager', email: 'sinta.maharani@kemkes.go.id', whatsapp: '+6281266554433', preferredChannel: 'WHATSAPP' }),
+    mkContact({ companyId: sentosa.id, firstName: 'Daniel', lastName: 'Oei', position: 'Procurement Lead', email: 'daniel.oei@banksentosa.co.id', whatsapp: '+6281566778899' }),
+    mkContact({ companyId: swg.id, firstName: 'Clara', lastName: 'Tanuwijaya', position: 'Event Manager', email: 'clara.t@sgwellness.sg', whatsapp: '+6598765432', country: 'Singapore', timezone: 'Asia/Singapore', language: 'en' }),
+  ])
 
-  const l3 = await db.lead.create({
-    data: {
-      code: "LD-000003", subject: "Rebranding brand skincare", brand: "unicam", channel: "instagram",
-      status: "NEW", stage: "NEW", estValue: 25000000, score: 55, contactId: c3.id, firstInAt: ago(0, 3), sourceRef: "@unicamstudio",
-    },
-  });
-  await db.leadMessage.create({
-    data: { leadId: l3.id, direction: "IN", channel: "instagram", body: "Hi kak, DM ya! Liat portfolio kalian di feed, keren banget. Untuk rebranding brand skincare kami bisa chat more?", senderName: "dinda.artworld", createdAt: ago(0, 3) },
-  });
+  /* ---------------- OPPORTUNITIES ---------------- */
+  const oppSeq = (n: number) => `OPP-2025-${String(n).padStart(4, '0')}`
+  const mkOpp = async (seq: number, data: Record<string, unknown>) =>
+    db.opportunity.create({ data: { ...(data as unknown as Prisma.OpportunityUncheckedCreateInput), code: oppSeq(seq) } })
 
-  const l4 = await db.lead.create({
-    data: {
-      code: "LD-000004", subject: "Katalog digital 200 SKU", brand: "erfo", channel: "web",
-      status: "NEW", stage: "NEW", estValue: 12000000, score: 45, contactId: c4.id, firstInAt: ago(0, 9), sourceRef: "https://udp.co.id/layanan",
-    },
-  });
-  await db.leadMessage.create({
-    data: { leadId: l4.id, direction: "IN", channel: "web", body: "Kami membutuhkan penawaran untuk pembuatan katalog digital produk kami (sekitar 200 SKU).", senderName: "Budi Santoso", createdAt: ago(0, 9) },
-  });
+  const o1 = await mkOpp(1, { title: 'Redesign Website Corporate', companyId: nusantara.id, contactId: hendra.id, sourceBrandId: segia.id, executingBrandId: segia.id, serviceId: sWeb.id, leadSource: 'WEBSITE', channel: 'WEBSITE', campaign: 'Google Ads - Website Korporat', brief: 'Website corporate dengan katalog produk dan berita; referensi: kompetitor FMCG.', needs: 'Modernisasi website + katalog produk', deliverables: 'Website responsif, CMS, katalog 200 produk', estimatedValue: 180000000, probability: 15, stage: 'NEW', temperature: 'WARM', ownerId: dewi.id, priority: 'HIGH', expectedCloseDate: d(45), nextAction: 'Hubungi via WhatsApp (SLA 4 jam)', nextActionDate: d(0, 17), createdAt: d(0, 8) })
+  const o2 = await mkOpp(2, { title: 'Animasi E-Learning Kesehatan Masyarakat', companyId: kemenkes.id, contactId: rina.id, sourceBrandId: unimasi.id, executingBrandId: unimasi.id, serviceId: sElearn.id, leadSource: 'INSTAGRAM', channel: 'INSTAGRAM', campaign: 'IG Organic', brief: 'Seri animasi edukasi PHBS untuk 10 episode.', estimatedValue: 320000000, probability: 55, stage: 'QUALIFIED', temperature: 'HOT', ownerId: dewi.id, priority: 'URGENT', expectedCloseDate: d(30), nextAction: 'Meeting penyusunan BAP', nextActionDate: d(2, 10), createdAt: d(9) })
+  const o3 = await mkOpp(3, { title: 'Company Profile Video 2025', companyId: sentosa.id, contactId: ahmad.id, sourceBrandId: unicam.id, executingBrandId: unicam.id, serviceId: sCorpVid.id, leadSource: 'REFERRAL', channel: 'WHATSAPP', brief: 'Video profil bank untuk investor day.', estimatedValue: 275000000, probability: 70, stage: 'NEGOTIATION', temperature: 'HOT', ownerId: fajar.id, priority: 'HIGH', expectedCloseDate: d(12), nextAction: 'Follow-up revisi penawaran v2', nextActionDate: d(1, 11), competitorName: 'VisionReel', createdAt: d(24) })
+  const o4 = await mkOpp(4, { title: 'Live Streaming Annual Wellness Summit', companyId: swg.id, contactId: clara.id, sourceBrandId: erfo.id, executingBrandId: erfo.id, serviceId: sLive.id, leadSource: 'EMAIL', channel: 'EMAIL', estimatedValue: 18, currency: 'SGD', probability: 45, stage: 'CONNECTED', temperature: 'WARM', ownerId: fajar.id, priority: 'MEDIUM', expectedCloseDate: d(35), nextAction: 'Kirim portofolio live streaming', nextActionDate: d(1), createdAt: d(6) })
+  const o5 = await mkOpp(5, { title: 'SEO & Konten Digital Penerimaan Mahasiswa', companyId: cakrawala.id, contactId: profSari.id, sourceBrandId: segia.id, executingBrandId: segia.id, serviceId: sSeo.id, leadSource: 'WEBSITE', channel: 'WEBSITE', brief: 'Naikkan organic traffic untuk pendaftaran mahasiswa baru.', estimatedValue: 95000000, probability: 40, stage: 'ESTIMATION', temperature: 'WARM', ownerId: dewi.id, priority: 'MEDIUM', expectedCloseDate: d(25), nextAction: 'Finalisasi cost breakdown dengan finance', nextActionDate: d(1, 14), createdAt: d(11) })
+  const o6 = await mkOpp(6, { title: 'Virtual Tour Pabrik Cikarang', companyId: tekno.id, contactId: kevin.id, sourceBrandId: unicam.id, executingBrandId: unicam.id, serviceId: sVtour.id, leadSource: 'WEBSITE', channel: 'WEBSITE', brief: 'Virtual tour 360° pabrik untuk keperluan audit vendor dan pameran digital.', estimatedValue: 145000000, probability: 60, stage: 'PROPOSAL_SENT', temperature: 'HOT', ownerId: dewi.id, priority: 'HIGH', expectedCloseDate: d(18), nextAction: 'Tanya status proposal (masa berlaku 14 hari)', nextActionDate: d(1, 9), createdAt: d(15) })
+  const o7 = await mkOpp(7, { title: 'Dokumentasi Video Produk Ekspor', companyId: maju.id, contactId: ratih.id, sourceBrandId: erfo.id, executingBrandId: erfo.id, serviceId: sDok.id, leadSource: 'INSTAGRAM', channel: 'INSTAGRAM', estimatedValue: 60000000, probability: 20, stage: 'CONTACT_ATTEMPTED', temperature: 'COLD', ownerId: fajar.id, priority: 'LOW', expectedCloseDate: d(60), nextAction: 'Telepon ulang (belum direspons)', nextActionDate: d(0, 16), createdAt: d(3) })
+  const o8 = await mkOpp(8, { title: 'Animasi Produk Untuk Pasar Ekspor', companyId: maju.id, contactId: ratih.id, sourceBrandId: unimasi.id, executingBrandId: unimasi.id, serviceId: sProd.id, leadSource: 'EVENT', channel: 'MEETING', brief: 'Animasi 3D proses produksi makanan untuk pameran Food Expo Shanghai.', estimatedValue: 210000000, probability: 35, stage: 'DISCOVERY', temperature: 'WARM', ownerId: dewi.id, priority: 'MEDIUM', expectedCloseDate: d(40), nextAction: 'Jadwalkan discovery call lanjutan', nextActionDate: d(3, 13), createdAt: d(8) })
+  const o9 = await mkOpp(9, { title: 'Website + Booking Engine Jaringan Hotel', companyId: hotelier.id, contactId: linda.id, sourceBrandId: segia.id, executingBrandId: segia.id, serviceId: sWeb.id, leadSource: 'REFERRAL', channel: 'REFERRAL', estimatedValue: 460000000, probability: 100, stage: 'WON', temperature: 'HOT', ownerId: fajar.id, priority: 'HIGH', expectedCloseDate: d(-5), wonAt: d(-5), nextAction: 'Kick-off project dengan produksi', nextActionDate: d(1, 10), createdAt: d(48) })
+  const o10 = await mkOpp(10, { title: 'Corporate Video Program CSR', companyId: bumi.id, contactId: budi.id, sourceBrandId: unicam.id, executingBrandId: unicam.id, serviceId: sCorpVid.id, leadSource: 'COLD_CALL', channel: 'PHONE', estimatedValue: 185000000, probability: 100, stage: 'WON', temperature: 'HOT', ownerId: dewi.id, priority: 'MEDIUM', expectedCloseDate: d(-12), wonAt: d(-12), createdAt: d(60) })
+  const o11 = await mkOpp(11, { title: 'Infografis Kampanye Sampah Plastik', companyId: yayasan.id, contactId: dedi.id, sourceBrandId: unimasi.id, executingBrandId: unimasi.id, serviceId: sInfo.id, leadSource: 'INSTAGRAM', channel: 'INSTAGRAM', estimatedValue: 45000000, probability: 0, stage: 'LOST', temperature: 'COLD', ownerId: dewi.id, priority: 'LOW', lostReason: 'PRICE_TOO_HIGH', lostNotes: 'Anggaran yayasan terbatas tahun ini, memilih vendor lebih murah (Studio X).', competitorName: 'Studio X', lastOfferValue: 45000000, reactivation: 'SMALLER_PACKAGE', followUpDate: d(30), lostAt: d(-8), createdAt: d(35) })
+  const o12 = await mkOpp(12, { title: 'Video 360 Tour Cabang Bank', companyId: sentosa.id, contactId: daniel.id, sourceBrandId: erfo.id, executingBrandId: erfo.id, serviceId: sV360.id, leadSource: 'WEBSITE', channel: 'WEBSITE', estimatedValue: 120000000, probability: 0, stage: 'LOST', temperature: 'COLD', ownerId: fajar.id, priority: 'LOW', lostReason: 'CHOSE_COMPETITOR', lostNotes: 'Kompetitor memberi harga 20% lebih rendah dengan timeline lebih cepat.', competitorName: 'VisionReel', lastOfferValue: 120000000, reactivation: 'REOFFER_90', followUpDate: d(75), lostAt: d(-20), createdAt: d(40) })
+  const o13 = await mkOpp(13, { title: 'AR Catalog Produk Otomotif', companyId: tekno.id, contactId: kevin.id, sourceBrandId: unicam.id, executingBrandId: unicam.id, serviceId: sArvr.id, leadSource: 'REFERRAL', channel: 'WHATSAPP', estimatedValue: 300000000, probability: 25, stage: 'NURTURE', temperature: 'COLD', ownerId: dewi.id, priority: 'MEDIUM', reactivation: 'BUDGET_PERIOD', followUpDate: d(50), nurtureTrack: 'REOFFER_90', nextAction: 'Penawaran ulang menjelang budget 2026', nextActionDate: d(50), createdAt: d(30) })
+  const o14 = await mkOpp(14, { title: 'UI/UX Redesign Mobile Banking', companyId: sentosa.id, contactId: daniel.id, sourceBrandId: segia.id, executingBrandId: segia.id, serviceId: sUiux.id, leadSource: 'REFERRAL', channel: 'MEETING', estimatedValue: 340000000, probability: 85, stage: 'VERBAL_AGREEMENT', temperature: 'HOT', ownerId: fajar.id, priority: 'URGENT', expectedCloseDate: d(5), nextAction: 'Tunggu PO & DP 50%', nextActionDate: d(2, 10), createdAt: d(20) })
+  const o15 = await mkOpp(15, { title: 'Drone Video Site Survey Tambang', companyId: bumi.id, contactId: budi.id, sourceBrandId: erfo.id, executingBrandId: erfo.id, serviceId: sDrone.id, leadSource: 'REFERRAL', channel: 'WHATSAPP', estimatedValue: 85000000, probability: 55, stage: 'QUALIFIED', temperature: 'WARM', ownerId: fajar.id, priority: 'MEDIUM', expectedCloseDate: d(28), nextAction: 'Konfirmasi izin area tambang', nextActionDate: d(2, 9), createdAt: d(7) })
+  const o16 = await mkOpp(16, { title: 'Animasi 2D Kampanye Vaksinasi', companyId: kemenkes.id, contactId: sinta.id, sourceBrandId: unimasi.id, executingBrandId: unimasi.id, serviceId: sProd.id, leadSource: 'EMAIL', channel: 'EMAIL', campaign: 'Kampanye Kesehatan Q3', estimatedValue: 265000000, probability: 60, stage: 'PROPOSAL_SENT', temperature: 'HOT', ownerId: dewi.id, priority: 'HIGH', expectedCloseDate: d(15), nextAction: 'Presentasi proposal ke PAP', nextActionDate: d(1, 13), createdAt: d(13) })
 
-  // WON + sudah jadi proyek selesai (2 bulan lalu)
-  const l5 = await db.lead.create({
-    data: {
-      code: "LD-000005", subject: "Produksi konten sosial media 3 bulan", brand: "erfo", channel: "email",
-      status: "WON", stage: "WON", estValue: 39960000, score: 100, contactId: c5.id, companyId: ptMaju.id, assigneeId: dewi?.id,
-      firstInAt: ago(70), firstOutAt: ago(69, 20), sourceRef: "leads@udp.co.id",
-    },
-  });
-  await db.leadMessage.createMany({
-    data: [
-      { leadId: l5.id, direction: "IN", channel: "email", body: "Dear team,\n\nKami dari procurement PT Maju Bersama, mohon informasi penawaran untuk pembuatan konten sosial media 3 bulan.\n\nSalam,\nHendra", senderName: "Hendra Gunawan", createdAt: ago(70) },
-      { leadId: l5.id, direction: "OUT", channel: "email", body: "Selamat siang Pak Hendra,\n\nBerikut kami lampirkan penawaran paket konten 3 bulan (12 konten feed + 8 reels). Kami siap mulai minggu depan.\n\nSalam,\nDewi", senderName: "Dewi Anggraini", createdAt: ago(69, 20) },
-    ],
-  });
+  /* ---------------- INTERACTIONS ---------------- */
+  const mkInt = (data: Parameters<typeof db.interaction.create>[0]['data']) => db.interaction.create({ data })
 
-  const l6 = await db.lead.create({
-    data: {
-      code: "LD-000006", subject: "Video company profile & drone shoot", brand: "unicam", channel: "whatsapp",
-      status: "QUOTED", stage: "NEGOTIATION", estValue: 42180000, score: 85, contactId: c2.id, companyId: sinarJaya.id, assigneeId: rizky?.id,
-      firstInAt: ago(12), firstOutAt: ago(12, -1), sourceRef: "+62 811-2200-345",
-    },
-  });
-  await db.leadMessage.createMany({
-    data: [
-      { leadId: l6.id, direction: "IN", channel: "whatsapp", body: "Pak Rizky, penawaran videonya sudah kami baca. Bisa diskon sedikit kalau ambil paket drone + editing 4K?", senderName: "Melisa Tanujaya", createdAt: ago(2) },
-      { leadId: l6.id, direction: "OUT", channel: "whatsapp", body: "Bu Melisa, untuk paket drone + 4K kami bisa kasih diskon 5% jika PO terbit minggu ini ya. Tim produksi kami slotnya tinggal 2 jadwal bulan ini.", senderName: "Rizky Hakim", createdAt: ago(1, 20) },
-    ],
-  });
+  await Promise.all([
+    // o1 — website form (baru, belum dibalas → SLA warning)
+    mkInt({ opportunityId: o1.id, contactId: hendra.id, companyId: nusantara.id, brandId: segia.id, channel: 'WEBSITE', direction: 'IN', body: 'Halo, kami butuh redesign website corporate. Mohon info paket dan estimasi biaya. Terima kasih.', sentAt: d(0, 8), status: 'DELIVERED', originalLink: 'https://segiatech.com/contact?form=LF-2201' }),
+    // o2 — IG DM thread
+    mkInt({ opportunityId: o2.id, contactId: rina.id, companyId: kemenkes.id, brandId: unimasi.id, channel: 'INSTAGRAM', direction: 'IN', body: 'Selamat siang, kami dari Kemenkes tertarik dengan portofolio animasi edukasi. Apakah bisa kirim reel contoh?', sentAt: d(9, 10) }),
+    mkInt({ opportunityId: o2.id, contactId: rina.id, companyId: kemenkes.id, brandId: unimasi.id, channel: 'INSTAGRAM', direction: 'OUT', respondedById: dewi.id, respondedAt: d(9, 11, 20), body: 'Selamat siang Ibu Rina 🙌 Tentu, berikut kami kirim 3 contoh reel animasi e-learning kami...', status: 'READ', sentAt: d(9, 11, 20) }),
+    mkInt({ opportunityId: o2.id, contactId: rina.id, companyId: kemenkes.id, brandId: unimasi.id, channel: 'WHATSAPP', direction: 'IN', body: 'Setelah diskusi internal, kami perlu 10 episode animasi PHBS. Kira-kira berapa estimasinya?', sentAt: d(4, 14) }),
+    mkInt({ opportunityId: o2.id, contactId: rina.id, companyId: kemenkes.id, brandId: unimasi.id, channel: 'WHATSAPP', direction: 'OUT', respondedById: dewi.id, respondedAt: d(4, 15), body: 'Siap Bu, untuk 10 episode range Rp 280–340 jt tergantung durasi & kompleksitas. Boleh kita jadwalkan meeting untuk brief?', status: 'READ', sentAt: d(4, 15) }),
+    // o3 — negotiation thread
+    mkInt({ opportunityId: o3.id, contactId: ahmad.id, companyId: sentosa.id, brandId: unicam.id, channel: 'WHATSAPP', direction: 'IN', body: 'Pak, proposal v1 kami review. Ada masukan dari legal terkait hak cipta footage.', sentAt: d(3, 13) }),
+    mkInt({ opportunityId: o3.id, contactId: ahmad.id, companyId: sentosa.id, brandId: unicam.id, channel: 'EMAIL', direction: 'OUT', respondedById: fajar.id, respondedAt: d(3, 16, 30), subject: 'QUO-2025-0031 — Revisi Syarat Lisensi Footage', body: 'Pak Ahmad, terlampir proposal revisi v2 dengan skema lisensi perpetual.', status: 'READ', sentAt: d(3, 16, 30) }),
+    // o4 — email
+    mkInt({ opportunityId: o4.id, contactId: clara.id, companyId: swg.id, brandId: erfo.id, channel: 'EMAIL', direction: 'IN', subject: 'Enquiry: Live Streaming for Annual Summit (2 days)', body: 'Hi, we plan to live stream our annual summit on 2 stages, approx 800 concurrent viewers. Can you share package and past work?', sentAt: d(6, 9, 40) }),
+    mkInt({ opportunityId: o4.id, contactId: clara.id, companyId: swg.id, brandId: erfo.id, channel: 'EMAIL', direction: 'OUT', respondedById: fajar.id, respondedAt: d(6, 13), subject: 'Re: Enquiry: Live Streaming for Annual Summit', body: 'Hi Clara, thanks for reaching out! Here is our live streaming deck with 3 package tiers...', status: 'READ', sentAt: d(6, 13) }),
+    // o5 — website
+    mkInt({ opportunityId: o5.id, contactId: profSari.id, companyId: cakrawala.id, brandId: segia.id, channel: 'WEBSITE', direction: 'IN', body: 'Kami butuh jasa SEO untuk program penerimaan mahasiswa baru. Mohon dihubungi.', sentAt: d(11, 10, 15) }),
+    mkInt({ opportunityId: o5.id, contactId: profSari.id, companyId: cakrawala.id, brandId: segia.id, channel: 'PHONE', direction: 'OUT', respondedById: dewi.id, respondedAt: d(10, 11), body: 'Telepon awal: konfirmasi kebutuhan, target: 3x organic traffic sebelum Juli.' }),
+    // o6 — website + wa
+    mkInt({ opportunityId: o6.id, contactId: kevin.id, companyId: tekno.id, brandId: unicam.id, channel: 'WEBSITE', direction: 'IN', body: 'Butuh virtual tour 360 untuk pabrik kami di Cikarang. Sudah pernah lihat portofolio virtual tour showroom.', sentAt: d(15, 9, 30) }),
+    mkInt({ opportunityId: o6.id, contactId: kevin.id, companyId: tekno.id, brandId: unicam.id, channel: 'WHATSAPP', direction: 'OUT', respondedById: dewi.id, respondedAt: d(15, 12), body: 'Siap Pak Kevin, kami kirim proposal virtual tour + contoh hasil 360° pabrik otomotif.', status: 'READ' }),
+    // o7 — IG, belum dibalas 3 hari (overdue)
+    mkInt({ opportunityId: o7.id, contactId: ratih.id, companyId: maju.id, brandId: erfo.id, channel: 'INSTAGRAM', direction: 'IN', body: 'Min, mau tanya untuk jasa dokumentasi video produk. Untuk katalog ekspor.', sentAt: d(3, 19, 45) }),
+    // o8 — event + meeting
+    mkInt({ opportunityId: o8.id, contactId: ratih.id, companyId: maju.id, brandId: unimasi.id, channel: 'MEETING', direction: 'IN', body: 'Pertemuan di pameran SIAL InterFOOD: minat animasi 3D proses produksi untuk booth Food Expo Shanghai.', sentAt: d(8, 14) }),
+    // o9 — won thread (referral)
+    mkInt({ opportunityId: o9.id, contactId: linda.id, companyId: hotelier.id, brandId: segia.id, channel: 'EMAIL', direction: 'IN', subject: 'Website Revamp for 12 Properties — RFP', body: 'Dear team, attached our RFP for website revamp including booking engine integration.', sentAt: d(48, 10) }),
+    mkInt({ opportunityId: o9.id, contactId: linda.id, companyId: hotelier.id, brandId: segia.id, channel: 'EMAIL', direction: 'OUT', respondedById: fajar.id, respondedAt: d(40, 15), subject: 'SEG-Q-2025-0012 — Proposal Website + Booking Engine', body: 'Dear Linda, please find our proposal with 3 implementation phases. Valid for 14 days.', status: 'READ' }),
+    mkInt({ opportunityId: o9.id, contactId: linda.id, companyId: hotelier.id, brandId: segia.id, channel: 'WHATSAPP', direction: 'IN', body: 'Good news! Management approved. PO will follow this week. 🎉', sentAt: d(-5, 11), status: 'READ' }),
+    // o10 — cold call to won
+    mkInt({ opportunityId: o10.id, contactId: budi.id, companyId: bumi.id, brandId: unicam.id, channel: 'PHONE', direction: 'OUT', body: 'Cold call awal: minat video CSR program reboisasi.', sentAt: d(60, 10, 30) }),
+    mkInt({ opportunityId: o10.id, contactId: budi.id, companyId: bumi.id, brandId: unicam.id, channel: 'EMAIL', direction: 'IN', subject: 'PO No. 550/BEN/2025 — Corporate Video CSR', body: 'Pak Andi/Dewi, PO terlampir. Mohon jadwal pre-production meeting.', sentAt: d(-12, 9) }),
+    // o11 lost
+    mkInt({ opportunityId: o11.id, contactId: dedi.id, companyId: yayasan.id, brandId: unimasi.id, channel: 'WHATSAPP', direction: 'IN', body: 'Terima kasih, tapi anggaran kami tidak cukup untuk skema ini tahun ini.', sentAt: d(-8, 15) }),
+    // o12 lost
+    mkInt({ opportunityId: o12.id, contactId: daniel.id, companyId: sentosa.id, brandId: erfo.id, channel: 'EMAIL', direction: 'IN', subject: 'Re: Penawaran Video 360', body: 'Mohon maaf, kami memilih vendor lain. Semoga bisa bekerja sama di kesempatan lain.', sentAt: d(-20, 11) }),
+    // o13 nurture
+    mkInt({ opportunityId: o13.id, contactId: kevin.id, companyId: tekno.id, brandId: unicam.id, channel: 'WHATSAPP', direction: 'IN', body: 'Budget AR tahun ini sudah dialokasikan. Mungkin kalau tahun depan bisa jalan.', sentAt: d(22, 16) }),
+    // o14 verbal
+    mkInt({ opportunityId: o14.id, contactId: daniel.id, companyId: sentosa.id, brandId: segia.id, channel: 'MEETING', direction: 'IN', body: 'Rapat negosiasi: sepakat scope & harga. PO menyusul dari procurement.', sentAt: d(1, 14) }),
+    // o15
+    mkInt({ opportunityId: o15.id, contactId: budi.id, companyId: bumi.id, brandId: erfo.id, channel: 'WHATSAPP', direction: 'IN', body: 'Untuk drone, area tambang butuh izin. Kami proses dulu surat jalannya.', sentAt: d(2, 10, 30) }),
+    // o16
+    mkInt({ opportunityId: o16.id, contactId: sinta.id, companyId: kemenkes.id, brandId: unimasi.id, channel: 'EMAIL', direction: 'IN', subject: 'Permintaan Proposal Kampanye Vaksinasi', body: 'Mohon kirimkan proposal animasi 2D untuk kampanye vaksinasi nasional, 4 episode.', sentAt: d(13, 8, 50) }),
+    mkInt({ opportunityId: o16.id, contactId: sinta.id, companyId: kemenkes.id, brandId: unimasi.id, channel: 'EMAIL', direction: 'OUT', respondedById: dewi.id, respondedAt: d(12, 10), subject: 'QUO-2025-0044 — Animasi 2D Kampanye Vaksinasi (4 Episode)', body: 'Bu Sinta, proposal terlampir. Kami siap presentasi minggu ini bila diperlukan.', status: 'READ' }),
+    // extra: duplicate-ish inbound via WA for o1 contact (identity matching demo)
+    mkInt({ opportunityId: o1.id, contactId: hendra.id, companyId: nusantara.id, brandId: segia.id, channel: 'WHATSAPP', direction: 'IN', body: 'Halo, tadi saya isi form website. Boleh dibalas ya? Butuh segera.', sentAt: d(0, 9, 30) }),
+  ])
 
-  const l7 = await db.lead.create({
-    data: {
-      code: "LD-000007", subject: "Brand activation & booth Kopi Kita", brand: "erfo", channel: "whatsapp",
-      status: "WON", stage: "WON", estValue: 30525000, score: 100, contactId: c6.id, companyId: kopiKita.id, assigneeId: dewi?.id,
-      firstInAt: ago(35), firstOutAt: ago(34, 22), sourceRef: "+62 811-2200-345",
-    },
-  });
-  await db.leadMessage.createMany({
-    data: [
-      { leadId: l7.id, direction: "IN", channel: "whatsapp", body: "Kak Dewi, kami butuh booth brand activation untuk 3 kota. Budget sekitar 30 juta bisa?", senderName: "Ratna Sari", createdAt: ago(35) },
-      { leadId: l7.id, direction: "OUT", channel: "whatsapp", body: "Bu Ratna, bisa! Kami kirim proposal booth modular 3 kota dengan desain custom. Minggu depan bisa mulai produksi.", senderName: "Dewi Anggraini", createdAt: ago(34, 22) },
-    ],
-  });
+  /* ---------------- TASKS ---------------- */
+  await Promise.all([
+    db.task.create({ data: { title: 'Respons lead website PT Nusantara Sejahtera (SLA 4 jam)', opportunityId: o1.id, assigneeId: dewi.id, dueDate: d(0, 12), priority: 'URGENT', type: 'FOLLOW_UP' } }),
+    db.task.create({ data: { title: 'Telepon ulang PT Maju Pangan (belum respons IG)', opportunityId: o7.id, assigneeId: fajar.id, dueDate: d(-1, 16), priority: 'HIGH', type: 'FOLLOW_UP' } }),
+    db.task.create({ data: { title: 'Siapkan BAP meeting Kemenkes E-Learning', opportunityId: o2.id, assigneeId: dewi.id, dueDate: d(2, 9), priority: 'HIGH', type: 'MEETING' } }),
+    db.task.create({ data: { title: 'Follow-up revisi proposal Bank Sentosa v2', opportunityId: o3.id, assigneeId: fajar.id, dueDate: d(1, 11), priority: 'URGENT', type: 'FOLLOW_UP' } }),
+    db.task.create({ data: { title: 'Kick-off meeting website Hotelier', opportunityId: o9.id, assigneeId: fajar.id, dueDate: d(1, 10), priority: 'HIGH', type: 'MEETING' } }),
+    db.task.create({ data: { title: 'Pre-production meeting video CSR Bumi Energi', opportunityId: o10.id, assigneeId: andi.id, dueDate: d(0, 14), priority: 'MEDIUM', type: 'INTERNAL' } }),
+    db.task.create({ data: { title: 'Finalisasi cost breakdown SEO Cakrawala', opportunityId: o5.id, assigneeId: sari.id, dueDate: d(1, 14), priority: 'MEDIUM', type: 'INTERNAL' } }),
+    db.task.create({ data: { title: 'Tunggu & verifikasi PO UI/UX Mobile Banking', opportunityId: o14.id, assigneeId: fajar.id, dueDate: d(2, 10), priority: 'URGENT', type: 'FOLLOW_UP' } }),
+    db.task.create({ data: { title: 'Re-offer paket infografis kecil ke Yayasan Peduli', opportunityId: o11.id, assigneeId: dewi.id, dueDate: d(30, 10), priority: 'LOW', type: 'FOLLOW_UP' } }),
+    db.task.create({ data: { title: 'Kirim portofolio live streaming ke Singapore Wellness', opportunityId: o4.id, assigneeId: fajar.id, dueDate: d(1, 17), priority: 'MEDIUM', type: 'FOLLOW_UP' } }),
+    db.task.create({ data: { title: 'Presentasi proposal vaksinasi ke PAP Kemenkes', opportunityId: o16.id, assigneeId: dewi.id, dueDate: d(1, 13), priority: 'HIGH', type: 'MEETING' } }),
+  ])
 
-  const l8 = await db.lead.create({
-    data: {
-      code: "LD-000008", subject: "Jasa desain kemasan produk", brand: "unicam", channel: "email",
-      status: "LOST", stage: "LOST", estValue: 8000000, score: 40, contactId: c7.id, lostReason: "Kompetitor",
-      firstInAt: ago(20), firstOutAt: ago(19, 18), sourceRef: "leads@udp.co.id",
-    },
-  });
-  await db.leadMessage.createMany({
-    data: [
-      { leadId: l8.id, direction: "IN", channel: "email", body: "Halo, mau tanya jasa desain kemasan untuk produk kami (3 varian SKUs).", senderName: "Yoga Pratama", createdAt: ago(20) },
-      { leadId: l8.id, direction: "NOTE", channel: "internal", body: "Klien memilih kompetitor karena harga lebih murah 30%. Tawarkan paket retainer untuk peluang berikutnya.", senderName: "Rizky Hakim", createdAt: ago(15) },
-    ],
-  });
+  /* ---------------- NOTES ---------------- */
+  await Promise.all([
+    db.note.create({ data: { opportunityId: o3.id, authorId: bambang.id, body: 'Direktur: Diskon maksimal 8% boleh disetujui. Jangan turunkan fee produksi, cukup dari margin lisensi.', visibility: 'DIRECTOR' } }),
+    db.note.create({ data: { opportunityId: o3.id, authorId: fajar.id, body: 'Legal bank minta lisensi footage perpetual. Sudah dikonfirmasi ke produksi, tidak ada biaya tambahan.', visibility: 'INTERNAL' } }),
+    db.note.create({ data: { opportunityId: o14.id, authorId: bambang.id, body: 'Direktur: Deal strategis untuk portfolio fintech. Prioritaskan ketersediaan tim UI/UX.', visibility: 'DIRECTOR' } }),
+    db.note.create({ data: { opportunityId: o2.id, authorId: dewi.id, body: 'PAP Kemenkes punya anggaran tersendiri, tapi perlu persetujuan Kepala Biro. Kuncinya timeline proposal < 2 minggu.', visibility: 'INTERNAL' } }),
+    db.note.create({ data: { opportunityId: o1.id, authorId: dewi.id, body: 'Lead dari Google Ads, kata kunci "jasa website corporate". Belum dibalas — perlu respons segera untuk SLA.', visibility: 'INTERNAL' } }),
+    db.note.create({ data: { opportunityId: o9.id, authorId: andi.id, body: 'Handover produksi: 12 properti hotel, fase 1 = 4 properti pilot. Perlu copywriter bahasa Inggris.', visibility: 'INTERNAL' } }),
+  ])
 
-  const l9 = await db.lead.create({
-    data: {
-      code: "LD-000009", subject: "SEO & Google Ads untuk e-commerce", brand: "segia", channel: "web",
-      status: "NEW", stage: "NEW", estValue: 18000000, score: 50, contactId: c4.id, companyId: kopiKita.id, firstInAt: ago(0, 2), sourceRef: "https://udp.co.id/layanan/seo",
-    },
-  });
-  await db.leadMessage.create({
-    data: { leadId: l9.id, direction: "IN", channel: "web", body: "Toko online kami butuh optimasi SEO dan ads bulanan. Mohon penawarannya.", senderName: "Budi Santoso", createdAt: ago(0, 2) },
-  });
+  /* ---------------- PROJECTS (dari WON) ---------------- */
+  const p1 = await db.project.create({ data: {
+    name: 'Website + Booking Engine — Global Hotelier Group', code: 'PRJ-2025-001', opportunityId: o9.id,
+    companyId: hotelier.id, brandId: segia.id, managerId: andi.id, status: 'IN_PROGRESS', progress: 35,
+    workflowType: 'website', budget: 460000000, startDate: d(-4), endDate: d(70),
+  }})
+  const p2 = await db.project.create({ data: {
+    name: 'Corporate Video CSR — PT Bumi Energi', code: 'PRJ-2025-002', opportunityId: o10.id,
+    companyId: bumi.id, brandId: unicam.id, managerId: andi.id, status: 'IN_PROGRESS', progress: 60,
+    workflowType: 'video', budget: 185000000, startDate: d(-11), endDate: d(30),
+  }})
+  const webMilestones = ['Discovery & Requirement', 'Sitemap & Wireframe', 'UI/UX Design', 'Development', 'QA & Testing', 'Launch & Handover']
+  const vidMilestones = ['Pre-Production', 'Shooting', 'Editing', 'Revision Round', 'Final Delivery']
+  await Promise.all([
+    ...webMilestones.map((name, i) => db.milestone.create({ data: { projectId: p1.id, name, stepOrder: i + 1, status: i === 0 ? 'DONE' : i === 1 ? 'IN_PROGRESS' : 'PENDING', dueDate: d(10 + i * 10), completedAt: i === 0 ? d(-1) : null } })),
+    ...vidMilestones.map((name, i) => db.milestone.create({ data: { projectId: p2.id, name, stepOrder: i + 1, status: i < 2 ? 'DONE' : i === 2 ? 'IN_PROGRESS' : 'PENDING', dueDate: d(-2 + i * 8), completedAt: i < 2 ? d(-4 + i) : null } })),
+  ])
 
-  // ===== Penawaran =====
-  await db.quotation.create({
-    data: {
-      number: "QT-0001", leadId: l2.id, brand: "segia", title: "Redesign Website Corporate + SEO Bulanan (6 bulan)",
-      itemsJson: JSON.stringify([
-        { desc: "Redesign website corporate (12 halaman)", qty: 1, price: 25000000 },
-        { desc: "SEO bulanan (6 bulan)", qty: 6, price: 2500000 },
-        { desc: "Copywriting & foto produk", qty: 1, price: 8000000 },
-      ]),
-      subtotal: 48000000, discountPct: 5, ppnPct: 11, grandTotal: 50724000,
-      status: "SENT", sentAt: ago(4), notes: "Diskon 5% kontrak 6 bulan.",
-    },
-  });
+  // Proyek Bank Sentosa (dari opportunity UI/UX Redesign — quotation ACCEPTED) — data demo Client Portal
+  const p3 = await db.project.create({ data: {
+    name: 'UI/UX Redesign Mobile Banking — Bank Sentosa', code: 'PRJ-2025-003', opportunityId: o14.id,
+    companyId: sentosa.id, brandId: segia.id, managerId: andi.id, status: 'IN_PROGRESS', progress: 40,
+    workflowType: 'website', budget: 340000000, startDate: d(-3), endDate: d(60),
+  }})
+  await Promise.all([
+    ...webMilestones.map((name, i) => db.milestone.create({ data: { projectId: p3.id, name, stepOrder: i + 1, status: i < 2 ? 'DONE' : i === 2 ? 'IN_PROGRESS' : 'PENDING', dueDate: d(6 + i * 10), completedAt: i < 2 ? d(-2 + i) : null } })),
+  ])
 
-  const qt2 = await db.quotation.create({
-    data: {
-      number: "QT-0002", leadId: l5.id, brand: "erfo", title: "Produksi Konten Sosial Media 3 Bulan",
-      itemsJson: JSON.stringify([
-        { desc: "Konten feed (desain + copywriting)", qty: 12, price: 1800000 },
-        { desc: "Reels/video pendek", qty: 8, price: 2200000 },
-        { desc: "Monthly report & analitik", qty: 3, price: 600000 },
-      ]),
-      subtotal: 39960000, discountPct: 0, ppnPct: 11, grandTotal: 44355600,
-      status: "APPROVED", sentAt: ago(65), decidedAt: ago(60), notes: "Persetujuan via email procurement.",
-    },
-  });
+  /* ---------------- FOLLOW-UP TEMPLATES ---------------- */
+  const mkTpl = (brandId: string, data: Record<string, unknown>) =>
+    db.followUpTemplate.create({ data: { ...(data as unknown as Prisma.FollowUpTemplateUncheckedCreateInput), brandId } })
+  await Promise.all([
+    mkTpl(segia.id, { name: 'FU1 — Konfirmasi Diterima', step: 1, delayDays: 1, channel: 'WHATSAPP', purpose: 'Konfirmasi pesan diterima', body: 'Halo {{contact_name}}, terima kasih telah menghubungi {{brand_name}} 👋 Permintaan Anda terkait {{service_name}} sudah kami terima. Saya {{marketing_name}} akan membantu prosesnya. Boleh dishare sedikit detail kebutuhan perusahaan {{company_name}}?' }),
+    mkTpl(segia.id, { name: 'FU2 — Tawaran Konsultasi', step: 2, delayDays: 3, channel: 'WHATSAPP', purpose: 'Tawarkan konsultasi singkat', body: 'Halo {{contact_name}}, semoga sehat selalu. Kami punya slot konsultasi gratis 30 menit membahas {{service_name}} untuk {{company_name}}. Tersedia {{meeting_link}} — kapan waktu yang nyaman untuk Bapak/Ibu?' }),
+    mkTpl(segia.id, { name: 'FU3 — Portfolio Relevan', step: 3, delayDays: 7, channel: 'EMAIL', language: 'en', subject: 'Relevant work for {{company_name}} — {{brand_name}}', purpose: 'Kirim portfolio relevan', body: 'Hi {{contact_name}},\n\nFollowing up on your inquiry about {{service_name}}. Here are two case studies similar to what {{company_name}} needs:\n\n1. Case study A — booking engine for hospitality\n2. Case study B — corporate website revamp\n\nHappy to walk you through. Estimated timeline: {{estimated_timeline}}.\n\nBest,\n{{marketing_name}}' }),
+    mkTpl(segia.id, { name: 'FU4 — Final Follow-up', step: 4, delayDays: 14, channel: 'WHATSAPP_EMAIL', purpose: 'Final follow-up', body: 'Halo {{contact_name}}, kami ingin memastikan apakah kebutuhan {{service_name}} masih relevan. Jika saat ini belum, dengan senang hati kami akan follow up lagi di waktu yang lebih tepat. Dokumen {{proposal_link}} tetap kami siapkan.' }),
+    mkTpl(unimasi.id, { name: 'FU1 — Konfirmasi Diterima', step: 1, delayDays: 1, channel: 'WHATSAPP', purpose: 'Konfirmasi pesan diterima', body: 'Halo {{contact_name}}, terima kasih! Permintaan {{service_name}} dari {{company_name}} sudah kami terima. Saya {{marketing_name}} dari {{brand_name}}. Apakah boleh tahu target tayang & durasi yang diinginkan?' }),
+    mkTpl(unimasi.id, { name: 'Nurture — Re-offer 30 Hari', step: 5, delayDays: 30, channel: 'EMAIL', purpose: 'Re-offer 30 hari', body: 'Halo {{contact_name}}, sudah sebulan sejak kita terakhir berbicara tentang {{service_name}}. Kami baru menyelesaikan 2 proyek serupa — apakah {{company_name}} ingin melihat hasilnya? {{proposal_link}}' }),
+    mkTpl(erfo.id, { name: 'FU1 — Konfirmasi Diterima', step: 1, delayDays: 1, channel: 'WHATSAPP', purpose: 'Konfirmasi pesan diterima', body: 'Halo {{contact_name}}, pesan Anda untuk {{brand_name}} sudah kami terima 🙏 Untuk kebutuhan {{service_name}}, mohon info lokasi & tanggal rencana. Saya {{marketing_name}} siap membantu.' }),
+    mkTpl(erfo.id, { name: 'FU2 — Penawaran Survey', step: 2, delayDays: 3, channel: 'WHATSAPP', purpose: 'Tawarkan site survey', body: 'Halo {{contact_name}}, untuk memberi estimasi akurat {{service_name}}, tim kami bisa lakukan site survey singkat. Kapan waktu yang cocok minggu ini?' }),
+    mkTpl(unicam.id, { name: 'FU1 — Konfirmasi Diterima', step: 1, delayDays: 1, channel: 'EMAIL', language: 'en', subject: 'Thank you for contacting {{brand_name}}', purpose: 'Confirm receipt', body: 'Dear {{contact_name}},\n\nThank you for your interest in {{service_name}}. I am {{marketing_name}} from {{brand_name}}. Could we schedule a short call to understand {{company_name}}\'s objectives? Here is my meeting link: {{meeting_link}}\n\nBest regards,' }),
+    mkTpl(unicam.id, { name: 'Nurture — Budget Period Re-offer', step: 5, delayDays: 60, channel: 'EMAIL', purpose: 'Re-offer menjelang budget period', body: 'Dear {{contact_name}},\n\nAs {{company_name}} plans next year\'s budget, immersive media like {{service_name}} could be a strong differentiator. We prepared an indicative proposal: {{proposal_link}}\n\nRegards,\n{{marketing_name}}' }),
+  ])
 
-  await db.quotation.create({
-    data: {
-      number: "QT-0003", leadId: l6.id, brand: "unicam", title: "Video Company Profile + Drone Shoot 4K",
-      itemsJson: JSON.stringify([
-        { desc: "Video company profile (3 menit, 4K)", qty: 1, price: 28000000 },
-        { desc: "Drone shoot lokasi", qty: 1, price: 8000000 },
-        { desc: "Editing + sound design", qty: 1, price: 12000000 },
-      ]),
-      subtotal: 48000000, discountPct: 10, ppnPct: 11, grandTotal: 47952000,
-      status: "SENT", sentAt: ago(3), notes: "Diskon 10% penawaran intro klien baru.",
-    },
-  });
+  /* ---------------- AUDIT LOGS ---------------- */
+  await Promise.all([
+    db.auditLog.create({ data: { userId: dewi.id, userName: 'Dewi Lestari', action: 'LOGIN', entityType: 'User', entityId: dewi.id, entityLabel: 'Dewi Lestari', ip: '103.11.22.33', userAgent: 'Chrome / macOS' } }),
+    db.auditLog.create({ data: { userId: fajar.id, userName: 'Fajar Pratama', action: 'LOGIN', entityType: 'User', entityId: fajar.id, entityLabel: 'Fajar Pratama', ip: '103.11.22.40', userAgent: 'Chrome / Windows' } }),
+    db.auditLog.create({ data: { userId: fajar.id, userName: 'Fajar Pratama', action: 'STAGE_CHANGE', entityType: 'Opportunity', entityId: o9.id, entityLabel: oppSeq(9) + ' — Website + Booking Engine Jaringan Hotel', oldValue: JSON.stringify({ stage: 'VERBAL_AGREEMENT' }), newValue: JSON.stringify({ stage: 'WON' }), ip: '103.11.22.40' } }),
+    db.auditLog.create({ data: { userId: dewi.id, userName: 'Dewi Lestari', action: 'STAGE_CHANGE', entityType: 'Opportunity', entityId: o11.id, entityLabel: oppSeq(11) + ' — Infografis Kampanye Sampah Plastik', oldValue: JSON.stringify({ stage: 'ESTIMATION' }), newValue: JSON.stringify({ stage: 'LOST', lostReason: 'PRICE_TOO_HIGH' }), ip: '103.11.22.33' } }),
+    db.auditLog.create({ data: { userId: bambang.id, userName: 'Bambang Sutrisno', action: 'APPROVE_DISCOUNT', entityType: 'Opportunity', entityId: o3.id, entityLabel: oppSeq(3) + ' — Company Profile Video 2025', newValue: JSON.stringify({ discount: '8%' }), ip: '103.11.22.51' } }),
+    db.auditLog.create({ data: { userId: ratna.id, userName: 'Ratna Wijaya', action: 'CREATE', entityType: 'Brand', entityId: unicam.id, entityLabel: 'Unicam Studio', newValue: JSON.stringify({ slaHours: 8, workflowType: 'video' }), ip: '10.0.0.2' } }),
+    db.auditLog.create({ data: { userId: ratna.id, userName: 'Ratna Wijaya', action: 'CREATE', entityType: 'User', entityId: andi.id, entityLabel: 'Andi Mulyana', newValue: JSON.stringify({ role: 'PRODUKSI' }), ip: '10.0.0.2' } }),
+    db.auditLog.create({ data: { userId: dewi.id, userName: 'Dewi Lestari', action: 'CREATE', entityType: 'Opportunity', entityId: o2.id, entityLabel: oppSeq(2) + ' — Animasi E-Learning Kesehatan Masyarakat', newValue: JSON.stringify({ stage: 'NEW', estimatedValue: 320000000 }), ip: '103.11.22.33' } }),
+    db.auditLog.create({ data: { userId: sari.id, userName: 'Sari Kusuma', action: 'UPDATE', entityType: 'Opportunity', entityId: o5.id, entityLabel: oppSeq(5) + ' — SEO & Konten Digital Penerimaan Mahasiswa', oldValue: JSON.stringify({ estimatedValue: 85000000 }), newValue: JSON.stringify({ estimatedValue: 95000000 }), ip: '103.11.22.61' } }),
+  ])
 
-  const qt4 = await db.quotation.create({
-    data: {
-      number: "QT-0004", leadId: l7.id, brand: "erfo", title: "Brand Activation Booth 3 Kota",
-      itemsJson: JSON.stringify([
-        { desc: "Desain & produksi booth modular", qty: 3, price: 7500000 },
-        { desc: "Crew & koordinasi event", qty: 3, price: 1500000 },
-        { desc: "Dokumentasi foto/video", qty: 3, price: 750000 },
-      ]),
-      subtotal: 29250000, discountPct: 0, ppnPct: 11, grandTotal: 32467500,
-      status: "APPROVED", sentAt: ago(30), decidedAt: ago(28),
-    },
-  });
-
-  // ===== Proyek produksi =====
-  const prj1 = await db.project.create({
-    data: {
-      code: "PRJ-0001", name: "Produksi Konten Sosial Media 3 Bulan", brand: "erfo",
-      companyId: ptMaju.id, leadId: l5.id, quotationId: qt2.id,
-      status: "DONE", progress: 100, budget: 44355600, managerName: "Sinta Maharani",
-      startDate: ago(58), dueDate: ago(2),
-    },
-  });
-  const prj1ms = [
-    { title: "Brief & Konsep", orderIdx: 1, weight: 20 },
-    { title: "Produksi Awal", orderIdx: 2, weight: 30 },
-    { title: "Review & Revisi", orderIdx: 3, weight: 20 },
-    { title: "Finalisasi", orderIdx: 4, weight: 20 },
-    { title: "Serah Terima", orderIdx: 5, weight: 10 },
-  ];
-  for (const m of prj1ms) {
-    await db.milestone.create({ data: { projectId: prj1.id, ...m, status: "DONE", dueDate: ago(10), doneAt: ago(12) } });
+  /* ---------------- QUOTATIONS & INVOICES (Fase 2) ---------------- */
+  const year = new Date().getFullYear()
+  const mkQuote = async (n: number, data: Record<string, unknown>, items: { description: string; qty: number; unitPrice: number }[]) => {
+    const subtotal = items.reduce((a, i) => a + i.qty * i.unitPrice, 0)
+    const discountPct = (data.discountPct as number) ?? 0
+    const discountAmount = Math.round(subtotal * discountPct / 100)
+    const taxPct = (data.taxPct as number) ?? 11
+    const taxAmount = Math.round((subtotal - discountAmount) * taxPct / 100)
+    return db.quotation.create({ data: {
+      ...(data as unknown as Prisma.QuotationUncheckedCreateInput),
+      code: `QUO-${year}-${String(n).padStart(4, '0')}`,
+      subtotal, discountAmount, taxAmount,
+      total: subtotal - discountAmount + taxAmount,
+      items: { create: items.map((it, idx) => ({ ...it, sortOrder: idx + 1 })) },
+    } })
   }
 
-  const prj2 = await db.project.create({
-    data: {
-      code: "PRJ-0002", name: "Brand Activation Booth 3 Kota", brand: "erfo",
-      companyId: kopiKita.id, leadId: l7.id, quotationId: qt4.id,
-      status: "IN_PROGRESS", progress: 50, budget: 32467500, managerName: "Dewi Anggraini",
-      startDate: ago(25), dueDate: new Date(Date.now() + 5 * 86400000),
-    },
-  });
-  await db.milestone.create({ data: { projectId: prj2.id, title: "Brief & Konsep", orderIdx: 1, weight: 20, status: "DONE", dueDate: ago(20), doneAt: ago(21) } });
-  await db.milestone.create({ data: { projectId: prj2.id, title: "Produksi Awal", orderIdx: 2, weight: 30, status: "DONE", dueDate: ago(10), doneAt: ago(11) } });
-  await db.milestone.create({ data: { projectId: prj2.id, title: "Review & Revisi", orderIdx: 3, weight: 20, status: "IN_PROGRESS", dueDate: ago(-3) } });
-  await db.milestone.create({ data: { projectId: prj2.id, title: "Finalisasi", orderIdx: 4, weight: 20, status: "PENDING", dueDate: ago(-5) } });
-  await db.milestone.create({ data: { projectId: prj2.id, title: "Serah Terima", orderIdx: 5, weight: 10, status: "PENDING", dueDate: ago(-7) } });
+  const q1 = await mkQuote(1, {
+    opportunityId: o3.id, brandId: unicam.id, companyId: sentosa.id,
+    title: 'Company Profile Video 2025 — Bank Sentosa', status: 'SENT', currency: 'IDR',
+    discountPct: 8, taxPct: 11, validUntil: d(10), sentAt: d(3),
+    notes: 'Termasuk 2 hari shooting, motion graphics, musik original. Lisensi footage perpetual.',
+    createdById: fajar.id,
+  }, [
+    { description: 'Pre-production (script, storyboard, talent)', qty: 1, unitPrice: 35000000 },
+    { description: 'Shooting 2 hari (crew + equipment)', qty: 2, unitPrice: 75000000 },
+    { description: 'Editing, motion graphics, sound design', qty: 1, unitPrice: 95000000 },
+  ])
 
-  // ===== Brief & Estimasi Produksi (alur: Lead → Brief → Estimasi → Penawaran → Proyek) =====
-  const bayu = await db.user.findFirst({ where: { email: "produksi@udp.co.id" } });
-  const sinta = await db.user.findFirst({ where: { email: "manager@udp.co.id" } });
+  const q2 = await mkQuote(2, {
+    opportunityId: o14.id, brandId: segia.id, companyId: sentosa.id,
+    title: 'UI/UX Redesign Mobile Banking', status: 'ACCEPTED', currency: 'IDR',
+    discountPct: 0, taxPct: 0, validUntil: d(-2), sentAt: d(9), decidedAt: d(2),
+    notes: 'Discovery workshop, design system, handoff developer.', createdById: fajar.id,
+  }, [
+    { description: 'Discovery & user research', qty: 1, unitPrice: 60000000 },
+    { description: 'Design system & komponen', qty: 1, unitPrice: 90000000 },
+    { description: 'UI design 40+ layar', qty: 1, unitPrice: 140000000 },
+    { description: 'Prototipe & usability testing', qty: 1, unitPrice: 50000000 },
+  ])
 
-  // BRF-0001: lead PROPOSAL, sudah ada estimasi → siap ditawarkan
-  const brf1 = await db.brief.create({
-    data: {
-      code: "BRF-0001", leadId: l2.id, brand: "segia", title: "Redesign Website Corporate Sinar Jaya",
-      objective: "Memperbarui identitas digital & meningkatkan kredibilitas B2B dengan website corporate baru yang modern.",
-      audience: "Procurement & manajemen B2B (pabrik, distributor, pemerintahan)",
-      deliverables: "Desain UI 12 halaman\nDevelopment WordPress custom\nCopywriting halaman utama\nSetup SEO dasar",
-      references: "https://drive.google.com/drive/folders/referensi-sinarjaya",
-      deadline: new Date(Date.now() + 21 * 86400000), status: "ESTIMATED",
-      createdById: sinta?.id, createdAt: ago(5),
-    },
-  });
-  await db.workEstimate.create({
-    data: {
-      briefId: brf1.id,
-      itemsJson: JSON.stringify([
-        { task: "Riset & wireframe", qty: 2, unit: "hari", hours: 16, cost: 800000 },
-        { task: "Desain UI 12 halaman", qty: 12, unit: "halaman", hours: 60, cost: 750000 },
-        { task: "Development WordPress", qty: 1, unit: "paket", hours: 80, cost: 1200000 },
-        { task: "Copywriting & review konten", qty: 1, unit: "paket", hours: 24, cost: 600000 },
-      ]),
-      totalHours: 180, totalCost: 19800000,
-      notes: "Butuh 1 desainer + 1 programmer, durasi 3 minggu.",
-      status: "SUBMITTED", createdById: bayu?.id, createdByName: "Bayu Aji Saputra", createdAt: ago(3),
-    },
-  });
+  await mkQuote(3, {
+    opportunityId: o6.id, brandId: unicam.id, companyId: tekno.id,
+    title: 'Virtual Tour 360° Pabrik Cikarang', status: 'DRAFT', currency: 'IDR',
+    discountPct: 0, taxPct: 11, createdById: dewi.id,
+  }, [
+    { description: 'Pemindaian 360° 12 titik area produksi', qty: 12, unitPrice: 6500000 },
+    { description: 'Hotspot informasi & navigasi', qty: 1, unitPrice: 35000000 },
+    { description: 'Hosting & maintenance 1 tahun', qty: 1, unitPrice: 28000000 },
+  ])
 
-  // BRF-0002: lead QUALIFIED, menunggu estimasi produksi
-  await db.brief.create({
-    data: {
-      code: "BRF-0002", leadId: l1.id, brand: "unimasi", title: "Website Company Profile + Katalog Produk",
-      objective: "Website company profile 5-7 halaman dengan katalog produk agar calon klien bisa melihat portofolio & produk.",
-      audience: "Owner UMKM & pengelola pengadaan",
-      deliverables: "Desain 7 halaman\nKatalog produk dinamis (min. 50 SKU)\nForm kontak terhubung WhatsApp\nMaintenance 3 bulan",
-      deadline: new Date(Date.now() + 30 * 86400000), status: "SUBMITTED",
-      createdById: dewi?.id, createdAt: ago(1),
-    },
-  });
+  // R12 — penawaran DITOLAK client via portal (demo bridge lost reason + notifikasi PORTAL_COMMENT)
+  const q4 = await mkQuote(4, {
+    opportunityId: o16.id, brandId: unimasi.id, companyId: kemenkes.id,
+    title: 'Animasi 2D Kampanye Vaksinasi (4 Episode)', status: 'REJECTED', currency: 'IDR',
+    discountPct: 5, taxPct: 11, validUntil: d(5), sentAt: d(-6), decidedAt: d(-1, 14),
+    notes: 'Produksi 4 episode animasi 2D + voice over profesional + adaptasi media sosial.',
+    createdById: dewi.id,
+  }, [
+    { description: 'Naskah & storyboard 4 episode', qty: 4, unitPrice: 7500000 },
+    { description: 'Produksi animasi 2D per episode (90 detik)', qty: 4, unitPrice: 52000000 },
+    { description: 'Voice over profesional & sound design', qty: 4, unitPrice: 8500000 },
+    { description: 'Adaptasi format media sosial (9:16 & 1:1)', qty: 8, unitPrice: 3500000 },
+  ])
+  await db.portalComment.create({ data: {
+    entityType: 'QUOTATION', entityId: q4.id, companyId: kemenkes.id, userId: null,
+    userName: 'Sinta Maharani', userRole: 'CLIENT',
+    body: 'Terima kasih atas proposalnya. Namun anggaran kampanye tahun ini telah dialokasikan ke vendor lain. Semoga bisa bekerja sama pada periode anggaran berikutnya.',
+    createdAt: d(-1, 15),
+  } })
+  await db.auditLog.create({ data: {
+    userName: 'Sinta Maharani', action: 'PORTAL_QUOTATION_DECISION',
+    entityType: 'Quotation', entityId: q4.id, entityLabel: `QUO-${year}-0004 — Animasi 2D Kampanye Vaksinasi (4 Episode)`,
+    newValue: JSON.stringify({ decision: 'REJECTED', by: 'Sinta Maharani', source: 'seed' }),
+  } })
 
-  // BRF-0003 & BRF-0004: brief untuk lead WON → terhubung proyek produksi
-  const brf3 = await db.brief.create({
-    data: {
-      code: "BRF-0003", leadId: l7.id, brand: "erfo", title: "Konsep Booth Brand Activation Kopi Kita 3 Kota",
-      objective: "Booth modular interaktif untuk aktivasi brand di 3 kota, menarik pengunjung & mendongkrak sampling produk.",
-      audience: "Pengunjung mall & event kuliner (18-40 tahun)",
-      deliverables: "Desain 3D booth modular\nProduksi rangka & print\nDokumentasi event",
-      references: "https://drive.google.com/drive/folders/moodboard-kopikita",
-      deadline: ago(-5), status: "QUOTED",
-      createdById: dewi?.id, createdAt: ago(27),
-    },
-  });
-  await db.project.update({ where: { id: prj2.id }, data: { briefId: brf3.id } });
+  const mkInvoice = async (n: number, data: Record<string, unknown>) => {
+    const amount = data.amount as number
+    const taxPct = (data.taxPct as number) ?? 0
+    const total = Math.round(amount * (1 + taxPct / 100))
+    return db.invoice.create({ data: { ...(data as unknown as Prisma.InvoiceUncheckedCreateInput), code: `INV-${year}-${String(n).padStart(4, '0')}`, total } })
+  }
 
-  const brf4 = await db.brief.create({
-    data: {
-      code: "BRF-0004", leadId: l5.id, brand: "erfo", title: "Paket Konten Sosial Media 3 Bulan Maju Bersama",
-      objective: "Konten feed & reels rutin 3 bulan untuk menjaga engagement & awareness brand di Instagram.",
-      audience: "Ibu rumah tangga & pekerja muda 22-40 tahun",
-      deliverables: "12 konten feed/bulan\n8 reels/bulan\nMonthly report",
-      deadline: ago(-30), status: "QUOTED",
-      createdById: dewi?.id, createdAt: ago(58),
-    },
-  });
-  await db.project.update({ where: { id: prj1.id }, data: { briefId: brf4.id } });
+  const inv1 = await mkInvoice(1, {
+    opportunityId: o9.id, projectId: p1.id,
+    brandId: segia.id, companyId: hotelier.id,
+    title: 'DP 50% — Website + Booking Engine Jaringan Hotel', status: 'PARTIAL',
+    amount: 230000000, taxPct: 0, dueDate: d(-5), issuedAt: d(-4),
+    notes: 'Termin 1 dari 2. Pelunasan setelah fase development selesai.',
+  })
+  const inv2 = await mkInvoice(2, {
+    opportunityId: o10.id, projectId: p2.id, brandId: unicam.id, companyId: bumi.id,
+    title: 'Corporate Video Program CSR — Termin 1 (50%)', status: 'PAID',
+    amount: 92500000, taxPct: 0, dueDate: d(-6), issuedAt: d(-11),
+    notes: 'Dibayar penuh via transfer.',
+  })
 
-  // ===== Deliverable produksi: file & link Google Drive =====
-  const uploadDir = path.join(process.cwd(), "uploads");
-  mkdirSync(uploadDir, { recursive: true });
-  const demoFileName = `seed-ringkasan-produksi-prj2-${Date.now()}.txt`;
-  writeFileSync(
-    path.join(uploadDir, demoFileName),
-    "RINGKASAN PRODUKSI — PRJ-0002 Brand Activation Booth 3 Kota\n\n" +
-      "- Desain 3D booth modular: disetujui klien (rev. 3)\n- Produksi rangka: 2 dari 3 booth selesai\n" +
-      "- Jadwal Kota 1: minggu depan\n- PIC: Bayu Aji Saputra\n\nDokumen demo dihasilkan otomatis oleh seed UDP CRM.\n"
-  );
-  await db.deliverable.createMany({
-    data: [
-      {
-        projectId: prj2.id, name: "Moodboard & Referensi Booth", type: "LINK",
-        url: "https://drive.google.com/drive/folders/moodboard-kopikita?demo=1",
-        milestoneLabel: "Brief & Konsep", note: "Folder Google Drive berisi moodboard, palet warna, dan referensi material booth.",
-        uploadedByName: "Bayu Aji Saputra", createdAt: ago(22),
-      },
-      {
-        projectId: prj2.id, name: "Desain 3D Booth (rev. 3)", type: "FILE",
-        filePath: demoFileName, fileName: "Desain-3D-Booth-rev3.txt", mimeType: "text/plain", sizeLabel: "1 KB",
-        milestoneLabel: "Produksi Awal", note: "Revisi ke-3 — sudah disetujui klien via WhatsApp.",
-        uploadedByName: "Bayu Aji Saputra", createdAt: ago(12),
-      },
-      {
-        projectId: prj2.id, name: "Jadwal Produksi 3 Kota (Google Sheets)", type: "LINK",
-        url: "https://docs.google.com/spreadsheets/jadwal-produksi-kopikita?demo=1",
-        milestoneLabel: "Review & Revisi", note: "Jadwal rigging & event per kota — diperbarui berkala.",
-        uploadedByName: "Dewi Anggraini", createdAt: ago(5),
-      },
-      {
-        projectId: prj1.id, name: "File Final Konten 3 Bulan", type: "LINK",
-        url: "https://drive.google.com/drive/folders/final-konten-majubersama?demo=1",
-        milestoneLabel: "Serah Terima", note: "Seluruh file final (feed, reels, report) sudah diserahkan ke klien.",
-        uploadedByName: "Bayu Aji Saputra", createdAt: ago(11),
-      },
-    ],
-  });
+  await Promise.all([
+    db.payment.create({ data: { invoiceId: inv1.id, amount: 92000000, method: 'TRANSFER', reference: 'TRF/BCA/88213', paidAt: d(-4), note: 'DP masuk', recordedById: sari.id } }),
+    db.payment.create({ data: { invoiceId: inv2.id, amount: 92500000, method: 'TRANSFER', reference: 'TRF/Mandiri/55021', paidAt: d(-7), recordedById: sari.id } }),
+  ])
+  await db.invoice.update({ where: { id: inv2.id }, data: { paidAmount: 92500000 } })
+  await db.invoice.update({ where: { id: inv1.id }, data: { paidAmount: 92000000 } })
 
-  // ===== Invoice & pembayaran (tersebar untuk chart 6 bulan) =====
-  const inv1 = await db.invoice.create({
-    data: {
-      number: "INV-0001", projectId: prj1.id, quotationId: qt2.id, leadId: l5.id, brand: "erfo",
-      title: "DP 50% — Produksi Konten Sosial Media 3 Bulan",
-      amount: 19980000, ppnPct: 11, grandTotal: 22177800, dueDate: ago(44), status: "PAID", issuedAt: ago(58),
-    },
-  });
-  await db.payment.create({ data: { invoiceId: inv1.id, amount: 22177800, method: "TRANSFER", note: "Transfer procurement PT Maju Bersama", paidAt: ago(55) } });
+  // Invoice Bank Sentosa (dari QUO-2026-0002 ACCEPTED) — data demo Client Portal
+  const inv3 = await mkInvoice(3, {
+    opportunityId: o14.id, quotationId: q2.id, projectId: p3.id,
+    brandId: segia.id, companyId: sentosa.id,
+    title: 'DP 50% — UI/UX Redesign Mobile Banking', status: 'PARTIAL',
+    amount: 170000000, taxPct: 0, dueDate: d(-2), issuedAt: d(-6),
+    notes: 'Termin 1 dari 2. Pelunasan setelah fase UI design selesai.',
+  })
+  const inv4 = await mkInvoice(4, {
+    opportunityId: o14.id, quotationId: q2.id, projectId: p3.id,
+    brandId: segia.id, companyId: sentosa.id,
+    title: 'Termin 1 — Design System & Discovery Bank Sentosa', status: 'PAID',
+    amount: 90000000, taxPct: 0, dueDate: d(-9), issuedAt: d(-15),
+    notes: 'Dibayar penuh via transfer.',
+  })
+  await Promise.all([
+    db.payment.create({ data: { invoiceId: inv3.id, amount: 100000000, method: 'TRANSFER', reference: 'TRF/BCA/90417', paidAt: d(-5), note: 'Sebagian DP', recordedById: sari.id } }),
+    db.payment.create({ data: { invoiceId: inv4.id, amount: 90000000, method: 'TRANSFER', reference: 'TRF/BCA/88110', paidAt: d(-10), recordedById: sari.id } }),
+  ])
+  await db.invoice.update({ where: { id: inv3.id }, data: { paidAmount: 100000000 } })
+  await db.invoice.update({ where: { id: inv4.id }, data: { paidAmount: 90000000 } })
 
-  const inv2 = await db.invoice.create({
-    data: {
-      number: "INV-0002", projectId: prj1.id, quotationId: qt2.id, leadId: l5.id, brand: "erfo",
-      title: "Pelunasan — Produksi Konten Sosial Media 3 Bulan",
-      amount: 19980000, ppnPct: 11, grandTotal: 22177800, dueDate: ago(8), status: "PAID", issuedAt: ago(20),
-    },
-  });
-  await db.payment.create({ data: { invoiceId: inv2.id, amount: 22177800, method: "TRANSFER", note: "Pelunasan akhir kontrak", paidAt: ago(10) } });
+  await Promise.all([
+    db.auditLog.create({ data: { userId: fajar.id, userName: 'Fajar Pratama', action: 'QUOTATION_SENT', entityType: 'Quotation', entityId: q1.id, entityLabel: `QUO-${year}-0001 — Company Profile Video 2025`, newValue: JSON.stringify({ status: 'SENT', discountPct: 8, total: q1.total }), ip: '103.11.22.40' } }),
+    db.auditLog.create({ data: { userId: sari.id, userName: 'Sari Kusuma', action: 'PAYMENT_RECORD', entityType: 'Invoice', entityId: inv2.id, entityLabel: `INV-${year}-0002 — Corporate Video CSR Termin 1`, newValue: JSON.stringify({ amount: 92500000, method: 'TRANSFER', status: 'PAID' }), ip: '103.11.22.61' } }),
+    db.auditLog.create({ data: { userId: sari.id, userName: 'Sari Kusuma', action: 'PAYMENT_RECORD', entityType: 'Invoice', entityId: inv3.id, entityLabel: `INV-${year}-0003 — DP 50% UI/UX Redesign Mobile Banking`, newValue: JSON.stringify({ amount: 100000000, method: 'TRANSFER', status: 'PARTIAL' }), ip: '103.11.22.61' } }),
+  ])
 
-  const inv3 = await db.invoice.create({
-    data: {
-      number: "INV-0003", projectId: prj2.id, quotationId: qt4.id, leadId: l7.id, brand: "erfo",
-      title: "DP 50% — Brand Activation Booth 3 Kota",
-      amount: 14625000, ppnPct: 11, grandTotal: 16233750, dueDate: ago(11), status: "PAID", issuedAt: ago(25),
-    },
-  });
-  await db.payment.create({ data: { invoiceId: inv3.id, amount: 16233750, method: "TRANSFER", note: "DP Kopi Kita Group", paidAt: ago(23) } });
+  /* ---------------- BRIEF & ESTIMATION (o14 — quotation ACCEPTED) ---------------- */
+  const brief14 = await db.brief.create({ data: {
+    opportunityId: o14.id,
+    serviceScope: 'Redesign UI/UX aplikasi mobile banking Android & iOS: discovery & user research, design system, UI design 40+ layar, prototipe interaktif, usability testing, dan handoff ke tim developer internal bank.',
+    objectives: 'Modernisasi pengalaman mobile banking; menaikkan rating app store dari 3,9 ke 4,5; menurunkan keluhan call center terkait navigasi 30%; mendukung target aktivasi digital onboarding 60.000 nasabah baru dalam 6 bulan.',
+    targetAudience: 'Nasabah retail usia 22–45 tahun (±75% Android), nasabah prioritas, dan calon nasabah muda yang berpindah dari bank digital.',
+    keyMessages: 'Aman & terpercaya (bank regulated), cepat (transfer & bayar < 3 langkah), personal (dashboard menyesuaikan pola transaksi nasabah).',
+    deliverables: 'Research report + persona; design system (token, komponen, pola); UI 40+ layar (light/dark); prototipe klik Figma; laporan usability testing 15 responden; aset handoff + spesifikasi developer; 2 sesi pendampingan implementasi.',
+    timeline: 'Minggu 1–2 discovery & research; minggu 3–4 design system; minggu 5–9 UI design bertahap per modul; minggu 10 prototipe & usability testing; minggu 11–12 revisi & handoff. Kick-off 1 minggu setelah PO diterima.',
+    references: 'Visual: aplikasi mobile banking unggulan lokal & regional. Flow: onboarding bank digital terkemuka. Seluruh komponen mengikuti brand guideline Bank Sentosa v3.',
+    budgetRange: `Rp 300–360 jt (selaras QUO-${year}-0002 yang disetujui); eksklusi lisensi pihak ketiga di luar daftar dan produksi aset foto.`,
+    constraints: 'Security review per layar oleh tim IT bank; aset & file kerja disimpan di server bank (tanpa cloud pribadi); usability test hanya memakai data dummy; revisi desain maksimal 3 putaran.',
+    status: 'FINAL',
+    preparedById: fajar.id,
+  }})
 
-  await db.invoice.create({
-    data: {
-      number: "INV-0004", projectId: prj2.id, quotationId: qt4.id, leadId: l7.id, brand: "erfo",
-      title: "Pelunasan — Brand Activation Booth 3 Kota",
-      amount: 14625000, ppnPct: 11, grandTotal: 16233750, dueDate: new Date(Date.now() + 7 * 86400000), status: "UNPAID", issuedAt: ago(3),
-    },
-  });
+  // lineTotal = qty × unitCost × (days ?? 1) — formula sama dengan API /estimation
+  const estItems = [
+    { category: 'INTERNAL', description: 'UX Researcher — discovery, user interview & usability testing', qty: 2, unit: 'orang', unitCost: 3500000, days: 5 },
+    { category: 'INTERNAL', description: 'UI/UX Designer — design system, 40+ layar & prototipe', qty: 2, unit: 'orang', unitCost: 3200000, days: 15 },
+    { category: 'FREELANCE', description: 'Editor freelance — video tutorial onboarding in-app', qty: 1, unit: 'paket', unitCost: 12000000, days: null },
+    { category: 'EQUIPMENT', description: 'Sewa device lab (ponsel Android/iOS + laptop) usability testing', qty: 6, unit: 'unit', unitCost: 500000, days: 4 },
+    { category: 'TRANSPORT', description: 'Transport & operasional tim workshop di Jakarta', qty: 8, unit: 'perjalanan', unitCost: 350000, days: null },
+    { category: 'ACCOMMODATION', description: 'Akomodasi tim discovery (4 kamar × 2 malam)', qty: 4, unit: 'kamar', unitCost: 950000, days: 2 },
+    { category: 'TALENT', description: 'Narator voice-over video tutorial onboarding', qty: 1, unit: 'orang', unitCost: 4000000, days: null },
+    { category: 'LOCATION', description: 'Sewa ruang workshop & focus group discussion', qty: 2, unit: 'hari', unitCost: 4500000, days: null },
+    { category: 'SOFTWARE', description: 'Lisensi Figma & tool prototyping (3 bulan)', qty: 3, unit: 'bulan', unitCost: 2500000, days: null },
+    { category: 'HOSTING', description: 'Hosting prototipe & rekaman usability testing (3 bulan)', qty: 3, unit: 'bulan', unitCost: 1300000, days: null },
+  ]
+  const internalCost = estItems.filter((i) => i.category === 'INTERNAL').reduce((a, i) => a + i.qty * i.unitCost * (i.days ?? 1), 0)
+  const externalCost = estItems.filter((i) => i.category !== 'INTERNAL').reduce((a, i) => a + i.qty * i.unitCost * (i.days ?? 1), 0)
+  const subtotalCost = internalCost + externalCost
+  const contingencyPct = 5
+  const managementFeePct = 10
+  const targetMarginPct = 30
+  const taxPct = 11
+  const contingencyAmount = (subtotalCost * contingencyPct) / 100
+  const managementFeeAmount = (subtotalCost * managementFeePct) / 100
+  const totalCost = subtotalCost + contingencyAmount + managementFeeAmount
+  const sellingPrice = Math.round(totalCost / (1 - targetMarginPct / 100))
+  const taxAmount = (sellingPrice * taxPct) / 100
+  const priceWithTax = sellingPrice + taxAmount
 
-  await db.invoice.create({
-    data: {
-      number: "INV-0005", brand: "unimasi",
-      title: "Maintenance Website — Unimasi (Kuartal)",
-      amount: 4500000, ppnPct: 11, grandTotal: 4995000, dueDate: ago(9), status: "UNPAID", issuedAt: ago(39),
-    },
-  });
+  const est14 = await db.estimation.create({ data: {
+    opportunityId: o14.id, currency: 'IDR', status: 'FINAL',
+    internalCost, externalCost, subtotalCost, contingencyPct, contingencyAmount,
+    managementFeePct, managementFeeAmount, totalCost, targetMarginPct, sellingPrice,
+    taxPct, taxAmount, priceWithTax,
+    notes: `Estimasi final selaras QUO-${year}-0002 yang disetujui (total Rp 340 jt). Selling price di bawah nilai quotation → margin aktual 35,8%; ruang negosiasi harga tetap tersedia.`,
+    createdById: sari.id,
+    items: { create: estItems.map((it, idx) => ({ ...it, sortOrder: idx })) },
+  }})
 
-  // ===== Notifikasi =====
-  await db.notification.createMany({
-    data: [
-      { role: "MARKETER", title: "Lead baru dari Instagram DM", body: "dinda.artworld — Rebranding brand skincare (Unicam Studio)", type: "NEW_LEAD" },
-      { role: "MANAGER", title: "Lead baru dari Form Web", body: "Budi Santoso — Katalog digital 200 SKU (Erfo Multimedia)", type: "NEW_LEAD" },
-      { role: "FINANCE", title: "Invoice INV-0004 terbit", body: "Pelunasan — Brand Activation Booth 3 Kota — Rp 16.233.750", type: "SYSTEM" },
-      { role: "MANAGER", title: "Milestone Review & Revisi berjalan", body: "PRJ-0002 Brand Activation Booth 3 Kota — progress 50%", type: "SYSTEM" },
-      { role: "PRODUCTION", title: "Brief BRF-0002 menunggu estimasi", body: "Website Company Profile + Katalog Produk — dari Rangga Prasetyo (Unimasi). Mohon hitung estimasi pengerjaan.", type: "SYSTEM" },
-      { role: "MANAGER", title: "Deliverable baru — PRJ-0002", body: "Jadwal Produksi 3 Kota (tautan) dikirim oleh Dewi Anggraini", type: "SYSTEM" },
-    ],
-  });
+  await Promise.all([
+    db.auditLog.create({ data: { userId: fajar.id, userName: 'Fajar Pratama', action: 'BRIEF_SAVED', entityType: 'Brief', entityId: brief14.id, entityLabel: `${oppSeq(14)} — Brief`, newValue: JSON.stringify({ status: 'FINAL' }), ip: '103.11.22.40' } }),
+    db.auditLog.create({ data: { userId: sari.id, userName: 'Sari Kusuma', action: 'ESTIMATION_SAVED', entityType: 'Estimation', entityId: est14.id, entityLabel: `${oppSeq(14)} — Estimasi`, newValue: JSON.stringify({ totalCost, sellingPrice, status: 'FINAL' }), ip: '103.11.22.61' } }),
+  ])
 
-  await db.auditLog.createMany({
-    data: [
-      { actorName: "system:seed", action: "SEED", entity: "System", detail: "Data awal UDP CRM dibuat" },
-      { actorName: "Andra Wijaya", action: "CHANNEL_ENABLED", entity: "ChannelConfig", entityId: "whatsapp", detail: "WhatsApp Business" },
-      { actorName: "Putri Larasati", action: "QUOTATION_APPROVED", entity: "Quotation", entityId: qt2.id, detail: "QT-0002 → PRJ-0001 + INV-0001" },
-      { actorName: "Putri Larasati", action: "PAYMENT_RECORDED", entity: "Invoice", entityId: inv1.id, detail: "INV-0001 +22.177.800 (PAID)" },
-    ],
-  });
-
-  // Backdate updatedAt untuk data historis (chart bulanan) — kolom @updatedAt tidak bisa diisi via create/update
-  await db.$executeRawUnsafe(`UPDATE "Lead" SET "updatedAt" = '${ago(60).toISOString()}' WHERE "code" = 'LD-000005'`);
-  await db.$executeRawUnsafe(`UPDATE "Lead" SET "updatedAt" = '${ago(27).toISOString()}' WHERE "code" = 'LD-000007'`);
-  await db.$executeRawUnsafe(`UPDATE "Lead" SET "updatedAt" = '${ago(14).toISOString()}' WHERE "code" = 'LD-000008'`);
-  await db.$executeRawUnsafe(`UPDATE "Project" SET "updatedAt" = '${ago(10).toISOString()}' WHERE "code" = 'PRJ-0001'`);
-  await db.$executeRawUnsafe(`UPDATE "Quotation" SET "updatedAt" = '${ago(60).toISOString()}' WHERE "number" = 'QT-0002'`);
-
-  console.log("Seeding selesai ✓ (UDP — PT. Unicam Digital Pictvres)");
+  console.log('✅ Seed selesai:')
+  console.log(`   Users: 6, Brands: 4, Services: 23, Companies: 10, Contacts: 14`)
+  console.log(`   Opportunities: 16, Interactions: ~26, Tasks: 11, Projects: 2, Templates: 10`)
+  console.log(`   Quotations: 3 (1 menunggu approval diskon), Invoices: 2 (1 outstanding), Payments: 2`)
+  console.log(`   Brief: 1 (FINAL), Estimation: 1 (FINAL — ${estItems.length} item, subtotal Rp ${subtotalCost.toLocaleString('id-ID')})`)
 }
 
 main()
-  .catch((e) => {
-    console.error(e);
-    process.exit(1);
-  })
-  .finally(() => db.$disconnect());
+  .catch((e) => { console.error(e); process.exit(1) })
+  .finally(() => db.$disconnect())

@@ -1,0 +1,702 @@
+     1→/* ============ Command Center — Dashboard Direktur ============ */
+     2→'use client'
+     3→
+     4→import React, { useCallback, useEffect, useRef, useState } from 'react'
+     5→import { createPortal } from 'react-dom'
+     6→import { analyticsApi, crmApi } from './api-client'
+     7→import { useCrmStore } from './crm-store'
+     8→import {
+     9→  BrandChip, ChannelIcon, EmptyState, LoadingRows, PriorityBadge, RefreshButton, StageBadge, UserAvatar, downloadCsv,
+    10→} from './shared'
+    11→import {
+    12→  channelMeta, daysUntil, formatDate, formatMoney, lostReasonLabel, projectStatusMeta, stageMeta, timeAgo,
+    13→} from '@/lib/crm-constants'
+    14→import type { ConversationAnalyticsDTO, DashboardDTO, TaskDTO } from '@/lib/crm-types'
+    15→import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+    16→import { Button } from '@/components/ui/button'
+    17→import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+    18→import { Progress } from '@/components/ui/progress'
+    19→import { Skeleton } from '@/components/ui/skeleton'
+    20→import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+    21→import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+    22→import { useToast } from '@/hooks/use-toast'
+    23→import { cn } from '@/lib/utils'
+    24→import {
+    25→  Bar, BarChart, CartesianGrid, Cell, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis,
+    26→} from 'recharts'
+    27→import {
+    28→  AlertTriangle, ArrowLeftRight, Building2, CalendarClock, Check, CheckCircle2, ChevronRight, Clock, Download, Inbox, ListTodo, Loader2,
+    29→  MessagesSquare, Printer, Siren, Sparkles, Target, Timer, TrendingUp, Trophy, Users, Wallet, XCircle,
+    30→} from 'lucide-react'
+    31→
+    32→/* Tone bar kuat per channel (indikator Progress = child div) — pasangan CHANNEL_HEX di atas */
+    33→const CHANNEL_BAR: Record<string, string> = {
+    34→  WHATSAPP: '[&>div]:bg-emerald-500',
+    35→  EMAIL: '[&>div]:bg-amber-500',
+    36→  INSTAGRAM: '[&>div]:bg-rose-500',
+    37→  WEBSITE: '[&>div]:bg-teal-500',
+    38→  PHONE: '[&>div]:bg-orange-500',
+    39→  MEETING: '[&>div]:bg-violet-500',
+    40→}
+    41→
+    42→/* Warna bar per channel (hex, agar aman dipakai di style inline) */
+    43→const CHANNEL_HEX: Record<string, string> = {
+    44→  WHATSAPP: '#059669',
+    45→  EMAIL: '#d97706',
+    46→  INSTAGRAM: '#e11d48',
+    47→  WEBSITE: '#0d9488',
+    48→  PHONE: '#ea580c',
+    49→  MEETING: '#7c3aed',
+    50→}
+    51→
+    52→const fmtNum = (n: number) => n.toLocaleString('id-ID', { maximumFractionDigits: 1 })
+    53→const pctOf = (value: number, total: number) => (total > 0 ? Math.round((value / total) * 100) : 0)
+    54→
+    55→/** Jam respons terbaca: < 48 jam → "X jam", ≥ 48 jam → "Y hari" (1 desimal, koma Indonesia) */
+    56→function formatHours(hours: number | null | undefined): string {
+    57→  if (hours === null || hours === undefined || Number.isNaN(hours)) return '—'
+    58→  if (hours >= 48) return `${fmtNum(hours / 24)} hari`
+    59→  return `${fmtNum(hours)} jam`
+    60→}
+    61→
+    62→/** Export CSV analitik percakapan — SATU file multi-seksi via shared downloadCsv (; separator + BOM). */
+    63→function exportConversationsCsv(data: ConversationAnalyticsDTO) {
+    64→  const { kpi, perBrand, perMarketer, channelMix, weekly } = data
+    65→  const totalInteractions = perBrand.reduce((acc, b) => acc + b.interactions, 0)
+    66→  const rows: (string | number | null | undefined)[][] = [
+    67→    // Seksi 1 — KPI
+    68→    ['Indikator', 'Nilai'],
+    69→    ['Respons Pertama (rata-rata)', formatHours(kpi.avgFirstResponseHours)],
+    70→    ['Respons Pertama (median)', formatHours(kpi.medianFirstResponseHours)],
+    71→    ['Kepatuhan SLA', kpi.slaCompliancePct !== null ? `${kpi.slaCompliancePct}%` : '—'],
+    72→    ['Percakapan Aktif', kpi.totalConversations],
+    73→    ['Menunggu Balasan', kpi.unansweredNow],
+    74→    ['Total Interaksi', totalInteractions],
+    75→    [''],
+    76→    // Seksi 2 — per brand
+    77→    ['brand', 'avg_first_response_hours', 'sla_pct', 'interactions'],
+    78→    ...perBrand.map((b) => [b.brandName, b.firstResponseHours ?? '', b.slaPct ?? '', b.interactions]),
+    79→    [''],
+    80→    // Seksi 3 — campuran kanal
+    81→    ['channel', 'count'],
+    82→    ...channelMix.map((c) => [channelMeta(c.channel).label, c.count]),
+    83→    [''],
+    84→    // Seksi 4 — aktivitas mingguan
+    85→    ['label', 'inbound', 'outbound'],
+    86→    ...weekly.map((w) => [w.label, w.inbound, w.outbound]),
+    87→    [''],
+    88→    // Seksi 5 — per marketer
+    89→    ['name', 'replies', 'avg_hours'],
+    90→    ...perMarketer.map((m) => [m.userName, m.replies, m.avgResponseHours ?? '']),
+    91→  ]
+    92→  downloadCsv(`laporan-percakapan-${new Date().toISOString().slice(0, 10)}.csv`, ['Laporan Analitik Percakapan', 'Grupa Kreasi CRM'], rows)
+    93→}
+    94→
+    95→type Tone = 'default' | 'warning' | 'danger' | 'positive'
+    96→const TONES: Record<Tone, { card: string; icon: string }> = {
+    97→  default: { card: 'border-slate-200 bg-white', icon: 'bg-slate-100 text-slate-600' },
+    98→  warning: { card: 'border-amber-200 bg-amber-50', icon: 'bg-amber-100 text-amber-700' },
+    99→  danger: { card: 'border-rose-200 bg-rose-50', icon: 'bg-rose-100 text-rose-700' },
+   100→  positive: { card: 'border-teal-200 bg-teal-50/60', icon: 'bg-teal-100 text-teal-700' },
+   101→}
+   102→
+   103→function KpiCard({ icon, label, value, hint, tone = 'default', progress, hintClass }: {
+   104→  icon: React.ReactNode; label: string; value: string; hint: string; tone?: Tone
+   105→  progress?: React.ReactNode; hintClass?: string
+   106→}) {
+   107→  const t = TONES[tone]
+   108→  return (
+   109→    <Card className={cn('rounded-xl shadow-sm transition-shadow hover:shadow-md', t.card)}>
+   110→      <CardContent className="p-4">
+   111→        <div className="flex items-start justify-between gap-2">
+   112→          <p className="text-xs font-medium text-slate-500">{label}</p>
+   113→          <div className={cn('flex h-8 w-8 shrink-0 items-center justify-center rounded-lg', t.icon)}>{icon}</div>
+   114→        </div>
+   115→        <p className="mt-2 text-2xl font-bold tracking-tight text-slate-900">{value}</p>
+   116→        <p className={cn('mt-1 text-[11px] leading-snug', hintClass ?? 'text-slate-400')}>{hint}</p>
+   117→        {progress}
+   118→      </CardContent>
+   119→    </Card>
+   120→  )
+   121→}
+   122→
+   123→/* ================= TAB KONVERSI — Analitik Percakapan (Fase 3) ================= */
+   124→function ConversationsTab({ data, loading, error, onRefresh }: {
+   125→  data: ConversationAnalyticsDTO | null; loading: boolean; error: string | null; onRefresh: () => void
+   126→}) {
+   127→  if (loading && !data) {
+   128→    return (
+   129→      <div className="space-y-5">
+   130→        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+   131→          {Array.from({ length: 4 }).map((_, i) => (
+   132→            <Skeleton key={i} className="h-[104px] rounded-xl" />
+   133→          ))}
+   134→        </div>
+   135→        <div className="grid gap-4 lg:grid-cols-2">
+   136→          {Array.from({ length: 2 }).map((_, i) => (
+   137→            <Skeleton key={i} className="h-[300px] rounded-xl" />
+   138→          ))}
+   139→        </div>
+   140→      </div>
+   141→    )
+   142→  }
+   143→  if (error && !data) {
+   144→    return (
+   145→      <Card className="mx-auto max-w-lg rounded-xl border-rose-200 bg-rose-50">
+   146→        <CardContent className="flex flex-col items-center gap-3 p-6 text-center">
+   147→          <AlertTriangle className="h-8 w-8 text-rose-500" />
+   148→          <div>
+   149→            <p className="font-semibold text-rose-800">Gagal memuat analitik percakapan</p>
+   150→            <p className="mt-1 text-sm text-rose-600">{error}</p>
+   151→          </div>
+   152→          <Button variant="outline" onClick={onRefresh} className="border-rose-300 hover:bg-rose-100">
+   153→            Coba Lagi
+   154→          </Button>
+   155→        </CardContent>
+   156→      </Card>
+   157→    )
+   158→  }
+   159→  if (!data) return null
+   160→
+   161→  const { kpi, perBrand, perMarketer, channelMix, weekly } = data
+   162→  const totalInteractions = perBrand.reduce((acc, b) => acc + b.interactions, 0)
+   163→  const channelTotal = channelMix.reduce((acc, c) => acc + c.count, 0)
+   164→  const maxChannelCount = Math.max(...channelMix.map((c) => c.count), 1)
+   165→  const respondedBrands = perBrand.filter((b) => b.firstResponseHours !== null)
+   166→  const noResponseBrands = perBrand.filter((b) => b.firstResponseHours === null)
+   167→  const marketers = perMarketer.slice(0, 8)
+   168→  const maxReplies = Math.max(...marketers.map((m) => m.replies), 1)
+   169→
+   170→  const slaBarClass =
+   171→    kpi.slaCompliancePct === null
+   172→      ? '[&>div]:bg-slate-400'
+   173→      : kpi.slaCompliancePct >= 80
+   174→        ? '[&>div]:bg-emerald-500'
+   175→        : kpi.slaCompliancePct >= 50
+   176→          ? '[&>div]:bg-amber-500'
+   177→          : '[&>div]:bg-rose-500'
+   178→
+   179→  const kpis: { key: string; icon: React.ReactNode; label: string; value: string; hint: string; tone?: Tone; progress?: React.ReactNode; hintClass?: string }[] = [
+   180→    {
+   181→      key: 'response', icon: <Timer className="h-4 w-4" />, label: 'Respons Pertama',
+   182→      value: formatHours(kpi.avgFirstResponseHours),
+   183→      hint: kpi.medianFirstResponseHours !== null ? `Median ${formatHours(kpi.medianFirstResponseHours)}` : 'Belum ada respons tercatat',
+   184→    },
+   185→    {
+   186→      key: 'sla', icon: <Target className="h-4 w-4" />, label: 'Kepatuhan SLA',
+   187→      value: kpi.slaCompliancePct !== null ? `${kpi.slaCompliancePct}%` : '—',
+   188→      hint: 'Respons pertama ≤ target SLA jam brand',
+   189→      progress: kpi.slaCompliancePct !== null ? (
+   190→        <Progress value={kpi.slaCompliancePct} className={cn('mt-2 h-1.5 bg-slate-100', slaBarClass)} />
+   191→      ) : undefined,
+   192→    },
+   193→    {
+   194→      key: 'active', icon: <MessagesSquare className="h-4 w-4" />, label: 'Percakapan Aktif',
+   195→      value: String(kpi.totalConversations),
+   196→      hint: `${kpi.unansweredNow} menunggu balasan`,
+   197→      hintClass: kpi.unansweredNow > 0 ? 'font-medium text-rose-600' : undefined,
+   198→      tone: kpi.unansweredNow > 0 ? 'warning' : 'default',
+   199→    },
+   200→    {
+   201→      key: 'interactions', icon: <ArrowLeftRight className="h-4 w-4" />, label: 'Total Interaksi',
+   202→      value: fmtNum(totalInteractions),
+   203→      hint: 'Pesan masuk + keluar, 90 hari terakhir',
+   204→    },
+   205→  ]
+   206→
+   207→  return (
+   208→    <div className="space-y-5">
+   209→      {/* Header */}
+   210→      <div className="flex flex-wrap items-end justify-between gap-3 print:hidden">
+   211→        <div>
+   212→          <h2 className="text-lg font-bold tracking-tight text-slate-900">Analitik Percakapan</h2>
+   213→          <p className="mt-0.5 text-sm text-slate-500">Waktu respons, kepatuhan SLA, dan aktivitas omnichannel 90 hari terakhir</p>
+   214→        </div>
+   215→        <div className="flex items-center gap-3 print:hidden">
+   216→          <span className="text-[11px] text-slate-400">Diperbarui {timeAgo(data.generatedAt)}</span>
+   217→          <Button variant="outline" onClick={() => exportConversationsCsv(data)} className="gap-1.5">
+   218→            <Download className="h-4 w-4" /> Export CSV
+   219→          </Button>
+   220→          <Button variant="outline" onClick={() => window.print()} className="gap-1.5">
+   221→            <Printer className="h-4 w-4" /> Cetak Laporan
+   222→          </Button>
+   223→          <RefreshButton onClick={onRefresh} loading={loading} />
+   224→        </div>
+   225→      </div>
+   226→
+   227→      {/* KPI grid */}
+   228→      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+   229→        {kpis.map((item) => (
+   230→          <KpiCard
+   231→            key={item.key}
+   232→            icon={item.icon}
+   233→            label={item.label}
+   234→            value={item.value}
+   235→            hint={item.hint}
+   236→            tone={item.tone}
+   237→            hintClass={item.hintClass}
+   238→            progress={item.progress}
+   239→          />
+   240→        ))}
+   241→      </div>
+   242→
+   243→      {/* Charts */}
+   244→      <div className="grid gap-4 lg:grid-cols-2">
+   245→        {/* Waktu respons per brand — bar horizontal */}
+   246→        <Card className="rounded-xl border-slate-200">
+   247→          <CardHeader className="pb-3">
+   248→            <CardTitle className="flex items-center gap-2 text-base">
+   249→              <Timer className="h-4 w-4 text-teal-600" /> Waktu Respons per Brand
+   250→            </CardTitle>
+   251→            <CardDescription>Rata-rata first response — warna mengikuti brand</CardDescription>
+   252→          </CardHeader>
+   253→          <CardContent>
+   254→            {respondedBrands.length === 0 ? (
+   255→              <EmptyState icon={<Timer className="h-5 w-5" />} title="Belum ada respons" description="First response akan muncul setelah pesan masuk dibalas tim." />
+   256→            ) : (
+   257→              <>
+   258→                <div className="h-[240px] w-full">
+   259→                  <ResponsiveContainer width="100%" height="100%">
+   260→                    <BarChart data={respondedBrands} layout="vertical" margin={{ top: 4, right: 24, left: 0, bottom: 0 }}>
+   261→                      <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
+   262→                      <XAxis
+   263→                        type="number"
+   264→                        unit=" jam"
+   265→                        tick={{ fontSize: 11, fill: '#64748b' }}
+   266→                        tickLine={false}
+   267→                        axisLine={false}
+   268→                      />
+   269→                      <YAxis
+   270→                        type="category"
+   271→                        dataKey="brandName"
+   272→                        width={110}
+   273→                        tick={{ fontSize: 11, fill: '#64748b' }}
+   274→                        tickLine={false}
+   275→                        axisLine={false}
+   276→                      />
+   277→                      <Tooltip
+   278→                        cursor={{ fill: '#f1f5f9' }}
+   279→                        formatter={(value) => [`${fmtNum(Number(value))} jam`, 'Respons pertama']}
+   280→                        contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12 }}
+   281→                      />
+   282→                      <Bar dataKey="firstResponseHours" name="Respons pertama" radius={[0, 4, 4, 0]} maxBarSize={20}>
+   283→                        {respondedBrands.map((b) => (
+   284→                          <Cell key={b.brandId} fill={b.brandColor} />
+   285→                        ))}
+   286→                      </Bar>
+   287→                    </BarChart>
+   288→                  </ResponsiveContainer>
+   289→                </div>
+   290→                {noResponseBrands.length > 0 && (
+   291→                  <p className="mt-2 text-[11px] text-slate-400">
+   292→                    {noResponseBrands.map((b) => b.brandName).join(', ')} belum ada respons dalam 90 hari terakhir.
+   293→                  </p>
+   294→                )}
+   295→              </>
+   296→            )}
+   297→          </CardContent>
+   298→        </Card>
+   299→
+   300→        {/* Aktivitas mingguan — inbound vs outbound */}
+   301→        <Card className="rounded-xl border-slate-200">
+   302→          <CardHeader className="pb-3">
+   303→            <CardTitle className="flex items-center gap-2 text-base">
+   304→              <TrendingUp className="h-4 w-4 text-teal-600" /> Aktivitas Mingguan
+   305→            </CardTitle>
+   306→            <CardDescription>Pesan masuk vs keluar per minggu (8 minggu terakhir)</CardDescription>
+   307→          </CardHeader>
+   308→          <CardContent>
+   309→            {weekly.length === 0 ? (
+   310→              <EmptyState icon={<Inbox className="h-5 w-5" />} title="Belum ada aktivitas" description="Interaksi percakapan akan tampil per minggu di sini." />
+   311→            ) : (
+   312→              <div className="h-[260px] w-full">
+   313→                <ResponsiveContainer width="100%" height="100%">
+   314→                  <BarChart data={weekly} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+   315→                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+   316→                    <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#64748b' }} tickLine={false} axisLine={false} />
+   317→                    <YAxis tick={{ fontSize: 11, fill: '#64748b' }} allowDecimals={false} width={32} tickLine={false} axisLine={false} />
+   318→                    <Tooltip cursor={{ fill: '#f1f5f9' }} contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12 }} />
+   319→                    <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12 }} />
+   320→                    <Bar dataKey="inbound" name="Masuk" fill="#10b981" radius={[4, 4, 0, 0]} maxBarSize={24} />
+   321→                    <Bar dataKey="outbound" name="Keluar" fill="#334155" radius={[4, 4, 0, 0]} maxBarSize={24} />
+   322→                  </BarChart>
+   323→                </ResponsiveContainer>
+   324→              </div>
+   325→            )}
+   326→          </CardContent>
+   327→        </Card>
+   328→
+   329→        {/* Campuran kanal */}
+   330→        <Card className="rounded-xl border-slate-200">
+   331→          <CardHeader className="pb-3">
+   332→            <CardTitle className="flex items-center gap-2 text-base">
+   333→              <Inbox className="h-4 w-4 text-teal-600" /> Campuran Kanal
+   334→            </CardTitle>
+   335→            <CardDescription>Distribusi interaksi per kanal 90 hari terakhir</CardDescription>
+   336→          </CardHeader>
+   337→          <CardContent>
+   338→            {channelMix.length === 0 ? (
+   339→              <EmptyState icon={<Inbox className="h-5 w-5" />} title="Belum ada data kanal" />
+   340→            ) : (
+   341→              <div className="space-y-3">
+   342→                {channelMix.map((c) => {
+   343→                  const meta = channelMeta(c.channel)
+   344→                  return (
+   345→                    <div key={c.channel} className="flex items-center gap-3">
+   346→                      <div className={cn('flex h-8 w-8 shrink-0 items-center justify-center rounded-full', meta.bg)}>
+   347→                        <ChannelIcon channel={c.channel} className="h-4 w-4" />
+   348→                      </div>
+   349→                      <div className="min-w-0 flex-1">
+   350→                        <div className="flex items-center justify-between gap-2">
+   351→                          <p className="truncate text-xs font-medium text-slate-700">{meta.label}</p>
+   352→                          <p className="text-xs font-semibold text-slate-900">
+   353→                            {c.count} <span className="font-normal text-slate-400">· {pctOf(c.count, channelTotal)}%</span>
+   354→                          </p>
+   355→                        </div>
+   356→                        <Progress
+   357→                          value={pctOf(c.count, maxChannelCount)}
+   358→                          className={cn('mt-1 h-1.5 bg-slate-100', CHANNEL_BAR[c.channel] ?? '[&>div]:bg-slate-500')}
+   359→                        />
+   360→                      </div>
+   361→                    </div>
+   362→                  )
+   363→                })}
+   364→              </div>
+   365→            )}
+   366→          </CardContent>
+   367→        </Card>
+   368→
+   369→        {/* Respons tim marketing */}
+   370→        <Card className="rounded-xl border-slate-200">
+   371→          <CardHeader className="pb-3">
+   372→            <CardTitle className="flex items-center gap-2 text-base">
+   373→              <Users className="h-4 w-4 text-violet-600" /> Respons Tim Marketing
+   374→            </CardTitle>
+   375→            <CardDescription>Jumlah balasan dan kecepatan respons per marketer</CardDescription>
+   376→          </CardHeader>
+   377→          <CardContent>
+   378→            {marketers.length === 0 ? (
+   379→              <EmptyState icon={<Users className="h-5 w-5" />} title="Belum ada balasan" description="Balasan marketer akan tampil di sini setelah pesan keluar terkirim." />
+   380→            ) : (
+   381→              <div className="space-y-3">
+   382→                {marketers.map((m) => (
+   383→                  <div key={m.userId}>
+   384→                    <div className="flex items-center gap-2.5">
+   385→                      <UserAvatar name={m.userName} color={m.avatarColor} size={28} />
+   386→                      <div className="min-w-0 flex-1">
+   387→                        <p className="truncate text-sm font-medium text-slate-900">{m.userName}</p>
+   388→                        <p className="text-[11px] text-slate-400">{m.replies} balasan</p>
+   389→                      </div>
+   390→                      <div className="shrink-0 text-right">
+   391→                        <p className="text-xs font-semibold text-slate-700">{formatHours(m.avgResponseHours)}</p>
+   392→                        <p className="text-[10px] text-slate-400">rata-rata respons</p>
+   393→                      </div>
+   394→                    </div>
+   395→                    <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-100">
+   396→                      <div className="h-full rounded-full bg-slate-700" style={{ width: `${pctOf(m.replies, maxReplies)}%` }} />
+   397→                    </div>
+   398→                  </div>
+   399→                ))}
+   400→              </div>
+   401→            )}
+   402→          </CardContent>
+   403→        </Card>
+   404→      </div>
+   405→    </div>
+   406→  )
+   407→}
+   408→
+   409→/* ================= LAPORAN CETAK — Analitik Percakapan (print-only, R12) =================
+   410→   Dirender via portal ke document.body dengan class .print-overlay-root sehingga lolos dari
+   411→   rule global @media print (body > *:not(.print-overlay-root) display:none) — di layar tetap
+   412→   hidden (display:none), hanya muncul saat window.print() dipicu tombol "Cetak Laporan". */
+   413→function PrintTh({ children, className }: { children: React.ReactNode; className?: string }) {
+   414→  return <th className={cn('border-b border-slate-400 px-2 py-1.5 text-left font-semibold', className)}>{children}</th>
+   415→}
+   416→
+   417→function PrintTd({ children, className, colSpan }: { children: React.ReactNode; className?: string; colSpan?: number }) {
+   418→  return <td colSpan={colSpan} className={cn('border-b border-slate-200 px-2 py-1.5', className)}>{children}</td>
+   419→}
+   420→
+   421→function ConversationPrintReport({ data }: { data: ConversationAnalyticsDTO }) {
+   422→  const { kpi, perBrand, perMarketer, channelMix, weekly } = data
+   423→  const totalInteractions = perBrand.reduce((acc, b) => acc + b.interactions, 0)
+   424→  const channelTotal = channelMix.reduce((acc, c) => acc + c.count, 0)
+   425→
+   426→  const kpiRows: [string, string][] = [
+   427→    ['Respons Pertama', `${formatHours(kpi.avgFirstResponseHours)}${kpi.medianFirstResponseHours !== null ? ` (median ${formatHours(kpi.medianFirstResponseHours)})` : ''}`],
+   428→    ['Kepatuhan SLA', kpi.slaCompliancePct !== null ? `${kpi.slaCompliancePct}%` : '—'],
+   429→    ['Percakapan Aktif', `${kpi.totalConversations} (${kpi.unansweredNow} menunggu balasan)`],
+   430→    ['Total Interaksi', `${fmtNum(totalInteractions)} (90 hari terakhir)`],
+   431→  ]
+   432→
+   433→  return createPortal(
+   434→    <div className="print-overlay-root hidden print:block">
+   435→      <div className="mx-auto w-full max-w-[180mm] p-2 text-[11px] leading-relaxed text-black">
+   436→        {/* Kepala laporan */}
+   437→        <div className="border-b-2 border-black pb-3">
+   438→          <h1 className="text-lg font-bold uppercase tracking-wide">Grupa Kreasi CRM — Laporan Analitik Percakapan</h1>
+   439→          <p className="mt-1">
+   440→            Dibuat {formatDate(data.generatedAt, true)} · Periode data 90 hari terakhir · Perusahaan: Grupa Kreasi Media
+   441→          </p>
+   442→        </div>
+   443→
+   444→        {/* Ringkasan KPI */}
+   445→        <section className="mt-4">
+   446→          <h2 className="mb-1 text-sm font-bold">1. Ringkasan KPI</h2>
+   447→          <table className="w-full border-collapse">
+   448→            <thead>
+   449→              <tr>
+   450→                <PrintTh className="w-1/3">Indikator</PrintTh>
+   451→                <PrintTh>Nilai</PrintTh>
+   452→              </tr>
+   453→            </thead>
+   454→            <tbody>
+   455→              {kpiRows.map(([label, value]) => (
+   456→                <tr key={label}>
+   457→                  <PrintTd className="font-medium">{label}</PrintTd>
+   458→                  <PrintTd>{value}</PrintTd>
+   459→                </tr>
+   460→              ))}
+   461→            </tbody>
+   462→          </table>
+   463→        </section>
+   464→
+   465→        {/* Per brand */}
+   466→        <section className="mt-4">
+   467→          <h2 className="mb-1 text-sm font-bold">2. Respons per Brand</h2>
+   468→          <table className="w-full border-collapse">
+   469→            <thead>
+   470→              <tr>
+   471→                <PrintTh>Brand</PrintTh>
+   472→                <PrintTh className="text-right">Rata-rata Respons</PrintTh>
+   473→                <PrintTh className="text-right">Kepatuhan SLA</PrintTh>
+   474→                <PrintTh className="text-right">Interaksi</PrintTh>
+   475→              </tr>
+   476→            </thead>
+   477→            <tbody>
+   478→              {perBrand.length === 0 ? (
+   479→                <tr><PrintTd colSpan={4}>Belum ada data brand.</PrintTd></tr>
+   480→              ) : perBrand.map((b) => (
+   481→                <tr key={b.brandId}>
+   482→                  <PrintTd className="font-medium">{b.brandName}</PrintTd>
+   483→                  <PrintTd className="text-right">{b.firstResponseHours !== null ? `${fmtNum(b.firstResponseHours)} jam` : '—'}</PrintTd>
+   484→                  <PrintTd className="text-right">{b.slaPct !== null ? `${b.slaPct}%` : '—'}</PrintTd>
+   485→                  <PrintTd className="text-right">{b.interactions}</PrintTd>
+   486→                </tr>
+   487→              ))}
+   488→            </tbody>
+   489→          </table>
+   490→        </section>
+   491→
+   492→        {/* Aktivitas mingguan */}
+   493→        <section className="mt-4">
+   494→          <h2 className="mb-1 text-sm font-bold">3. Aktivitas Mingguan (Masuk vs Keluar)</h2>
+   495→          <table className="w-full border-collapse">
+   496→            <thead>
+   497→              <tr>
+   498→                <PrintTh>Minggu</PrintTh>
+   499→                <PrintTh className="text-right">Masuk</PrintTh>
+   500→                <PrintTh className="text-right">Keluar</PrintTh>
+   501→              </tr>
+   502→            </thead>
+   503→            <tbody>
+   504→              {weekly.length === 0 ? (
+   505→                <tr><PrintTd colSpan={3}>Belum ada aktivitas.</PrintTd></tr>
+   506→              ) : weekly.map((w) => (
+   507→                <tr key={w.weekStart}>
+   508→                  <PrintTd className="font-medium">{w.label}</PrintTd>
+   509→                  <PrintTd className="text-right">{w.inbound}</PrintTd>
+   510→                  <PrintTd className="text-right">{w.outbound}</PrintTd>
+   511→                </tr>
+   512→              ))}
+   513→            </tbody>
+   514→          </table>
+   515→        </section>
+   516→
+   517→        {/* Campuran kanal */}
+   518→        <section className="mt-4">
+   519→          <h2 className="mb-1 text-sm font-bold">4. Campuran Kanal</h2>
+   520→          <table className="w-full border-collapse">
+   521→            <thead>
+   522→              <tr>
+   523→                <PrintTh>Kanal</PrintTh>
+   524→                <PrintTh className="text-right">Jumlah</PrintTh>
+   525→                <PrintTh className="text-right">Persentase</PrintTh>
+   526→              </tr>
+   527→            </thead>
+   528→            <tbody>
+   529→              {channelMix.length === 0 ? (
+   530→                <tr><PrintTd colSpan={3}>Belum ada data kanal.</PrintTd></tr>
+   531→              ) : channelMix.map((c) => (
+   532→                <tr key={c.channel}>
+   533→                  <PrintTd className="font-medium">{channelMeta(c.channel).label}</PrintTd>
+   534→                  <PrintTd className="text-right">{c.count}</PrintTd>
+   535→                  <PrintTd className="text-right">{pctOf(c.count, channelTotal)}%</PrintTd>
+   536→                </tr>
+   537→              ))}
+   538→            </tbody>
+   539→          </table>
+   540→        </section>
+   541→
+   542→        {/* Respons tim marketing */}
+   543→        <section className="mt-4">
+   544→          <h2 className="mb-1 text-sm font-bold">5. Respons Tim Marketing</h2>
+   545→          <table className="w-full border-collapse">
+   546→            <thead>
+   547→              <tr>
+   548→                <PrintTh>Marketer</PrintTh>
+   549→                <PrintTh className="text-right">Balasan</PrintTh>
+   550→                <PrintTh className="text-right">Rata-rata Respons</PrintTh>
+   551→              </tr>
+   552→            </thead>
+   553→            <tbody>
+   554→              {perMarketer.length === 0 ? (
+   555→                <tr><PrintTd colSpan={3}>Belum ada balasan tercatat.</PrintTd></tr>
+   556→              ) : perMarketer.slice(0, 8).map((m) => (
+   557→                <tr key={m.userId}>
+   558→                  <PrintTd className="font-medium">{m.userName}</PrintTd>
+   559→                  <PrintTd className="text-right">{m.replies}</PrintTd>
+   560→                  <PrintTd className="text-right">{m.avgResponseHours !== null ? formatHours(m.avgResponseHours) : '—'}</PrintTd>
+   561→                </tr>
+   562→              ))}
+   563→            </tbody>
+   564→          </table>
+   565→        </section>
+   566→
+   567→        <p className="mt-4 border-t border-slate-300 pt-2 text-[10px] text-slate-500">
+   568→          Dicetak dari Grupa Kreasi CRM — Modul Dashboard, tab Konversasi.
+   569→        </p>
+   570→      </div>
+   571→    </div>,
+   572→    document.body,
+   573→  )
+   574→}
+   575→
+   576→function dueInfo(task: TaskDTO): { label: string; overdue: boolean } {
+   577→  if (!task.dueDate) return { label: 'Tanpa tenggat', overdue: false }
+   578→  const d = daysUntil(task.dueDate)
+   579→  if (d === null) return { label: formatDate(task.dueDate), overdue: false }
+   580→  if (d < 0) return { label: `${formatDate(task.dueDate)} · terlambat ${Math.abs(d)} hari`, overdue: true }
+   581→  if (d === 0) return { label: `${formatDate(task.dueDate)} · hari ini`, overdue: false }
+   582→  return { label: `${formatDate(task.dueDate)} · ${d} hari lagi`, overdue: false }
+   583→}
+   584→
+   585→export default function DashboardView() {
+   586→  const openOpportunity = useCrmStore((s) => s.openOpportunity)
+   587→  const openCompany = useCrmStore((s) => s.openCompany)
+   588→  const user = useCrmStore((s) => s.user)
+   589→  const users = useCrmStore((s) => s.users)
+   590→  const { toast } = useToast()
+   591→
+   592→  const [data, setData] = useState<DashboardDTO | null>(null)
+   593→  const [loading, setLoading] = useState(true)
+   594→  const [error, setError] = useState<string | null>(null)
+   595→  const [lastUpdated, setLastUpdated] = useState<string | null>(null)
+   596→  const [completingIds, setCompletingIds] = useState<Set<string>>(new Set())
+   597→
+   598→  /* Eskalasi SLA (13-d) — task URGENT ke owner lead; id row yang sudah dibuat (per session) */
+   599→  const [escalatedIds, setEscalatedIds] = useState<Set<string>>(new Set())
+   600→  const [escalatingId, setEscalatingId] = useState<string | null>(null)
+   601→
+   602→  /* State analitik percakapan (tab Konversasi) — di-lift agar cache saat pindah-pindah tab */
+   603→  const [tab, setTab] = useState('ringkasan')
+   604→  const [analytics, setAnalytics] = useState<ConversationAnalyticsDTO | null>(null)
+   605→  const [analyticsLoading, setAnalyticsLoading] = useState(false)
+   606→  const [analyticsError, setAnalyticsError] = useState<string | null>(null)
+   607→  const analyticsRequestedRef = useRef(false)
+   608→
+   609→  const load = useCallback(async () => {
+   610→    setLoading(true)
+   611→    setError(null)
+   612→    try {
+   613→      const res = await crmApi.dashboard()
+   614→      setData(res)
+   615→      setLastUpdated(new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }))
+   616→    } catch (e) {
+   617→      setError(e instanceof Error ? e.message : 'Gagal memuat dashboard')
+   618→    } finally {
+   619→      setLoading(false)
+   620→    }
+   621→  }, [])
+   622→
+   623→  useEffect(() => { void load() }, [load])
+   624→
+   625→  const loadAnalytics = useCallback(async () => {
+   626→    setAnalyticsLoading(true)
+   627→    setAnalyticsError(null)
+   628→    try {
+   629→      const res = await analyticsApi.conversations()
+   630→      setAnalytics(res)
+   631→    } catch (e) {
+   632→      const msg = e instanceof Error ? e.message : 'Gagal memuat analitik percakapan'
+   633→      setAnalyticsError(msg)
+   634→      toast({ title: 'Gagal memuat analitik percakapan', description: msg, variant: 'destructive' })
+   635→    } finally {
+   636→      setAnalyticsLoading(false)
+   637→    }
+   638→  }, [toast])
+   639→
+   640→  /* Analitik dimuat sekali saat tab Konversasi pertama dibuka — cache di parent, pindah tab tidak refetch */
+   641→  const handleTabChange = useCallback((next: string) => {
+   642→    setTab(next)
+   643→    if (next === 'konversasi' && !analytics && !analyticsLoading && !analyticsRequestedRef.current) {
+   644→      analyticsRequestedRef.current = true
+   645→      void loadAnalytics()
+   646→    }
+   647→  }, [analytics, analyticsLoading, loadAnalytics])
+   648→
+   649→  const handleCompleteTask = async (task: TaskDTO) => {
+   650→    setCompletingIds((prev) => new Set(prev).add(task.id))
+   651→    try {
+   652→      await crmApi.updateTask(task.id, { status: 'DONE' })
+   653→      toast({ title: 'Task diselesaikan', description: task.title })
+   654→      await load()
+   655→    } catch (e) {
+   656→      toast({
+   657→        title: 'Gagal menyelesaikan task',
+   658→        description: e instanceof Error ? e.message : 'Coba lagi',
+   659→        variant: 'destructive',
+   660→      })
+   661→    } finally {
+   662→      setCompletingIds((prev) => {
+   663→        const next = new Set(prev)
+   664→        next.delete(task.id)
+   665→        return next
+   666→      })
+   667→    }
+   668→  }
+   669→
+   670→  /* ---------- Eskalasi SLA (13-d) ---------- */
+   671→  /* slaBreaches DTO hanya membawa ownerName (tanpa ownerId) → resolve owner via store users;
+   672→     fallback terakhir = user yang sedang login. */
+   673→  const resolveEscalationAssignee = useCallback((ownerName?: string | null): string => {
+   674→    if (ownerName) {
+   675→      const owner = users.find((u) => u.name === ownerName)
+   676→      if (owner) return owner.id
+   677→    }
+   678→    return user?.id ?? ''
+   679→  }, [users, user])
+   680→
+   681→  const handleEscalate = useCallback(async (b: DashboardDTO['slaBreaches'][number]) => {
+   682→    if (escalatedIds.has(b.opportunityId) || escalatingId) return
+   683→    setEscalatingId(b.opportunityId)
+   684→    try {
+   685→      await crmApi.createTask({
+   686→        title: `ESKALASI: segera hubungi ${b.companyName} — SLA ${b.brandName} terlewati (${b.code})`,
+   687→        opportunityId: b.opportunityId,
+   688→        assigneeId: resolveEscalationAssignee(b.ownerName),
+   689→        priority: 'URGENT',
+   690→        type: 'FOLLOW_UP',
+   691→        dueDate: new Date().toISOString(),
+   692→      })
+   693→      setEscalatedIds((prev) => new Set(prev).add(b.opportunityId))
+   694→      toast({ title: `Task eskalasi dibuat untuk ${b.ownerName ?? 'owner lead'}`, description: `${b.code} · prioritas URGENT · tenggat hari ini` })
+   695→    } catch (e) {
+   696→      toast({
+   697→        title: 'Gagal membuat task eskalasi',
+   698→        description: e instanceof Error ? e.message : 'Coba lagi',
+   699→        variant: 'destructive',
+   700→      })
+
+[showing lines 1-700 of 1374; use offset=701 with limit to continue reading]

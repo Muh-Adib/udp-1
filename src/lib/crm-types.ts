@@ -1,650 +1,802 @@
-/**
- * Kontrak tipe bersama untuk UDP CRM — PT. Unicam Digital Pictvres.
- * Dipakai oleh backend (route handlers) dan frontend (views).
- */
+/* ============ Multi-Brand CRM — Shared Types (API contract) ============ */
 
-export type Role = "OWNER" | "MANAGER" | "MARKETER" | "PRODUCTION" | "FINANCE" | "CLIENT";
+export type Role = 'SUPER_ADMIN' | 'DIREKTUR' | 'MARKETING' | 'KEUANGAN' | 'PRODUKSI' | 'CLIENT'
 
-export const ROLE_LABEL: Record<Role, string> = {
-  OWNER: "Owner / Dirut",
-  MANAGER: "Manajer",
-  MARKETER: "Marketing",
-  PRODUCTION: "Produksi",
-  FINANCE: "Finance",
-  CLIENT: "Klien",
-};
+export type Stage =
+  | 'NEW' | 'CONTACT_ATTEMPTED' | 'CONNECTED' | 'QUALIFIED' | 'DISCOVERY'
+  | 'ESTIMATION' | 'PROPOSAL_SENT' | 'NEGOTIATION' | 'VERBAL_AGREEMENT'
+  | 'WON' | 'LOST' | 'NURTURE'
 
-export type ChannelType = "whatsapp" | "email" | "instagram" | "web";
+export type Channel = 'WHATSAPP' | 'EMAIL' | 'INSTAGRAM' | 'WEBSITE' | 'PHONE' | 'MEETING'
 
-export const CHANNELS: ChannelType[] = ["whatsapp", "email", "instagram", "web"];
-
-export const CHANNEL_LABEL: Record<ChannelType, string> = {
-  whatsapp: "WhatsApp Business",
-  email: "Email",
-  instagram: "Instagram DM",
-  web: "Form Web",
-};
-
-export const CHANNEL_DESC: Record<ChannelType, string> = {
-  whatsapp: "Chat langsung via WhatsApp Cloud API (Meta Business). Pesan masuk otomatis masuk ke Inbox Lead.",
-  email: "Inbound email (inquiry, RFP, vendor registration) diteruskan otomatis ke CRM lewat webhook forwarding.",
-  instagram: "Direct Message dari akun bisnis Instagram tiap brand, via Instagram Messaging API.",
-  web: "Form kontak / pop-up di website tiap brand, dikirim langsung ke endpoint CRM.",
-};
-
-/** Varian warna badge per kanal (tanpa biru/indigo). */
-export const CHANNEL_BADGE_CLASS: Record<ChannelType, string> = {
-  whatsapp: "bg-emerald-100 text-emerald-800 border-emerald-200",
-  email: "bg-amber-100 text-amber-800 border-amber-200",
-  instagram: "bg-rose-100 text-rose-800 border-rose-200",
-  web: "bg-stone-200 text-stone-800 border-stone-300",
-};
-
-export type BrandKey = "unimasi" | "segia" | "erfo" | "unicam";
-
-export const BRANDS: { key: BrandKey; name: string }[] = [
-  { key: "unimasi", name: "Unimasi" },
-  { key: "segia", name: "Segia Tech" },
-  { key: "erfo", name: "Erfo Multimedia" },
-  { key: "unicam", name: "Unicam Studio" },
-];
-
-export const BRAND_LABEL: Record<string, string> = Object.fromEntries(BRANDS.map((b) => [b.key, b.name]));
-
-export type LeadStatus = "NEW" | "FOLLOW_UP" | "QUOTED" | "WON" | "LOST";
-
-/** Tahapan funnel penjualan (stage detail). `status` adalah ringkasan yang tersinkron otomatis. */
-export type LeadStage = "NEW" | "QUALIFIED" | "PROPOSAL" | "NEGOTIATION" | "WON" | "LOST";
-
-export const LEAD_STAGES: LeadStage[] = ["NEW", "QUALIFIED", "PROPOSAL", "NEGOTIATION", "WON", "LOST"];
-
-export const LEAD_STAGE_LABEL: Record<LeadStage, string> = {
-  NEW: "Lead Baru",
-  QUALIFIED: "Terkualifikasi",
-  PROPOSAL: "Usulan Penawaran",
-  NEGOTIATION: "Negosiasi",
-  WON: "Menang",
-  LOST: "Hilang",
-};
-
-export const LEAD_STAGE_BADGE: Record<LeadStage, string> = {
-  NEW: "bg-amber-100 text-amber-800 border-amber-200",
-  QUALIFIED: "bg-teal-100 text-teal-800 border-teal-200",
-  PROPOSAL: "bg-violet-100 text-violet-800 border-violet-200",
-  NEGOTIATION: "bg-orange-100 text-orange-800 border-orange-200",
-  WON: "bg-emerald-100 text-emerald-800 border-emerald-200",
-  LOST: "bg-rose-100 text-rose-700 border-rose-200",
-};
-
-/** Pemetaan stage → status ringkasan (untuk sinkronisasi kolom lama). */
-export const STAGE_TO_STATUS: Record<LeadStage, LeadStatus> = {
-  NEW: "NEW",
-  QUALIFIED: "FOLLOW_UP",
-  PROPOSAL: "QUOTED",
-  NEGOTIATION: "QUOTED",
-  WON: "WON",
-  LOST: "LOST",
-};
-
-export const LOST_REASONS = ["Harga", "Kompetitor", "Budget tidak ada", "Timing", "Tidak ada balasan", "Lainnya"] as const;
-
-export type ProjectStatus = "PLANNED" | "BRIEFED" | "IN_PROGRESS" | "REVIEW" | "DONE";
-
-export const PROJECT_STATUS_LABEL: Record<ProjectStatus, string> = {
-  PLANNED: "Perencanaan",
-  BRIEFED: "Brief Masuk",
-  IN_PROGRESS: "Dikerjakan",
-  REVIEW: "Review Klien",
-  DONE: "Selesai",
-};
-
-export const PROJECT_STATUS_BADGE: Record<ProjectStatus, string> = {
-  PLANNED: "bg-stone-200 text-stone-700 border-stone-300",
-  BRIEFED: "bg-amber-100 text-amber-800 border-amber-200",
-  IN_PROGRESS: "bg-teal-100 text-teal-800 border-teal-200",
-  REVIEW: "bg-violet-100 text-violet-800 border-violet-200",
-  DONE: "bg-emerald-100 text-emerald-800 border-emerald-200",
-};
-
-export type QuotationStatus = "DRAFT" | "SENT" | "APPROVED" | "REJECTED";
-
-export const QUOTATION_STATUS_LABEL: Record<QuotationStatus, string> = {
-  DRAFT: "Draf",
-  SENT: "Terkirim",
-  APPROVED: "Disetujui",
-  REJECTED: "Ditolak",
-};
-
-export const QUOTATION_STATUS_BADGE: Record<QuotationStatus, string> = {
-  DRAFT: "bg-stone-200 text-stone-700 border-stone-300",
-  SENT: "bg-amber-100 text-amber-800 border-amber-200",
-  APPROVED: "bg-emerald-100 text-emerald-800 border-emerald-200",
-  REJECTED: "bg-rose-100 text-rose-700 border-rose-200",
-};
-
-export type InvoiceStatus = "UNPAID" | "PARTIAL" | "PAID" | "OVERDUE";
-
-export const INVOICE_STATUS_LABEL: Record<InvoiceStatus, string> = {
-  UNPAID: "Belum Dibayar",
-  PARTIAL: "Dibayar Sebagian",
-  PAID: "Lunas",
-  OVERDUE: "Jatuh Tempo",
-};
-
-export const INVOICE_STATUS_BADGE: Record<InvoiceStatus, string> = {
-  UNPAID: "bg-stone-200 text-stone-700 border-stone-300",
-  PARTIAL: "bg-amber-100 text-amber-800 border-amber-200",
-  PAID: "bg-emerald-100 text-emerald-800 border-emerald-200",
-  OVERDUE: "bg-rose-100 text-rose-700 border-rose-200",
-};
-
-// ============ BRIEF & ESTIMASI ============
-
-export type BriefStatus = "DRAFT" | "SUBMITTED" | "ESTIMATED" | "QUOTED";
-
-export const BRIEF_STATUS_LABEL: Record<BriefStatus, string> = {
-  DRAFT: "Draf",
-  SUBMITTED: "Menunggu Estimasi",
-  ESTIMATED: "Sudah Ters Estimasi",
-  QUOTED: "Sudah Ditawarkan",
-};
-
-export const BRIEF_STATUS_BADGE: Record<BriefStatus, string> = {
-  DRAFT: "bg-stone-200 text-stone-700 border-stone-300",
-  SUBMITTED: "bg-amber-100 text-amber-800 border-amber-200",
-  ESTIMATED: "bg-teal-100 text-teal-800 border-teal-200",
-  QUOTED: "bg-emerald-100 text-emerald-800 border-emerald-200",
-};
-
-export interface EstimateItemDTO {
-  task: string;
-  qty: number;
-  unit: string; // jam | unit | orang dsb
-  hours: number;
-  cost: number;
-}
-
-export interface WorkEstimateDTO {
-  id: string;
-  briefId: string;
-  items: EstimateItemDTO[];
-  totalHours: number;
-  totalCost: number;
-  notes?: string | null;
-  createdByName?: string | null;
-  createdAt: string;
-}
-
-export interface BriefDTO {
-  id: string;
-  code: string;
-  leadId: string;
-  brand: string;
-  title: string;
-  objective: string;
-  audience?: string | null;
-  deliverables: string;
-  references?: string | null;
-  deadline?: string | null;
-  notes?: string | null;
-  status: BriefStatus;
-  createdByName?: string | null;
-  createdAt: string;
-  lead?: { code: string; subject: string; stage?: LeadStage; contactName: string; companyName?: string | null; estValue?: number } | null;
-  estimates: WorkEstimateDTO[];
-  projectCode?: string | null;
-}
-
-export type DeliverableType = "FILE" | "LINK";
-
-export interface DeliverableDTO {
-  id: string;
-  projectId: string;
-  name: string;
-  type: DeliverableType;
-  url?: string | null;
-  fileName?: string | null;
-  mimeType?: string | null;
-  sizeLabel?: string | null;
-  milestoneLabel?: string | null;
-  note?: string | null;
-  uploadedByName: string;
-  createdAt: string;
-}
-
-export const DELIVERABLE_TYPE_LABEL: Record<DeliverableType, string> = {
-  FILE: "File",
-  LINK: "Tautan",
-};
-
-export interface QuotationItemDTO {
-  desc: string;
-  qty: number;
-  price: number;
-}
-
-export const LEAD_STATUS_LABEL: Record<LeadStatus, string> = {
-  NEW: "Baru",
-  FOLLOW_UP: "Diikuti",
-  QUOTED: "Penawaran",
-  WON: "Menang",
-  LOST: "Hilang",
-};
-
-export const LEAD_STATUS_BADGE: Record<LeadStatus, string> = {
-  NEW: "bg-amber-100 text-amber-800 border-amber-200",
-  FOLLOW_UP: "bg-stone-200 text-stone-700 border-stone-300",
-  QUOTED: "bg-violet-100 text-violet-800 border-violet-200",
-  WON: "bg-emerald-100 text-emerald-800 border-emerald-200",
-  LOST: "bg-rose-100 text-rose-700 border-rose-200",
-};
+export type Temperature = 'HOT' | 'WARM' | 'COLD'
+export type Priority = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT'
 
 export interface SessionUser {
-  id: string;
-  name: string;
-  email: string;
-  role: Role;
-  companyId?: string | null;
+  id: string
+  name: string
+  email: string
+  role: Role
+  title?: string | null
+  avatarColor: string
+  brandIds: string[]
+  companyId?: string | null
 }
 
-export interface LeadMessageDTO {
-  id: string;
-  direction: "IN" | "OUT" | "NOTE";
-  channel: string;
-  body: string;
-  senderName: string;
-  createdAt: string;
-  /** Untuk pesan OUT: tujuan nyata balasan (nomor WA / email / @handle). */
-  destination?: string | null;
+export interface ServiceDTO {
+  id: string
+  name: string
+  category: string
+  brandId: string
 }
 
-/** Kanal balasan keluar — balasan WA harus ke nomor WA, DM ke IG, dsb. */
-export type ReplyChannel = ChannelType | "internal";
-
-export const REPLY_CHANNEL_LABEL: Record<ReplyChannel, string> = {
-  whatsapp: "WhatsApp",
-  email: "Email",
-  instagram: "Instagram DM",
-  web: "Form Web",
-  internal: "Catatan internal",
-};
-
-/** Kanal mana yang benar-benar bisa dipakai membalas, berdasarkan data kontak yang tersedia. */
-export interface ChannelAvailability {
-  channel: ChannelType;
-  available: boolean;
-  destination?: string | null; // nomor / email / handle yang dipakai
-  missingLabel?: string | null; // "nomor WhatsApp" bila tidak tersedia
+export interface BrandDTO {
+  id: string
+  name: string
+  slug: string
+  tagline?: string | null
+  description?: string | null
+  color: string
+  website?: string | null
+  /* Identitas kontak brand — kop dokumen & identifikasi kanal (R15) */
+  email?: string | null
+  phone?: string | null
+  instagram?: string | null
+  address?: string | null
+  primaryCurrency: string
+  invoicePrefix: string
+  quotationPrefix: string
+  slaHours: number
+  workflowType: string
+  services: ServiceDTO[]
 }
 
-/** Input form "Lead Masuk" — pintu masuk real (bukan dummy) dengan dedupe kontak. */
-export interface IntakeLeadInput {
-  channel: ChannelType | "manual";
-  name: string;
-  company?: string;
-  position?: string;
-  country?: string;
-  phone?: string;
-  email?: string;
-  igUsername?: string;
-  subject: string;
-  body: string;
-  brand?: string;
-  sourceRef?: string;
-  contactNotes?: string;
-}
-
-export interface IntakeLeadResult {
-  leadId: string;
-  leadCode: string;
-  isNewLead: boolean;
-  contactId: string;
-  contactName: string;
-  newContact: boolean;
-  /** Field yang mencocokkan kontak existing (dedupe): phone | email | instagram | null */
-  matchedBy: "phone" | "email" | "instagram" | null;
-}
-
-export interface LeadDTO {
-  id: string;
-  code: string;
-  subject: string;
-  brand: string;
-  channel: ChannelType | "manual";
-  status: LeadStatus;
-  stage?: LeadStage;
-  estValue?: number;
-  score: number;
-  sourceRef?: string | null;
-  lostReason?: string | null;
-  createdAt: string;
-  updatedAt: string;
-  slaOverdue?: boolean;
-  contact: {
-    id: string;
-    name: string;
-    position?: string | null;
-    companyName?: string | null;
-    country?: string;
-    email?: string | null;
-    phone?: string | null;
-    igUsername?: string | null;
-    company?: string | null;
-    notes?: string | null;
-  };
-  assignee?: { id: string; name: string } | null;
-  lastMessage?: { body: string; direction: string; createdAt: string; channel: string } | null;
-  messageCount?: number;
-}
-
-export interface ChannelConfigDTO {
-  type: ChannelType;
-  name: string;
-  enabled: boolean;
-  config: Record<string, string>;
-  configFields: ChannelField[];
-  apiKey?: string | null;
-  webhookSecret?: string | null;
-  webhookUrl: string;
-  lastEventAt?: string | null;
-  eventCount: number;
-}
-
-export interface ChannelField {
-  key: string;
-  label: string;
-  type?: "text" | "password" | "textarea";
-  placeholder?: string;
-  required?: boolean;
-  secret?: boolean;
-  hint?: string;
-}
-
-export interface DashboardStats {
-  totals: { all: number; new: number; followUp: number; quoted: number; won: number; lost: number };
-  channelBreakdown: { channel: ChannelType | "manual"; count: number; pct: number }[];
-  channelHealth: { type: ChannelType; name: string; enabled: boolean; lastEventAt: string | null; eventCount: number }[];
-  recentLeads: LeadDTO[];
-  responseRatePct: number;
-  avgFirstResponseMins: number | null;
-  slaHours: number;
-}
-
-export interface NotificationDTO {
-  id: string;
-  title: string;
-  body: string;
-  type: string;
-  link?: string | null;
-  read: boolean;
-  createdAt: string;
+export interface UserDTO {
+  id: string
+  name: string
+  email: string
+  role: Role
+  title?: string | null
+  avatarColor: string
+  isActive: boolean
+  brandIds: string[]
+  companyId?: string | null
 }
 
 export interface ContactDTO {
-  id: string;
-  name: string;
-  position?: string | null;
-  companyName?: string | null;
-  country: string;
-  email?: string | null;
-  phone?: string | null;
-  igUsername?: string | null;
-  source: string;
-  company?: string | null; // nama tampil: companyName ?? perusahaan terhubung
-  notes?: string | null;
-  createdAt: string;
-  leadCount: number;
+  id: string
+  companyId?: string | null
+  firstName: string
+  lastName?: string | null
+  fullName: string
+  position?: string | null
+  email?: string | null
+  altEmail?: string | null
+  whatsapp?: string | null
+  phone?: string | null
+  country: string
+  city?: string | null
+  timezone: string
+  language: string
+  preferredChannel: string
+  linkedin?: string | null
+  consentStatus: string
+  tags: string[]
+  isPrimary: boolean
+  createdAt: string
+  company?: { id: string; name: string; country: string } | null
 }
 
-export interface QuotationDTO {
-  id: string;
-  number: string;
-  leadId: string;
-  brand: string;
-  title: string;
-  items: QuotationItemDTO[];
-  subtotal: number;
-  discountPct: number;
-  ppnPct: number;
-  grandTotal: number;
-  status: QuotationStatus;
-  notes?: string | null;
-  sentAt?: string | null;
-  decidedAt?: string | null;
-  decidedNote?: string | null;
-  createdAt: string;
-  lead?: { code: string; subject: string; contactName: string; companyName?: string | null } | null;
-  projectCode?: string | null; // terisi bila proyek produksi sudah dibuat
+export interface CompanyDTO {
+  id: string
+  name: string
+  industry?: string | null
+  website?: string | null
+  country: string
+  city?: string | null
+  address?: string | null
+  size?: string | null
+  taxId?: string | null
+  currency: string
+  tags: string[]
+  notes?: string | null
+  ownerId?: string | null
+  ownerName?: string | null
+  createdAt: string
+  contactsCount: number
+  opportunitiesCount: number
+  totalValue: number
+  wonValue: number
 }
 
-export interface InvoiceDTO {
-  id: string;
-  number: string;
-  brand: string;
-  title: string;
-  amount: number;
-  ppnPct: number;
-  grandTotal: number;
-  paidAmount: number;
-  dueDate?: string | null;
-  status: InvoiceStatus;
-  issuedAt: string;
-  projectCode?: string | null;
-  quotationNumber?: string | null;
-  companyName?: string | null;
-  payments: { id: string; amount: number; method: string; paidAt: string; note?: string | null }[];
+export interface OpportunityDTO {
+  id: string
+  code: string
+  title: string
+  stage: Stage
+  temperature: Temperature
+  priority: Priority
+  estimatedValue: number
+  currency: string
+  probability: number
+  expectedCloseDate?: string | null
+  nextAction?: string | null
+  nextActionDate?: string | null
+  lostReason?: string | null
+  lostNotes?: string | null
+  competitorName?: string | null
+  lastOfferValue?: number | null
+  reactivation?: string | null
+  followUpDate?: string | null
+  nurtureTrack?: string | null
+  wonAt?: string | null
+  lostAt?: string | null
+  leadSource: string
+  channel: string
+  campaign?: string | null
+  brief?: string | null
+  needs?: string | null
+  targetAudience?: string | null
+  deliverables?: string | null
+  deadline?: string | null
+  companyId: string
+  companyName: string
+  companyCountry: string
+  contactId: string
+  contactName: string
+  sourceBrandId: string
+  executingBrandId: string
+  brandName: string
+  brandColor: string
+  serviceId?: string | null
+  serviceName?: string | null
+  ownerId: string
+  ownerName: string
+  ownerColor: string
+  interactionsCount: number
+  tasksCount: number
+  openTasksCount: number
+  lastInteractionAt?: string | null
+  /** interaksi IN terakhir — basis presisi chip SLA di inbox (fallback createdAt) */
+  lastInboundAt?: string | null
+  stageUpdatedAt: string
+  createdAt: string
+}
+
+export interface InteractionDTO {
+  id: string
+  opportunityId?: string | null
+  opportunityTitle?: string | null
+  contactId: string
+  contactName: string
+  companyName?: string | null
+  brandId: string
+  brandName: string
+  brandColor: string
+  channel: string
+  direction: string
+  subject?: string | null
+  body: string
+  sentAt: string
+  status: string
+  respondedBy?: string | null
+  externalMessageId?: string | null
+  attachmentName?: string | null
+  originalLink?: string | null
+  replied?: boolean
+}
+
+export interface TaskDTO {
+  id: string
+  title: string
+  description?: string | null
+  status: string
+  priority: Priority
+  type: string
+  dueDate?: string | null
+  assigneeId: string
+  assigneeName?: string | null
+  assigneeColor?: string | null
+  opportunityId?: string | null
+  opportunityTitle?: string | null
+  companyName?: string | null
+  completedAt?: string | null
+  createdAt: string
+}
+
+export interface NoteDTO {
+  id: string
+  body: string
+  authorId: string
+  authorName: string
+  authorColor: string
+  visibility: string
+  createdAt: string
 }
 
 export interface MilestoneDTO {
-  id: string;
-  title: string;
-  orderIdx: number;
-  weight: number;
-  status: "PENDING" | "IN_PROGRESS" | "DONE";
-  dueDate?: string | null;
-  doneAt?: string | null;
+  id: string
+  name: string
+  stepOrder: number
+  status: string
+  dueDate?: string | null
 }
 
 export interface ProjectDTO {
-  id: string;
-  code: string;
-  name: string;
-  brand: string;
-  status: ProjectStatus;
-  progress: number;
-  budget: number;
-  managerName?: string | null;
-  startDate?: string | null;
-  dueDate?: string | null;
-  companyName?: string | null;
-  leadCode?: string | null;
-  quotationNumber?: string | null;
-  billedAmount: number; // total invoice terkait proyek
-  milestones: MilestoneDTO[];
-  deliverables: DeliverableDTO[]; // file produksi / link Google Drive
-  brief?: { code: string; title: string; objective: string; deliverables: string; deadline?: string | null } | null;
+  id: string
+  name: string
+  code: string
+  status: string
+  progress: number
+  workflowType: string
+  budget: number
+  brandId: string
+  brandName: string
+  brandColor: string
+  companyId: string
+  companyName: string
+  managerName?: string | null
+  opportunityCode: string
+  startDate?: string | null
+  endDate?: string | null
+  milestones: MilestoneDTO[]
 }
 
-export interface PipelineStageStat {
-  stage: LeadStage;
-  count: number;
-  value: number; // akumulasi estValue
-  pctOfWon: number; // konversi terhadap total lead masuk (won+lost)
+export interface OpportunityDetailDTO extends OpportunityDTO {
+  interactions: InteractionDTO[]
+  tasks: TaskDTO[]
+  notes: NoteDTO[]
+  related: OpportunityDTO[]
+  projects: ProjectDTO[]
 }
 
-export interface PipelineStats {
-  stages: PipelineStageStat[];
-  totalOpen: number;
-  totalValueOpen: number;
-  wonCount: number;
-  wonValue: number;
-  lostCount: number;
-  conversionPct: number; // won / (won+lost)
-  avgDealSize: number;
+export interface DashboardDTO {
+  kpis: {
+    totalOpenLeads: number
+    newThisWeek: number
+    unreadInbound: number
+    pipelineValue: number
+    weightedPipeline: number
+    winRate: number
+    avgResponseHours: number
+    avgSalesCycleDays: number
+    forecast30: number
+    forecast60: number
+    forecast90: number
+    overdueTasks: number
+    activeProjects: number
+  }
+  leadsByBrand: { brandId: string; name: string; color: string; count: number; value: number }[]
+  leadsByChannel: { channel: string; count: number }[]
+  leadsByCountry: { country: string; count: number }[]
+  funnel: { stage: Stage; count: number; value: number }[]
+  lostReasons: { reason: string; count: number }[]
+  wonLost: { won: number; lost: number }
+  marketingPerf: { userId: string; name: string; color: string; open: number; won: number; lost: number; avgResponseHours: number }[]
+  upcomingTasks: TaskDTO[]
+  recentInteractions: InteractionDTO[]
+  topCompanies: { companyId: string; name: string; country: string; openOpps: number; totalValue: number }[]
+  projectsStatus: { status: string; count: number }[]
+  /** Fase 3 — lead belum dibalas melewati SLA jam brand (stage NEW/CONTACT_ATTEMPTED), terlama dulu */
+  slaBreaches: {
+    opportunityId: string
+    code: string
+    title: string
+    companyName: string
+    brandName: string
+    brandColor: string
+    ownerName?: string | null
+    /** R14 — id pemilik opp (eskalasi tak perlu resolve via users store lagi) */
+    ownerId?: string | null
+    slaHours: number
+    waitingHours: number
+    waitingSince: string
+  }[]
 }
 
-export interface PipelineLeadDTO extends LeadDTO {
-  stage: LeadStage;
-  estValue: number;
-  quotationCount?: number;
+export interface AuditLogDTO {
+  id: string
+  userName?: string | null
+  action: string
+  entityType: string
+  entityId?: string | null
+  entityLabel?: string | null
+  oldValue?: string | null
+  newValue?: string | null
+  ip?: string | null
+  userAgent?: string | null
+  createdAt: string
 }
 
-export interface FinanceStats {
-  revenuePaid: number; // total pembayaran masuk
-  outstanding: number; // belum dibayar (termasuk sebagian)
-  overdueCount: number;
-  invoiceCount: number;
-  quotationCount: number;
-  quotationApprovedPct: number;
-  monthly: { month: string; label: string; revenue: number; invoiced: number }[]; // 6 bulan terakhir
-  byBrand: { brand: string; revenue: number; outstanding: number }[];
-  statusBreakdown: { status: InvoiceStatus; count: number; amount: number }[];
+export interface TemplateDTO {
+  id: string
+  brandId: string
+  name: string
+  step: number
+  delayDays: number
+  channel: string
+  language: string
+  subject?: string | null
+  body: string
+  purpose?: string | null
+  isActive: boolean
 }
 
-export interface ProductionStats {
-  totalProjects: number;
-  activeCount: number; // belum DONE
-  doneCount: number;
-  avgProgress: number;
-  milestoneDonePct: number;
-  byStatus: { status: ProjectStatus; count: number }[];
-  monthly: { month: string; label: string; completed: number; started: number }[]; // 6 bulan terakhir
-  byBrand: { brand: string; active: number; done: number; budget: number }[];
+export interface DuplicateCandidate {
+  contactA: ContactDTO
+  contactB: ContactDTO
+  matchType: 'EMAIL' | 'WHATSAPP' | 'PHONE'
+  matchValue: string
 }
 
-/** Gabungan keuangan + produksi — "bagan keuangan dan produksi bekerja sama". */
-export interface OverviewStats {
-  monthly: { month: string; label: string; revenue: number; projectsCompleted: number; leadsWon: number }[];
-  perBrand: { brand: string; revenue: number; activeProjects: number; doneProjects: number; pipelineValue: number }[];
-  totals: { revenue: number; projectsDone: number; projectsActive: number; pipelineValue: number; avgProjectValue: number };
+/* ============ FASE 2 — Quotations, Invoices, Payments ============ */
+
+export type QuotationStatus = 'DRAFT' | 'SENT' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED'
+export type InvoiceStatus = 'UNPAID' | 'PARTIAL' | 'PAID' | 'CANCELLED'
+
+export interface QuotationItemDTO {
+  id: string
+  description: string
+  qty: number
+  unitPrice: number
+  sortOrder: number
+  lineTotal: number
 }
 
-export interface PortalSummaryDTO {
-  company: { name: string } | null;
-  projects: ProjectDTO[];
-  invoices: InvoiceDTO[];
-  quotations: QuotationDTO[];
+export interface QuotationDTO {
+  id: string
+  code: string
+  title: string
+  status: QuotationStatus
+  version: number
+  currency: string
+  subtotal: number
+  discountPct: number
+  discountAmount: number
+  taxPct: number
+  taxAmount: number
+  total: number
+  validUntil?: string | null
+  notes?: string | null
+  discountApprovedById?: string | null
+  discountApprovedByName?: string | null
+  discountApprovedAt?: string | null
+  sentAt?: string | null
+  decidedAt?: string | null
+  createdById: string
+  createdByName?: string | null
+  createdAt: string
+  opportunityId: string
+  opportunityCode: string
+  opportunityTitle: string
+  opportunityStage: string
+  brandId: string
+  brandName: string
+  brandColor: string
+  companyId: string
+  companyName: string
+  itemsCount: number
 }
 
-export const SLA_KEY = "firstResponseSlaHours";
-
-/** Skor awal per kanal — chat personal dinilai lebih hangat daripada form pasif. */
-export const CHANNEL_BASE_SCORE: Record<ChannelType | "manual", number> = {
-  whatsapp: 35,
-  instagram: 30,
-  email: 25,
-  web: 20,
-  manual: 15,
-};
-
-// ============ IDENTITAS BRAND & DOKUMEN ============
-
-/** Profil identitas brand — dipakai kop surat dokumen (penawaran, brief, invoice). */
-export interface BrandProfileDTO {
-  brand: string; // unimasi | segia | erfo | unicam
-  name: string;
-  tagline: string;
-  logoUrl: string | null; // null = belum ada logo (fallback monogram)
-  address: string;
-  phone: string;
-  email: string;
-  instagram: string; // akun IG resmi brand (mis. @unimasi.id) — dipakai kop surat & identifikasi kanal lead
-  website: string;
-  primaryColor: string; // hex
-  letterheadNote: string; // baris legal di bawah kop
-  footerNote: string; // teks footer dokumen
-  bankInfo: string; // rekening pembayaran
+export interface QuotationDetailDTO extends QuotationDTO {
+  items: QuotationItemDTO[]
 }
 
-/** Jenis dokumen terformat yang bisa dicetak dengan kop brand. */
-export type BrandDocType = "QUOTATION" | "BRIEF";
-
-// ============ SECURE LINK (DISTRIBUSI DOKUMEN AMAN) ============
-
-/** Target dokumen yang bisa dibagikan via tautan aman + password. */
-export type SecureTargetType = "QUOTATION" | "BRIEF" | "DELIVERABLE";
-
-export const SECURE_TARGET_LABEL: Record<SecureTargetType, string> = {
-  QUOTATION: "Surat Penawaran",
-  BRIEF: "Brief Proyek",
-  DELIVERABLE: "File Produksi",
-};
-
-export interface SecureLinkDTO {
-  id: string;
-  token: string;
-  /** Relative URL halaman publik: /s/<token> */
-  url: string;
-  title: string;
-  targetType: SecureTargetType;
-  targetId: string;
-  /** Label pendek target (mis. QT-0004, BRF-0002, nama file). */
-  targetLabel?: string | null;
-  leadId?: string | null;
-  projectId?: string | null;
-  brand: string;
-  active: boolean;
-  expiresAt?: string | null;
-  accessCount: number;
-  lastAccessAt?: string | null;
-  createdByName?: string | null;
-  createdAt: string;
+export interface PaymentDTO {
+  id: string
+  amount: number
+  method: string
+  reference?: string | null
+  paidAt: string
+  note?: string | null
+  recordedByName?: string | null
 }
 
-export interface SecureLinkCreateInput {
-  targetType: SecureTargetType;
-  targetId: string;
-  title?: string;
-  leadId?: string;
-  projectId?: string;
-  brand?: string;
-  /** Kosongkan → password dibuat otomatis sistem. */
-  password?: string;
-  /** null/undefined = tanpa kedaluwarsa; angka = hari. */
-  expiresInDays?: number | null;
+export interface InvoiceDTO {
+  id: string
+  code: string
+  title: string
+  status: InvoiceStatus
+  currency: string
+  amount: number
+  taxPct: number
+  total: number
+  paidAmount: number
+  dueDate?: string | null
+  issuedAt: string
+  notes?: string | null
+  opportunityId: string
+  opportunityCode: string
+  opportunityTitle: string
+  projectId?: string | null
+  projectCode?: string | null
+  brandId: string
+  brandName: string
+  brandColor: string
+  companyId: string
+  companyName: string
+  payments: PaymentDTO[]
+  createdAt: string
 }
 
-/** Payload dokumen yang dirender halaman publik /s/<token> setelah password benar. */
-export interface SecureAccessResult {
-  title: string;
-  docLabel: string;
-  docNumber: string;
-  dateIso: string;
-  senderName?: string | null;
-  toName?: string | null;
-  toCompany?: string | null;
-  showBankInfo: boolean;
-  brand: BrandProfileDTO;
-  kind: SecureTargetType;
-  quotation?: QuotationDTO | null;
-  brief?: BriefDTO | null;
-  deliverable?: {
-    name: string;
-    type: DeliverableType;
-    fileName?: string | null;
-    mimeType?: string | null;
-    sizeLabel?: string | null;
-    note?: string | null;
-    /** Untuk FILE: endpoint unduhan aman (perlu cookie grant). */
-    downloadUrl?: string | null;
-    /** Untuk LINK: URL eksternal (Google Drive dsb). */
-    externalUrl?: string | null;
-  } | null;
+export interface FinanceSummaryDTO {
+  outstandingTotal: number
+  overdueTotal: number
+  overdueCount: number
+  paidThisMonth: number
+  invoicedTotal: number
+  unpaidCount: number
+  aging: { bucket: string; count: number; value: number }[]
+  byBrand: { brandId: string; name: string; color: string; invoiced: number; paid: number; outstanding: number }[]
+  recentPayments: (PaymentDTO & { invoiceCode: string; invoiceTitle: string; companyName: string })[]
 }
 
-// ============ ATURAN SKOR LEAD (transparansi funnel) ============
+/* ============ FASE 2 — Brief & Estimation ============ */
 
-/** Satu aturan skor — dipakai kartu penjelasan "Bagaimana skor terbentuk?". */
-export interface ScoreRule {
-  label: string;
-  detail: string;
-  points: string;
+export interface BriefDTO {
+  id?: string
+  opportunityId: string
+  serviceScope?: string | null
+  objectives?: string | null
+  targetAudience?: string | null
+  keyMessages?: string | null
+  deliverables?: string | null
+  timeline?: string | null
+  references?: string | null
+  budgetRange?: string | null
+  constraints?: string | null
+  status: 'DRAFT' | 'FINAL'
+  preparedById?: string | null
+  preparedByName?: string | null
+  updatedAt?: string | null
 }
 
-export const SCORE_RULES: ScoreRule[] = [
-  { label: "Basis kanal", detail: "Chat personal dinilai lebih hangat daripada form pasif: WhatsApp 35, Instagram 30, Email 25, Form Web 20, Input Manual 15.", points: "15–35" },
-  { label: "Pesan masuk lanjutan", detail: "Setiap pesan berikutnya dari lead (+5) hingga maksimal +25 — tanda engagement/serius.", points: "+5 / pesan (maks +25)" },
-  { label: "Sales membalas", detail: "Setiap balasan internal dari tim (+5, maks 100) — interaksi dua arah menaikkan kualitas.", points: "+5 / balasan" },
-  { label: "Penawaran disetujui", detail: "Lead Menang (WON) langsung dikunci ke skor 100 dan masuk produksi.", points: "= 100" },
-];
+export type EstimationCategory =
+  | 'INTERNAL' | 'FREELANCE' | 'EQUIPMENT' | 'TRANSPORT' | 'ACCOMMODATION'
+  | 'TALENT' | 'LOCATION' | 'SOFTWARE' | 'HOSTING' | 'OTHER'
 
+export interface EstimationItemDTO {
+  id?: string
+  category: EstimationCategory
+  description: string
+  qty: number
+  unit: string
+  unitCost: number
+  days?: number | null
+  lineTotal: number
+  sortOrder: number
+}
+
+export interface EstimationDTO {
+  id: string
+  opportunityId: string
+  currency: string
+  status: 'DRAFT' | 'FINAL'
+  internalCost: number
+  externalCost: number
+  subtotalCost: number
+  contingencyPct: number
+  contingencyAmount: number
+  managementFeePct: number
+  managementFeeAmount: number
+  totalCost: number
+  targetMarginPct: number
+  sellingPrice: number
+  taxPct: number
+  taxAmount: number
+  priceWithTax: number
+  notes?: string | null
+  createdById?: string | null
+  createdByName?: string | null
+  createdAt: string
+  updatedAt: string
+  items: EstimationItemDTO[]
+  /** Nilai referensi margin: total quotation terakhir (SENT/ACCEPTED) atau estimatedValue opportunity */
+  referenceValue: number
+  referenceSource: 'QUOTATION' | 'OPPORTUNITY' | 'NONE'
+  /** Margin aktual vs referenceValue: (reference - totalCost) / reference */
+  actualMarginAmount: number
+  actualMarginPct: number
+  /** Selisih harga jual estimasi vs nilai referensi */
+  priceGap: number
+}
+
+export interface EstimationSaveInput {
+  currency?: string
+  status?: 'DRAFT' | 'FINAL'
+  items: Array<Pick<EstimationItemDTO, 'category' | 'description' | 'qty' | 'unit' | 'unitCost' | 'days'>>
+  contingencyPct?: number
+  managementFeePct?: number
+  taxPct?: number
+  targetMarginPct?: number
+  notes?: string | null
+}
+
+/* ============ FASE 2 — Client Portal (read-only per company) ============ */
+
+export interface PortalProjectDTO {
+  id: string
+  code: string
+  name: string
+  status: string
+  progress: number
+  workflowType: string
+  brandName: string
+  brandColor: string
+  managerName?: string | null
+  startDate?: string | null
+  endDate?: string | null
+  milestones: MilestoneDTO[]
+}
+
+export interface PortalQuotationDTO {
+  id: string
+  code: string
+  title: string
+  status: QuotationStatus
+  version: number
+  currency: string
+  subtotal: number
+  discountPct: number
+  discountAmount: number
+  taxPct: number
+  taxAmount: number
+  total: number
+  validUntil?: string | null
+  sentAt?: string | null
+  decidedAt?: string | null
+  createdAt: string
+  brandName: string
+  brandColor: string
+  items: { id: string; description: string; qty: number; unitPrice: number; lineTotal: number }[]
+}
+
+export interface PortalInvoiceDTO {
+  id: string
+  code: string
+  title: string
+  status: InvoiceStatus
+  currency: string
+  amount: number
+  taxPct: number
+  total: number
+  paidAmount: number
+  dueDate?: string | null
+  issuedAt: string
+  brandName: string
+  brandColor: string
+  projectCode?: string | null
+  payments: { id: string; amount: number; method: string; paidAt: string; reference?: string | null }[]
+}
+
+export interface PortalDTO {
+  company: {
+    id: string
+    name: string
+    industry?: string | null
+    country: string
+    city?: string | null
+    contacts: { id: string; name: string; position?: string | null; email?: string | null; phone?: string | null }[]
+  }
+  projects: PortalProjectDTO[]
+  quotations: PortalQuotationDTO[]
+  invoices: PortalInvoiceDTO[]
+  summary: {
+    activeProjects: number
+    openQuotations: number      // SENT menunggu keputusan
+    outstandingTotal: number    // sisa tagihan (semua invoice non-CANCELLED)
+    nextDueDate?: string | null // jatuh tempo terdekat invoice outstanding
+  }
+}
+
+/* ---------------- Notification center (R10) ---------------- */
+
+export type NotificationType =
+  | 'SLA'            // lead NEW/CONTACT_ATTEMPTED melewati SLA respons brand
+  | 'APPROVAL'       // quotation menunggu persetujuan diskon
+  | 'INVOICE_DUE'    // invoice jatuh tempo / lewat tempo dengan sisa tagihan
+  | 'TASK_DUE'       // task milik saya overdue / jatuh tempo ≤48 jam
+  | 'QUOTATION_EXPIRY' // quotation SENT mendekati masa berlaku habis (≤7 hari)
+  | 'PORTAL_COMMENT' // R12: komentar/keputusan baru dari client portal (belum ditindaklanjuti staff)
+
+export type NotificationSeverity = 'critical' | 'warning' | 'info'
+
+export interface NotificationDTO {
+  /** key stabil utk dedup + mark-as-read di sisi client (localStorage) */
+  key: string
+  type: NotificationType
+  severity: NotificationSeverity
+  title: string
+  description: string
+  /** meta angka tambahan, sudah diformat ringkas (mis. "7,6 jam / SLA 4 jam") */
+  metric?: string
+  opportunityId?: string | null
+  /** view tujuan saat item diklik */
+  targetView: 'inbox' | 'pipeline' | 'quotations' | 'finance' | 'followup'
+  createdAt: string
+}
+
+export interface NotificationsResponseDTO {
+  items: NotificationDTO[]
+  counts: { total: number; critical: number }
+}
+
+/* ============ R11 — Portal actions (decision + comments) & conversation analytics ============ */
+
+export type PortalCommentEntity = 'QUOTATION' | 'INVOICE' | 'PROJECT'
+
+export interface PortalCommentDTO {
+  id: string
+  entityType: PortalCommentEntity
+  entityId: string
+  userName: string
+  userRole: string
+  /** true bila penulis adalah user role CLIENT (menentukan posisi bubble chat) */
+  isClient: boolean
+  body: string
+  createdAt: string
+}
+
+export interface PortalDecisionResultDTO {
+  quotation: PortalQuotationDTO
+  message: string
+}
+
+/** Analitik percakapan omnichannel (Fase 3 awal) — role internal saja */
+export interface ConversationAnalyticsDTO {
+  generatedAt: string
+  kpi: {
+    /** opportunity dengan ≥1 interaksi dalam 90 hari terakhir */
+    totalConversations: number
+    /** rata-rata jam dari interaksi IN pertama → OUT pertama per opportunity */
+    avgFirstResponseHours: number | null
+    medianFirstResponseHours: number | null
+    /** % opportunity dengan first response ≤ SLA brand (fallback 24 jam) */
+    slaCompliancePct: number | null
+    /** percakapan aktif (stage bukan WON/LOST) yang pesan terakhirnya IN dan belum dibalas */
+    unansweredNow: number
+  }
+  perBrand: {
+    brandId: string
+    brandName: string
+    brandColor: string
+    firstResponseHours: number | null
+    slaPct: number | null
+    interactions: number
+  }[]
+  perMarketer: {
+    userId: string
+    userName: string
+    avatarColor?: string | null
+    replies: number
+    avgResponseHours: number | null
+  }[]
+  channelMix: { channel: string; count: number }[]
+  /** 8 minggu terakhir, inbound = interaksi IN, outbound = interaksi OUT */
+  weekly: { weekStart: string; label: string; inbound: number; outbound: number }[]
+}
+
+/* ============ R13 — Conversation list (server-side) & AI summary (Phase 4) ============ */
+
+/** Baris daftar percakapan inbox — digroup server-side agar preview/lastMessage akurat */
+export interface ConversationListItemDTO {
+  opportunityId: string
+  opportunityCode: string
+  opportunityTitle: string
+  stage: string
+  contactName: string
+  companyName?: string | null
+  brandId?: string | null
+  brandName: string
+  brandColor: string
+  lastDirection: 'IN' | 'OUT'
+  /** body pesan terakhir, dipotong server ~140 char */
+  lastBody: string
+  lastSentAt: string
+  lastChannel: string
+  /** jumlah interaksi dalam window analisis (60 hari) */
+  messageCount: number
+  /** pesan terakhir IN & stage aktif (belum ditutup) */
+  unanswered: boolean
+  /** jam kelebihan SLA bila breach, null bila tidak */
+  slaOverHours?: number | null
+  /** SLA jam brand (fallback 24) — utk tooltip chip */
+  slaHours?: number | null
+  /** slaOverHours > slaHours → eskalasi 2× SLA */
+  escalated: boolean
+  ownerName?: string | null
+}
+
+export type AiSentiment = 'POSITIVE' | 'NEUTRAL' | 'NEGATIVE' | 'MIXED'
+
+export interface OpportunityAiSummaryDTO {
+  generatedAt: string
+  /** ringkasan 2-4 kalimat kondisi deal */
+  summary: string
+  sentiment: AiSentiment
+  interests: string[]
+  risks: string[]
+  /** 2-3 aksi lanjutan yang disarankan */
+  suggestedActions: string[]
+  /** draft pesan balasan siap kirim (ID, sopan, singkat) */
+  suggestedFollowUp?: string | null
+  messageCount: number
+  model: string
+}
+
+/* ============ R14 — Briefing Pagi (AI digest) & Proyeksi Forecast ============ */
+
+/** Satu item prioritas dalam briefing pagi — diklik → buka drawer opportunity bila opportunityId ada. */
+export interface BriefingPriorityItemDTO {
+  title: string
+  reason: string
+  action: string
+  /** SLA | LEAD | TASK | QUOTATION | INVOICE | OTHER */
+  source: string
+  opportunityId?: string | null
+}
+
+/** Statistik mini briefing — tone menentukan warna chip (default/good/warn/bad). */
+export interface BriefingStatDTO {
+  label: string
+  value: string
+  tone: 'default' | 'good' | 'warn' | 'bad'
+}
+
+/** Digest pagi AI — digenerate dari snapshot kondisi CRM saat ini (cache server 10 menit). */
+export interface BriefingDTO {
+  greeting: string
+  headline: string
+  priorities: BriefingPriorityItemDTO[]
+  risks: string[]
+  focus: string
+  stats: BriefingStatDTO[]
+  /** angka mentah dasar briefing (transparansi — user bisa cek sumber) */
+  basis: {
+    slaBreaches: number
+    hotLeads: number
+    unanswered: number
+    tasksDue: number
+    quotationsAwaiting: number
+    invoicesOverdue: number
+  }
+  generatedAt: string
+  model: string
+  /** true bila disajikan dari cache server (≤10 menit) */
+  cached: boolean
+}
+
+/** Satu deal dalam proyeksi — weight = blended probability (60% stage + 40% lead score). */
+export interface ForecastDealDTO {
+  opportunityId: string
+  code: string
+  title: string
+  companyName: string
+  brandName: string
+  brandColor: string
+  ownerName: string
+  stage: Stage
+  value: number
+  currency: string
+  /** 0-1, sudah di-clamp 0.05-0.95 */
+  weight: number
+  weightedValue: number
+  score: number
+  grade: 'A' | 'B' | 'C' | 'D'
+  /** expectedCloseDate ?? createdAt+45 hari (fallback) — ISO */
+  expectedClose: string | null
+}
+
+/** Proyeksi pipeline berbobot — penjumlahan hanya IDR (non-IDR dilaporkan terpisah). */
+export interface ForecastDTO {
+  scenarios: { conservative: number; realistic: number; optimistic: number }
+  /** 6 bulan ke depan mulai bulan berjalan — bucket by expectedClose (fallback createdAt+45d) */
+  monthly: { month: string; label: string; count: number; total: number; weighted: number }[]
+  byBrand: { brandId: string; name: string; color: string; count: number; total: number; weighted: number }[]
+  topDeals: ForecastDealDTO[]
+  baseline: { won90dCount: number; won90dValue: number; winRate: number; avgDealSize: number }
+  /** deal non-IDR tidak masuk penjumlahan (mata uang tercampur = menyesatkan) */
+  excludedNonIdr: { currency: string; count: number; total: number }[]
+  openDealsCount: number
+  generatedAt: string
+}

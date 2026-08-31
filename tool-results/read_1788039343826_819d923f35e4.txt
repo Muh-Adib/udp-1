@@ -1,0 +1,1102 @@
+     1→/* ============ Finance View — Invoice, Pembayaran & Aging ============ */
+     2→'use client'
+     3→
+     4→import React, { useCallback, useEffect, useMemo, useState } from 'react'
+     5→import { crmApi, financeApi } from './api-client'
+     6→import { useCrmStore } from './crm-store'
+     7→import { useToast } from '@/hooks/use-toast'
+     8→import { BrandChip, EmptyState, LoadingRows, RefreshButton, SectionHeader, downloadCsv } from './shared'
+     9→import { PrintOverlay, InvoicePrintBody } from './print-document'
+    10→import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+    11→import { Badge } from '@/components/ui/badge'
+    12→import { Button } from '@/components/ui/button'
+    13→import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+    14→import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+    15→import { Input } from '@/components/ui/input'
+    16→import { Textarea } from '@/components/ui/textarea'
+    17→import { Label } from '@/components/ui/label'
+    18→import { Progress } from '@/components/ui/progress'
+    19→import { Separator } from '@/components/ui/separator'
+    20→import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+    21→import { Skeleton } from '@/components/ui/skeleton'
+    22→import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+    23→import { daysUntil, formatDate, formatMoney, timeAgo } from '@/lib/crm-constants'
+    24→import type { FinanceSummaryDTO, InvoiceDTO, InvoiceStatus, OpportunityDTO, QuotationDTO } from '@/lib/crm-types'
+    25→import { cn } from '@/lib/utils'
+    26→import {
+    27→  AlarmClock, AlertCircle, ArrowUpRight, BarChart3, Ban, Building2, CalendarClock,
+    28→  CheckCircle2, Download, Eye, FileText, Loader2, Plus, Printer, ReceiptText, Search, TrendingUp, Wallet,
+    29→} from 'lucide-react'
+    30→
+    31→/* ---------------- Local metadata ---------------- */
+    32→const INVOICE_STATUS_META: Record<InvoiceStatus, { label: string; cls: string }> = {
+    33→  UNPAID: { label: 'Belum Dibayar', cls: 'bg-amber-100 text-amber-700' },
+    34→  PARTIAL: { label: 'Sebagian', cls: 'bg-orange-100 text-orange-700' },
+    35→  PAID: { label: 'Lunas', cls: 'bg-emerald-100 text-emerald-700' },
+    36→  CANCELLED: { label: 'Dibatalkan', cls: 'bg-slate-100 text-slate-500 line-through' },
+    37→}
+    38→const statusLabel = (s: InvoiceStatus) => INVOICE_STATUS_META[s]?.label ?? s
+    39→
+    40→const PAYMENT_METHODS: { key: string; label: string }[] = [
+    41→  { key: 'TRANSFER', label: 'Transfer Bank' },
+    42→  { key: 'CASH', label: 'Tunai' },
+    43→  { key: 'QRIS', label: 'QRIS' },
+    44→  { key: 'OTHER', label: 'Lainnya' },
+    45→]
+    46→const methodLabel = (key: string) => PAYMENT_METHODS.find(m => m.key === key)?.label ?? key
+    47→
+    48→const AGING_ORDER = ['0-30', '31-60', '61-90', '>90']
+    49→const AGING_META: Record<string, { label: string; bar: string; text: string; tint: string }> = {
+    50→  '0-30': { label: '0–30 hari', bar: '[&>div]:bg-rose-300', text: 'text-rose-600', tint: 'bg-rose-50/60' },
+    51→  '31-60': { label: '31–60 hari', bar: '[&>div]:bg-rose-400', text: 'text-rose-600', tint: 'bg-rose-50' },
+    52→  '61-90': { label: '61–90 hari', bar: '[&>div]:bg-rose-500', text: 'text-rose-700', tint: 'bg-rose-100/70' },
+    53→  '>90': { label: '>90 hari', bar: '[&>div]:bg-rose-600', text: 'text-rose-700', tint: 'bg-rose-100' },
+    54→}
+    55→
+    56→const localISO = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    57→const todayISO = () => localISO(new Date())
+    58→const todayPlus30ISO = () => { const d = new Date(); d.setDate(d.getDate() + 30); return localISO(d) }
+    59→
+    60→const isOverdue = (inv: InvoiceDTO) =>
+    61→  !!inv.dueDate && (daysUntil(inv.dueDate) ?? 0) < 0 && inv.total - inv.paidAmount > 0 && inv.status !== 'CANCELLED'
+    62→
+    63→/* ---------------- Local atoms ---------------- */
+    64→function StatusBadge({ status }: { status: InvoiceStatus }) {
+    65→  const meta = INVOICE_STATUS_META[status]
+    66→  return <span className={cn('inline-flex whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11px] font-semibold', meta.cls)}>{meta.label}</span>
+    67→}
+    68→
+    69→function MethodChip({ method }: { method: string }) {
+    70→  return <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">{methodLabel(method)}</span>
+    71→}
+    72→
+    73→function DetailField({ label, value }: { label: string; value: React.ReactNode }) {
+    74→  return (
+    75→    <div className="min-w-0">
+    76→      <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400">{label}</p>
+    77→      <p className="mt-0.5 break-words text-sm text-slate-800">{value ?? '—'}</p>
+    78→    </div>
+    79→  )
+    80→}
+    81→
+    82→function KpiCard({ label, value, sub, icon: Icon, bgCls, iconCls, alertRing, accentCls = 'bg-slate-300' }: {
+    83→  label: string; value: string; sub?: string; icon: React.ElementType; bgCls: string; iconCls: string; alertRing?: boolean; accentCls?: string
+    84→}) {
+    85→  return (
+    86→    <Card className={cn('card-hover relative overflow-hidden rounded-xl border-slate-200 shadow-sm', alertRing && 'border-rose-200 ring-2 ring-rose-200')}>
+    87→      {/* Aksen strip tipis di sisi atas — warna semantik (amber/rose/emerald/slate) */}
+    88→      <span aria-hidden className={cn('absolute left-1/2 top-0 h-[2px] w-12 -translate-x-1/2 rounded-full', accentCls)} />
+    89→      <CardContent className="flex items-center gap-3 p-4">
+    90→        <div className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-lg', bgCls)}>
+    91→          <Icon className={cn('h-5 w-5', iconCls)} />
+    92→        </div>
+    93→        <div className="min-w-0">
+    94→          <p className="truncate text-[11px] text-slate-500">{label}</p>
+    95→          <p className="truncate text-lg font-bold leading-tight text-slate-900 tabular-nums">{value}</p>
+    96→          {sub && <p className={cn('truncate text-[11px]', alertRing ? 'font-medium text-rose-600' : 'text-slate-400')}>{sub}</p>}
+    97→        </div>
+    98→      </CardContent>
+    99→    </Card>
+   100→  )
+   101→}
+   102→
+   103→/* ---------------- Invoice row ---------------- */
+   104→function InvoiceRow({ inv, onPay, onDetail }: { inv: InvoiceDTO; onPay: (inv: InvoiceDTO) => void; onDetail: (inv: InvoiceDTO) => void }) {
+   105→  const overdue = isOverdue(inv)
+   106→  const pct = inv.total > 0 ? Math.min(100, Math.max(0, (inv.paidAmount / inv.total) * 100)) : 0
+   107→  const canPay = inv.status !== 'PAID' && inv.status !== 'CANCELLED'
+   108→  return (
+   109→    <div className="flex flex-col gap-3 p-4 transition-colors hover:bg-slate-50/70 md:flex-row md:items-center md:gap-5">
+   110→      {/* Kiri: identitas */}
+   111→      <div className="min-w-0 flex-1">
+   112→        <div className="flex flex-wrap items-center gap-2">
+   113→          <span className="font-mono text-[11px] text-slate-400">{inv.code}</span>
+   114→          <BrandChip name={inv.brandName} color={inv.brandColor} size="xs" />
+   115→          {overdue && <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-semibold text-rose-700">Lewat jatuh tempo</span>}
+   116→        </div>
+   117→        <p className="mt-0.5 truncate text-sm font-semibold text-slate-900">{inv.title}</p>
+   118→        <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-slate-500">
+   119→          <span className="inline-flex items-center gap-1"><Building2 className="h-3 w-3" />{inv.companyName}</span>
+   120→          {inv.dueDate && (
+   121→            <span className={cn('inline-flex items-center gap-1', overdue ? 'font-semibold text-rose-600' : 'text-slate-500')}>
+   122→              <CalendarClock className="h-3 w-3" />
+   123→              Jatuh tempo {formatDate(inv.dueDate)}
+   124→            </span>
+   125→          )}
+   126→        </div>
+   127→      </div>
+   128→
+   129→      {/* Tengah: progres pembayaran */}
+   130→      <div className="w-full shrink-0 md:w-60">
+   131→        <div className="flex items-center justify-between gap-2 text-[11px]">
+   132→          <span className="truncate text-slate-500 tabular-nums">
+   133→            Terbayar <span className="font-semibold text-slate-700">{formatMoney(inv.paidAmount, inv.currency, true)}</span>
+   134→            {' '}/ {formatMoney(inv.total, inv.currency, true)}
+   135→          </span>
+   136→          <Badge variant="outline" className="h-4 shrink-0 px-1.5 text-[10px] font-medium text-slate-500">{inv.payments.length}× bayar</Badge>
+   137→        </div>
+   138→        <Progress value={pct} className="mt-1.5 h-1.5 bg-slate-100 [&>div]:bg-emerald-500" />
+   139→      </div>
+   140→
+   141→      {/* Kanan: status + aksi */}
+   142→      <div className="flex items-center gap-2 md:justify-end">
+   143→        <StatusBadge status={inv.status} />
+   144→        <Button
+   145→          size="sm"
+   146→          className="h-8 gap-1.5 bg-teal-600 text-white hover:bg-teal-700"
+   147→          disabled={!canPay}
+   148→          title={canPay ? 'Catat pembayaran untuk invoice ini' : 'Invoice lunas / dibatalkan'}
+   149→          onClick={() => onPay(inv)}
+   150→        >
+   151→          <Wallet className="h-3.5 w-3.5" />
+   152→          <span className="hidden sm:inline">Catat Pembayaran</span>
+   153→          <span className="sm:hidden">Bayar</span>
+   154→        </Button>
+   155→        <Button
+   156→          size="icon"
+   157→          variant="ghost"
+   158→          className="h-8 w-8 text-slate-400 hover:text-slate-700"
+   159→          aria-label={`Lihat detail invoice ${inv.code}`}
+   160→          title="Lihat detail"
+   161→          onClick={() => onDetail(inv)}
+   162→        >
+   163→          <Eye className="h-4 w-4" />
+   164→        </Button>
+   165→      </div>
+   166→    </div>
+   167→  )
+   168→}
+   169→
+   170→/* ================================================================ */
+   171→export default function FinanceView() {
+   172→  const { toast } = useToast()
+   173→  const user = useCrmStore((s) => s.user)
+   174→  const brands = useCrmStore((s) => s.brands)
+   175→  const openOpportunity = useCrmStore((s) => s.openOpportunity)
+   176→  const canCreate = !!user && ['SUPER_ADMIN', 'KEUANGAN', 'DIREKTUR'].includes(user.role)
+   177→
+   178→  /* ---- data ---- */
+   179→  const [summary, setSummary] = useState<FinanceSummaryDTO | null>(null)
+   180→  const [invoices, setInvoices] = useState<InvoiceDTO[]>([])
+   181→  const [loading, setLoading] = useState(true)
+   182→  const [error, setError] = useState<string | null>(null)
+   183→
+   184→  /* ---- filter ---- */
+   185→  const [search, setSearch] = useState('')
+   186→  const [statusFilter, setStatusFilter] = useState<InvoiceStatus | 'all'>('all')
+   187→  const [brandFilter, setBrandFilter] = useState<string>('all')
+   188→
+   189→  /* ---- dialog: pembayaran ---- */
+   190→  const [payInv, setPayInv] = useState<InvoiceDTO | null>(null)
+   191→  const [payAmount, setPayAmount] = useState('')
+   192→  const [payMethod, setPayMethod] = useState('TRANSFER')
+   193→  const [payRef, setPayRef] = useState('')
+   194→  const [payDate, setPayDate] = useState(todayISO())
+   195→  const [payNote, setPayNote] = useState('')
+   196→  const [payError, setPayError] = useState<string | null>(null)
+   197→  const [paySubmitting, setPaySubmitting] = useState(false)
+   198→
+   199→  /* ---- dialog: detail ---- */
+   200→  const [detailInv, setDetailInv] = useState<InvoiceDTO | null>(null)
+   201→  const [printInvOpen, setPrintInvOpen] = useState(false)
+   202→  const [cancelArmed, setCancelArmed] = useState(false)
+   203→  const [cancelSubmitting, setCancelSubmitting] = useState(false)
+   204→
+   205→  /* ---- dialog: buat invoice ---- */
+   206→  const [createOpen, setCreateOpen] = useState(false)
+   207→  const [optsLoading, setOptsLoading] = useState(false)
+   208→  const [wonOpps, setWonOpps] = useState<OpportunityDTO[]>([])
+   209→  const [acceptedQuotes, setAcceptedQuotes] = useState<QuotationDTO[]>([])
+   210→  const [fOppId, setFOppId] = useState('none')
+   211→  const [fQuoteId, setFQuoteId] = useState('none')
+   212→  const [fTitle, setFTitle] = useState('')
+   213→  const [fAmount, setFAmount] = useState('')
+   214→  const [fTaxPct, setFTaxPct] = useState('0')
+   215→  const [fDueDate, setFDueDate] = useState('')
+   216→  const [fNotes, setFNotes] = useState('')
+   217→  const [createError, setCreateError] = useState<string | null>(null)
+   218→  const [createSubmitting, setCreateSubmitting] = useState(false)
+   219→
+   220→  /* ---------------- loaders ---------------- */
+   221→  const load = useCallback(async (quiet = false) => {
+   222→    if (!quiet) setLoading(true)
+   223→    try {
+   224→      const [sum, invs] = await Promise.all([financeApi.financeSummary(), financeApi.invoices()])
+   225→      setSummary(sum)
+   226→      setInvoices(invs)
+   227→      setError(null)
+   228→    } catch (e) {
+   229→      setError(e instanceof Error ? e.message : 'Gagal memuat data finance')
+   230→    } finally {
+   231→      if (!quiet) setLoading(false)
+   232→    }
+   233→  }, [])
+   234→
+   235→  useEffect(() => { load() }, [load])
+   236→
+   237→  const applyInvoice = useCallback((updated: InvoiceDTO) => {
+   238→    setInvoices(prev => prev.map(i => (i.id === updated.id ? updated : i)))
+   239→    setDetailInv(prev => (prev && prev.id === updated.id ? updated : prev))
+   240→    setPayInv(prev => (prev && prev.id === updated.id ? updated : prev))
+   241→  }, [])
+   242→
+   243→  const refreshSummary = useCallback(() => {
+   244→    financeApi.financeSummary().then(setSummary).catch(() => { /* senyap — banner error utama sudah menangkap kegagalan load penuh */ })
+   245→  }, [])
+   246→
+   247→  /* ---------------- filter memo ---------------- */
+   248→  const filtered = useMemo(() => {
+   249→    const q = search.trim().toLowerCase()
+   250→    return invoices.filter(inv => {
+   251→      if (statusFilter !== 'all' && inv.status !== statusFilter) return false
+   252→      if (brandFilter !== 'all' && inv.brandId !== brandFilter) return false
+   253→      if (q && !`${inv.code} ${inv.title} ${inv.companyName}`.toLowerCase().includes(q)) return false
+   254→      return true
+   255→    })
+   256→  }, [invoices, search, statusFilter, brandFilter])
+   257→
+   258→  /* ---------------- pembayaran ---------------- */
+   259→  const openPay = useCallback((inv: InvoiceDTO) => {
+   260→    setPayInv(inv)
+   261→    setPayAmount(String(Math.max(0, inv.total - inv.paidAmount)))
+   262→    setPayMethod('TRANSFER')
+   263→    setPayRef('')
+   264→    setPayDate(todayISO())
+   265→    setPayNote('')
+   266→    setPayError(null)
+   267→  }, [])
+   268→
+   269→  const submitPayment = useCallback(async () => {
+   270→    if (!payInv) return
+   271→    const sisa = payInv.total - payInv.paidAmount
+   272→    const amt = Number(payAmount)
+   273→    if (!Number.isFinite(amt) || amt <= 0) {
+   274→      setPayError('Nominal pembayaran harus lebih dari 0')
+   275→      return
+   276→    }
+   277→    if (amt > sisa + 0.001) {
+   278→      setPayError(`Nominal melebihi sisa tagihan (${formatMoney(sisa, payInv.currency)})`)
+   279→      return
+   280→    }
+   281→    setPaySubmitting(true)
+   282→    try {
+   283→      const updated = await financeApi.addPayment(payInv.id, {
+   284→        amount: amt,
+   285→        method: payMethod,
+   286→        reference: payRef.trim() || undefined,
+   287→        paidAt: payDate ? new Date(`${payDate}T00:00:00`).toISOString() : undefined,
+   288→        note: payNote.trim() || undefined,
+   289→      })
+   290→      applyInvoice(updated)
+   291→      refreshSummary()
+   292→      toast({ title: `Pembayaran ${formatMoney(amt, updated.currency, true)} tercatat — status invoice: ${statusLabel(updated.status)}` })
+   293→      setPayInv(null)
+   294→    } catch (e) {
+   295→      setPayError(e instanceof Error ? e.message : 'Gagal mencatat pembayaran')
+   296→    } finally {
+   297→      setPaySubmitting(false)
+   298→    }
+   299→  }, [payInv, payAmount, payMethod, payRef, payDate, payNote, applyInvoice, refreshSummary, toast])
+   300→
+   301→  /* ---------------- detail & batal ---------------- */
+   302→  const openDetail = useCallback((inv: InvoiceDTO) => {
+   303→    setDetailInv(inv)
+   304→    setCancelArmed(false)
+   305→  }, [])
+   306→
+   307→  const submitCancel = useCallback(async () => {
+   308→    if (!detailInv) return
+   309→    setCancelSubmitting(true)
+   310→    try {
+   311→      const updated = await financeApi.updateInvoice(detailInv.id, { status: 'CANCELLED' })
+   312→      applyInvoice(updated)
+   313→      refreshSummary()
+   314→      toast({ title: `Invoice ${updated.code} dibatalkan`, description: 'Status invoice kini Dibatalkan.' })
+   315→      setDetailInv(null)
+   316→    } catch (e) {
+   317→      toast({ title: 'Gagal membatalkan invoice', description: e instanceof Error ? e.message : undefined, variant: 'destructive' })
+   318→    } finally {
+   319→      setCancelSubmitting(false)
+   320→    }
+   321→  }, [detailInv, applyInvoice, refreshSummary, toast])
+   322→
+   323→  /* ---------------- buat invoice ---------------- */
+   324→  const resetCreateForm = useCallback(() => {
+   325→    setFOppId('none')
+   326→    setFQuoteId('none')
+   327→    setFTitle('')
+   328→    setFAmount('')
+   329→    setFTaxPct('0')
+   330→    setFDueDate(todayPlus30ISO())
+   331→    setFNotes('')
+   332→    setCreateError(null)
+   333→  }, [])
+   334→
+   335→  const openCreate = useCallback(() => {
+   336→    resetCreateForm()
+   337→    setWonOpps([])
+   338→    setAcceptedQuotes([])
+   339→    setCreateOpen(true)
+   340→    setOptsLoading(true)
+   341→    Promise.all([crmApi.opportunities('stage=WON'), financeApi.quotations('status=ACCEPTED')])
+   342→      .then(([opps, quotes]) => {
+   343→        setWonOpps(opps.filter(o => o.stage === 'WON'))
+   344→        setAcceptedQuotes(quotes)
+   345→      })
+   346→      .catch(e => toast({
+   347→        title: 'Gagal memuat data deal / quotation',
+   348→        description: e instanceof Error ? e.message : undefined,
+   349→        variant: 'destructive',
+   350→      }))
+   351→      .finally(() => setOptsLoading(false))
+   352→  }, [resetCreateForm, toast])
+   353→
+   354→  const handleOppChange = (v: string) => {
+   355→    setFOppId(v)
+   356→    setCreateError(null)
+   357→    const opp = wonOpps.find(o => o.id === v)
+   358→    if (opp) {
+   359→      if (!fTitle.trim()) setFTitle(opp.title)
+   360→      if (!fAmount.trim() || Number(fAmount) === 0) setFAmount(opp.estimatedValue ? String(opp.estimatedValue) : '')
+   361→    }
+   362→  }
+   363→
+   364→  const handleQuoteChange = (v: string) => {
+   365→    setFQuoteId(v)
+   366→    setCreateError(null)
+   367→    const q = acceptedQuotes.find(x => x.id === v)
+   368→    if (q) {
+   369→      setFAmount(String(q.total))
+   370→      setFTitle(q.title)
+   371→      setFNotes(`Dari quotation ${q.code}`)
+   372→      if (wonOpps.some(o => o.id === q.opportunityId)) setFOppId(q.opportunityId)
+   373→    }
+   374→  }
+   375→
+   376→  const submitCreate = useCallback(async () => {
+   377→    if (fOppId === 'none') { setCreateError('Pilih opportunity (deal Won) terlebih dahulu'); return }
+   378→    if (!fTitle.trim()) { setCreateError('Judul invoice wajib diisi'); return }
+   379→    const amt = Number(fAmount)
+   380→    if (!Number.isFinite(amt) || amt <= 0) { setCreateError('Nominal invoice harus lebih dari 0'); return }
+   381→    setCreateSubmitting(true)
+   382→    try {
+   383→      const created = await financeApi.createInvoice({
+   384→        opportunityId: fOppId,
+   385→        quotationId: fQuoteId !== 'none' ? fQuoteId : undefined,
+   386→        title: fTitle.trim(),
+   387→        amount: amt,
+   388→        taxPct: Number(fTaxPct) || 0,
+   389→        dueDate: fDueDate ? new Date(`${fDueDate}T00:00:00`).toISOString() : undefined,
+   390→        notes: fNotes.trim() || undefined,
+   391→      })
+   392→      toast({ title: `Invoice ${created.code} dibuat`, description: `${created.title} — ${formatMoney(created.total, created.currency)}` })
+   393→      setCreateOpen(false)
+   394→      await load(true)
+   395→    } catch (e) {
+   396→      setCreateError(e instanceof Error ? e.message : 'Gagal membuat invoice')
+   397→    } finally {
+   398→      setCreateSubmitting(false)
+   399→    }
+   400→  }, [fOppId, fQuoteId, fTitle, fAmount, fTaxPct, fDueDate, fNotes, load, toast])
+   401→
+   402→  const totalPreview = useMemo(() => {
+   403→    const amt = Number(fAmount)
+   404→    if (!Number.isFinite(amt) || amt <= 0) return 0
+   405→    return amt * (1 + (Number(fTaxPct) || 0) / 100)
+   406→  }, [fAmount, fTaxPct])
+   407→
+   408→  /* ---------------- aging memo ---------------- */
+   409→  const agingRows = useMemo(() => {
+   410→    if (!summary) return []
+   411→    return [...summary.aging].sort((a, b) => AGING_ORDER.indexOf(a.bucket) - AGING_ORDER.indexOf(b.bucket))
+   412→  }, [summary])
+   413→  const agingMax = Math.max(...agingRows.map(r => r.value), 1)
+   414→  const agingAllZero = agingRows.length > 0 && agingRows.every(r => r.count === 0)
+   415→  const brandMax = summary ? Math.max(...summary.byBrand.map(b => b.invoiced), 1) : 1
+   416→  const paySisa = payInv ? payInv.total - payInv.paidAmount : 0
+   417→
+   418→  /* ================================================================ */
+   419→  return (
+   420→    <div className="space-y-5">
+   421→      <SectionHeader
+   422→        title="Finance"
+   423→        description="Invoice, pembayaran, dan analitik piutang lintas brand"
+   424→        action={
+   425→          <div className="flex items-center gap-2">
+   426→            <RefreshButton onClick={() => load()} loading={loading} />
+   427→            {canCreate && (
+   428→              <Button
+   429→                variant="outline"
+   430→                onClick={() => downloadCsv(
+   431→                  `invoices-${new Date().toISOString().slice(0, 10)}.csv`,
+   432→                  ['Kode', 'Judul', 'Perusahaan', 'Brand', 'Status', 'Amount', 'PPN %', 'Total', 'Terbayar', 'Sisa', 'Currency', 'Jatuh Tempo', 'Terbit'],
+   433→                  filtered.map((inv) => [inv.code, inv.title, inv.companyName, inv.brandName, inv.status, inv.amount, inv.taxPct, inv.total, inv.paidAmount, inv.total - inv.paidAmount, inv.currency, inv.dueDate ?? '', inv.issuedAt]),
+   434→                )}
+   435→                className="h-9 gap-1.5"
+   436→              >
+   437→                <Download className="h-4 w-4" />
+   438→                Export CSV
+   439→              </Button>
+   440→            )}
+   441→            {canCreate && (
+   442→              <Button onClick={openCreate} className="h-9 gap-1.5 bg-teal-600 text-white hover:bg-teal-700">
+   443→                <Plus className="h-4 w-4" />
+   444→                Buat Invoice
+   445→              </Button>
+   446→            )}
+   447→          </div>
+   448→        }
+   449→      />
+   450→
+   451→      {error && (
+   452→        <Alert variant="destructive" className="border-rose-200">
+   453→          <AlertCircle className="h-4 w-4" />
+   454→          <AlertTitle>Gagal memuat data finance</AlertTitle>
+   455→          <AlertDescription>
+   456→            <p>{error}</p>
+   457→            <Button
+   458→              size="sm"
+   459→              variant="outline"
+   460→              className="mt-2 border-rose-200 text-rose-700 hover:bg-rose-50"
+   461→              onClick={() => load()}
+   462→            >
+   463→              Coba lagi
+   464→            </Button>
+   465→          </AlertDescription>
+   466→        </Alert>
+   467→      )}
+   468→
+   469→      <Tabs defaultValue="invoices" className="gap-4">
+   470→        <TabsList className="h-auto w-full justify-start overflow-x-auto sm:w-auto">
+   471→          <TabsTrigger value="invoices" className="gap-1.5 px-3 py-1.5">
+   472→            <ReceiptText className="h-3.5 w-3.5" />
+   473→            Invoice &amp; Pembayaran
+   474→          </TabsTrigger>
+   475→          <TabsTrigger value="aging" className="gap-1.5 px-3 py-1.5">
+   476→            <BarChart3 className="h-3.5 w-3.5" />
+   477→            Aging &amp; Analitik
+   478→          </TabsTrigger>
+   479→        </TabsList>
+   480→
+   481→        {/* ================= TAB 1 — INVOICE & PEMBAYARAN ================= */}
+   482→        <TabsContent value="invoices" className="mt-2 space-y-4">
+   483→          {/* KPI row */}
+   484→          {loading && !summary ? (
+   485→            <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+   486→              {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-[86px] rounded-xl" />)}
+   487→            </div>
+   488→          ) : summary && (
+   489→            <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+   490→              <KpiCard
+   491→                label="Outstanding"
+   492→                value={formatMoney(summary.outstandingTotal, 'IDR', true)}
+   493→                sub={`${summary.unpaidCount} invoice belum lunas`}
+   494→                icon={Wallet}
+   495→                bgCls="bg-amber-50"
+   496→                iconCls="text-amber-600"
+   497→                accentCls="bg-amber-400"
+   498→              />
+   499→              <KpiCard
+   500→                label="Jatuh Tempo"
+   501→                value={formatMoney(summary.overdueTotal, 'IDR', true)}
+   502→                sub={`${summary.overdueCount} invoice lewat jatuh tempo`}
+   503→                icon={AlarmClock}
+   504→                bgCls="bg-rose-50"
+   505→                iconCls="text-rose-600"
+   506→                alertRing={summary.overdueCount > 0}
+   507→                accentCls="bg-rose-500"
+   508→              />
+   509→              <KpiCard
+   510→                label="Diterima Bulan Ini"
+   511→                value={formatMoney(summary.paidThisMonth, 'IDR', true)}
+   512→                sub="Total pembayaran bulan berjalan"
+   513→                icon={TrendingUp}
+   514→                bgCls="bg-emerald-50"
+   515→                iconCls="text-emerald-600"
+   516→                accentCls="bg-emerald-500"
+   517→              />
+   518→              <KpiCard
+   519→                label="Total Terfaktur"
+   520→                value={formatMoney(summary.invoicedTotal, 'IDR', true)}
+   521→                sub="Seluruh invoice diterbitkan"
+   522→                icon={FileText}
+   523→                bgCls="bg-slate-100"
+   524→                iconCls="text-slate-600"
+   525→                accentCls="bg-slate-400"
+   526→              />
+   527→            </div>
+   528→          )}
+   529→
+   530→          {/* Toolbar */}
+   531→          <Card className="rounded-xl border-slate-200 py-0 shadow-sm">
+   532→            <CardContent className="flex flex-col gap-2 p-4 sm:flex-row sm:items-center">
+   533→              <div className="relative flex-1 sm:min-w-[220px]">
+   534→                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+   535→                <Input
+   536→                  value={search}
+   537→                  onChange={(e) => setSearch(e.target.value)}
+   538→                  placeholder="Cari kode, judul, atau perusahaan…"
+   539→                  className="h-9 pl-9"
+   540→                  aria-label="Cari invoice"
+   541→                />
+   542→              </div>
+   543→              <div className="flex gap-2">
+   544→                <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as InvoiceStatus | 'all')}>
+   545→                  <SelectTrigger className="h-9 w-full sm:w-[150px]" aria-label="Filter status invoice">
+   546→                    <SelectValue />
+   547→                  </SelectTrigger>
+   548→                  <SelectContent>
+   549→                    <SelectItem value="all">Semua Status</SelectItem>
+   550→                    <SelectItem value="UNPAID">Belum Dibayar</SelectItem>
+   551→                    <SelectItem value="PARTIAL">Sebagian</SelectItem>
+   552→                    <SelectItem value="PAID">Lunas</SelectItem>
+   553→                    <SelectItem value="CANCELLED">Dibatalkan</SelectItem>
+   554→                  </SelectContent>
+   555→                </Select>
+   556→                <Select value={brandFilter} onValueChange={setBrandFilter}>
+   557→                  <SelectTrigger className="h-9 w-full sm:w-[160px]" aria-label="Filter brand">
+   558→                    <SelectValue />
+   559→                  </SelectTrigger>
+   560→                  <SelectContent>
+   561→                    <SelectItem value="all">Semua Brand</SelectItem>
+   562→                    {brands.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+   563→                  </SelectContent>
+   564→                </Select>
+   565→              </div>
+   566→              <p className="whitespace-nowrap text-xs text-slate-500 sm:ml-auto">
+   567→                {filtered.length} dari {invoices.length} invoice
+   568→              </p>
+   569→            </CardContent>
+   570→          </Card>
+   571→
+   572→          {/* Daftar invoice */}
+   573→          {loading && invoices.length === 0 ? (
+   574→            <Card className="rounded-xl border-slate-200 py-0 shadow-sm">
+   575→              <CardContent className="p-4"><LoadingRows rows={6} /></CardContent>
+   576→            </Card>
+   577→          ) : filtered.length === 0 ? (
+   578→            invoices.length === 0 ? (
+   579→              <EmptyState
+   580→                icon={<ReceiptText className="h-5 w-5" />}
+   581→                title="Belum ada invoice"
+   582→                description="Invoice dibuat dari deal berstatus Won atau quotation yang disetujui. Klik “Buat Invoice” untuk menerbitkan invoice pertama."
+   583→                action={canCreate ? (
+   584→                  <Button onClick={openCreate} className="gap-1.5 bg-teal-600 text-white hover:bg-teal-700">
+   585→                    <Plus className="h-4 w-4" /> Buat Invoice
+   586→                  </Button>
+   587→                ) : undefined}
+   588→              />
+   589→            ) : (
+   590→              <EmptyState
+   591→                icon={<Search className="h-5 w-5" />}
+   592→                title="Tidak ada invoice yang cocok"
+   593→                description="Coba ubah kata kunci pencarian atau reset filter status/brand."
+   594→              />
+   595→            )
+   596→          ) : (
+   597→            <Card className="rounded-xl border-slate-200 py-0 shadow-sm">
+   598→              <div className="max-h-[60vh] divide-y divide-slate-100 overflow-y-auto scrollbar-slim">
+   599→                {filtered.map(inv => (
+   600→                  <InvoiceRow key={inv.id} inv={inv} onPay={openPay} onDetail={openDetail} />
+   601→                ))}
+   602→              </div>
+   603→            </Card>
+   604→          )}
+   605→        </TabsContent>
+   606→
+   607→        {/* ================= TAB 2 — AGING & ANALITIK ================= */}
+   608→        <TabsContent value="aging" className="mt-2 space-y-4">
+   609→          {!summary ? (
+   610→            <div className="grid gap-4 lg:grid-cols-2">
+   611→              <Skeleton className="h-64 rounded-xl" />
+   612→              <Skeleton className="h-64 rounded-xl" />
+   613→            </div>
+   614→          ) : (
+   615→            <>
+   616→              <div className="grid gap-4 lg:grid-cols-2">
+   617→                {/* Aging piutang */}
+   618→                <Card className="rounded-xl border-slate-200 shadow-sm">
+   619→                  <CardHeader className="pb-3">
+   620→                    <CardTitle className="flex items-center gap-2 text-base">
+   621→                      <AlarmClock className="h-4 w-4 text-rose-500" />
+   622→                      Aging Piutang
+   623→                    </CardTitle>
+   624→                    <CardDescription className="text-xs">Outstanding invoice berdasarkan umur keterlambatan</CardDescription>
+   625→                  </CardHeader>
+   626→                  <CardContent>
+   627→                    {agingAllZero ? (
+   628→                      <div className="flex flex-col items-center gap-2 py-8 text-center">
+   629→                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-50">
+   630→                          <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+   631→                        </div>
+   632→                        <p className="text-sm font-medium text-slate-700">Tidak ada piutang tertunggak</p>
+   633→                        <p className="text-xs text-slate-500">Semua invoice lunas atau belum jatuh tempo.</p>
+   634→                      </div>
+   635→                    ) : (
+   636→                      <div className="space-y-3">
+   637→                        {agingRows.map(row => {
+   638→                          const meta = AGING_META[row.bucket] ?? AGING_META['>90']
+   639→                          const pct = Math.min(100, (row.value / agingMax) * 100)
+   640→                          return (
+   641→                            <div key={row.bucket} className={cn('rounded-lg p-3', meta.tint)}>
+   642→                              <div className="flex items-center justify-between gap-2">
+   643→                                <div className="flex items-center gap-2">
+   644→                                  <span className={cn('text-xs font-semibold', meta.text)}>{meta.label}</span>
+   645→                                  <span className="rounded-full bg-white/80 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">{row.count} invoice</span>
+   646→                                </div>
+   647→                                <span className={cn('text-sm font-bold tabular-nums', meta.text)}>{formatMoney(row.value, 'IDR', true)}</span>
+   648→                              </div>
+   649→                              <Progress value={pct} className={cn('mt-2 h-1.5 bg-white/70', meta.bar)} />
+   650→                            </div>
+   651→                          )
+   652→                        })}
+   653→                      </div>
+   654→                    )}
+   655→                  </CardContent>
+   656→                </Card>
+   657→
+   658→                {/* Per brand */}
+   659→                <Card className="rounded-xl border-slate-200 shadow-sm">
+   660→                  <CardHeader className="pb-3">
+   661→                    <CardTitle className="flex items-center gap-2 text-base">
+   662→                      <Building2 className="h-4 w-4 text-teal-600" />
+   663→                      Per Brand
+   664→                    </CardTitle>
+   665→                    <CardDescription className="text-xs">Perbandingan terfaktur, diterima, dan outstanding per brand</CardDescription>
+   666→                  </CardHeader>
+   667→                  <CardContent>
+   668→                    {summary.byBrand.length === 0 ? (
+   669→                      <div className="flex flex-col items-center gap-2 py-8 text-center">
+   670→                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100">
+   671→                          <ReceiptText className="h-5 w-5 text-slate-400" />
+   672→                        </div>
+   673→                        <p className="text-sm font-medium text-slate-700">Belum ada data per brand</p>
+   674→                        <p className="text-xs text-slate-500">Data muncul setelah ada invoice yang diterbitkan.</p>
+   675→                      </div>
+   676→                    ) : (
+   677→                      <div className="space-y-4">
+   678→                        {summary.byBrand.map(b => {
+   679→                          const paidW = Math.min(100, (b.paid / brandMax) * 100)
+   680→                          const outW = Math.min(100, (b.outstanding / brandMax) * 100)
+   681→                          return (
+   682→                            <div key={b.brandId}>
+   683→                              <div className="flex flex-wrap items-center justify-between gap-2">
+   684→                                <BrandChip name={b.name} color={b.color} size="sm" />
+   685→                                <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] tabular-nums">
+   686→                                  <span className="text-slate-600">Terfaktur <b className="text-slate-800">{formatMoney(b.invoiced, 'IDR', true)}</b></span>
+   687→                                  <span className="text-emerald-700">Diterima <b>{formatMoney(b.paid, 'IDR', true)}</b></span>
+   688→                                  <span className="text-amber-700">Outstanding <b>{formatMoney(b.outstanding, 'IDR', true)}</b></span>
+   689→                                </div>
+   690→                              </div>
+   691→                              <div className="mt-2 flex h-2 w-full overflow-hidden rounded-full bg-slate-100">
+   692→                                <div className="bg-emerald-500 transition-all" style={{ width: `${paidW}%` }} />
+   693→                                <div className="bg-amber-400 transition-all" style={{ width: `${outW}%` }} />
+   694→                              </div>
+   695→                            </div>
+   696→                          )
+   697→                        })}
+   698→                      </div>
+   699→                    )}
+   700→                  </CardContent>
+   701→                </Card>
+   702→              </div>
+   703→
+   704→              {/* Pembayaran terbaru */}
+   705→              <Card className="rounded-xl border-slate-200 shadow-sm">
+   706→                <CardHeader className="pb-3">
+   707→                  <CardTitle className="flex items-center gap-2 text-base">
+   708→                    <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+   709→                    Pembayaran Terbaru
+   710→                  </CardTitle>
+   711→                  <CardDescription className="text-xs">8 pembayaran terakhir yang tercatat</CardDescription>
+   712→                </CardHeader>
+   713→                <CardContent>
+   714→                  {summary.recentPayments.length === 0 ? (
+   715→                    <p className="rounded-lg border border-dashed border-slate-200 p-6 text-center text-sm text-slate-500">
+   716→                      Belum ada pembayaran tercatat — catat dari tombol “Catat Pembayaran” di tab Invoice &amp; Pembayaran.
+   717→                    </p>
+   718→                  ) : (
+   719→                    <div className="max-h-[420px] divide-y divide-slate-100 overflow-y-auto pr-1 scrollbar-slim">
+   720→                      {summary.recentPayments.slice(0, 8).map(p => (
+   721→                        <div key={p.id} className="flex items-center gap-3 py-2.5">
+   722→                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-50">
+   723→                            <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+   724→                          </div>
+   725→                          <div className="min-w-0 flex-1">
+   726→                            <p className="truncate text-sm">
+   727→                              <span className="font-bold text-slate-900">{formatMoney(p.amount, 'IDR', true)}</span>
+   728→                              <span className="text-slate-400"> · {p.invoiceCode}</span>
+   729→                            </p>
+   730→                            <p className="truncate text-[11px] text-slate-500">{p.companyName} — {p.invoiceTitle}</p>
+   731→                            <p className="mt-0.5 flex flex-wrap items-center gap-2">
+   732→                              <MethodChip method={p.method} />
+   733→                              {p.reference && <span className="font-mono text-[10px] text-slate-400">{p.reference}</span>}
+   734→                            </p>
+   735→                          </div>
+   736→                          <div className="shrink-0 text-right">
+   737→                            <p className="text-[11px] text-slate-500">{timeAgo(p.paidAt)}</p>
+   738→                            {p.recordedByName && <p className="text-[10px] text-slate-400">dicatat {p.recordedByName}</p>}
+   739→                          </div>
+   740→                        </div>
+   741→                      ))}
+   742→                    </div>
+   743→                  )}
+   744→                </CardContent>
+   745→              </Card>
+   746→            </>
+   747→          )}
+   748→        </TabsContent>
+   749→      </Tabs>
+   750→
+   751→      {/* ================= DIALOG: CATAT PEMBAYARAN ================= */}
+   752→      <Dialog open={!!payInv} onOpenChange={(o) => { if (!o) setPayInv(null) }}>
+   753→        <DialogContent className="max-w-md rounded-xl">
+   754→          <DialogHeader>
+   755→            <DialogTitle className="flex items-center gap-2">
+   756→              <Wallet className="h-4 w-4 text-teal-600" />
+   757→              Catat Pembayaran
+   758→            </DialogTitle>
+   759→            <DialogDescription>{payInv?.code} · {payInv?.title}</DialogDescription>
+   760→          </DialogHeader>
+   761→          {payInv && (
+   762→            <div className="space-y-4">
+   763→              <div className="rounded-lg bg-slate-50 p-3 text-sm">
+   764→                <div className="flex items-center justify-between gap-2">
+   765→                  <span className="text-slate-500">Total tagihan</span>
+   766→                  <span className="font-semibold text-slate-900">{formatMoney(payInv.total, payInv.currency)}</span>
+   767→                </div>
+   768→                <div className="mt-1 flex items-center justify-between gap-2">
+   769→                  <span className="text-slate-500">Sudah dibayar</span>
+   770→                  <span className="font-semibold text-emerald-700">{formatMoney(payInv.paidAmount, payInv.currency)}</span>
+   771→                </div>
+   772→                <Separator className="my-2" />
+   773→                <div className="flex items-center justify-between gap-2">
+   774→                  <span className="text-slate-500">Sisa</span>
+   775→                  <span className="font-bold text-rose-600">{formatMoney(paySisa, payInv.currency)}</span>
+   776→                </div>
+   777→              </div>
+   778→
+   779→              <div className="space-y-1.5">
+   780→                <Label htmlFor="pay-amount">Nominal Pembayaran</Label>
+   781→                <Input
+   782→                  id="pay-amount"
+   783→                  type="number"
+   784→                  min={0}
+   785→                  value={payAmount}
+   786→                  onChange={(e) => { setPayAmount(e.target.value); setPayError(null) }}
+   787→                />
+   788→                {payError ? (
+   789→                  <p className="text-xs font-medium text-rose-600">{payError}</p>
+   790→                ) : (
+   791→                  <p className="text-xs text-slate-500">Maksimal {formatMoney(paySisa, payInv.currency)}</p>
+   792→                )}
+   793→              </div>
+   794→
+   795→              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+   796→                <div className="space-y-1.5">
+   797→                  <Label>Metode</Label>
+   798→                  <Select value={payMethod} onValueChange={setPayMethod}>
+   799→                    <SelectTrigger aria-label="Metode pembayaran"><SelectValue /></SelectTrigger>
+   800→                    <SelectContent>
+   801→                      {PAYMENT_METHODS.map(m => <SelectItem key={m.key} value={m.key}>{m.label}</SelectItem>)}
+   802→                    </SelectContent>
+   803→                  </Select>
+   804→                </div>
+   805→                <div className="space-y-1.5">
+   806→                  <Label htmlFor="pay-date">Tanggal Bayar</Label>
+   807→                  <Input id="pay-date" type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} />
+   808→                </div>
+   809→              </div>
+   810→
+   811→              <div className="space-y-1.5">
+   812→                <Label htmlFor="pay-ref">No. Referensi</Label>
+   813→                <Input id="pay-ref" value={payRef} onChange={(e) => setPayRef(e.target.value)} placeholder="No. transfer/bukti" />
+   814→              </div>
+   815→
+   816→              <div className="space-y-1.5">
+   817→                <Label htmlFor="pay-note">Catatan</Label>
+   818→                <Input id="pay-note" value={payNote} onChange={(e) => setPayNote(e.target.value)} placeholder="Catatan (opsional)" />
+   819→              </div>
+   820→            </div>
+   821→          )}
+   822→          <DialogFooter>
+   823→            <Button variant="outline" onClick={() => setPayInv(null)} disabled={paySubmitting}>Batal</Button>
+   824→            <Button
+   825→              onClick={submitPayment}
+   826→              disabled={paySubmitting || !payInv || !payAmount}
+   827→              className="bg-teal-600 text-white hover:bg-teal-700"
+   828→            >
+   829→              {paySubmitting && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
+   830→              Simpan Pembayaran
+   831→            </Button>
+   832→          </DialogFooter>
+   833→        </DialogContent>
+   834→      </Dialog>
+   835→
+   836→      {/* ================= DIALOG: DETAIL INVOICE ================= */}
+   837→      <Dialog open={!!detailInv} onOpenChange={(o) => { if (!o) setDetailInv(null) }}>
+   838→        <DialogContent className="max-h-[85vh] overflow-y-auto rounded-xl sm:max-w-2xl" onInteractOutside={(e) => { if (printInvOpen) e.preventDefault() }}>
+   839→          <DialogHeader>
+   840→            <DialogTitle className="flex flex-wrap items-center gap-2">
+   841→              <span className="font-mono text-sm font-semibold text-slate-400">{detailInv?.code}</span>
+   842→              {detailInv && <StatusBadge status={detailInv.status} />}
+   843→            </DialogTitle>
+   844→            <DialogDescription>{detailInv?.title}</DialogDescription>
+   845→          </DialogHeader>
+   846→          {detailInv && (
+   847→            <div className="space-y-4">
+   848→              <div className="grid grid-cols-3 gap-2">
+   849→                <div className="rounded-lg bg-slate-50 p-3 text-center">
+   850→                  <p className="text-[10px] uppercase tracking-wide text-slate-500">Total Tagihan</p>
+   851→                  <p className="mt-0.5 text-sm font-bold text-slate-900 tabular-nums">{formatMoney(detailInv.total, detailInv.currency)}</p>
+   852→                </div>
+   853→                <div className="rounded-lg bg-emerald-50 p-3 text-center">
+   854→                  <p className="text-[10px] uppercase tracking-wide text-emerald-600">Dibayar</p>
+   855→                  <p className="mt-0.5 text-sm font-bold text-emerald-700 tabular-nums">{formatMoney(detailInv.paidAmount, detailInv.currency)}</p>
+   856→                </div>
+   857→                <div className="rounded-lg bg-amber-50 p-3 text-center">
+   858→                  <p className="text-[10px] uppercase tracking-wide text-amber-600">Sisa</p>
+   859→                  <p className="mt-0.5 text-sm font-bold text-amber-700 tabular-nums">{formatMoney(detailInv.total - detailInv.paidAmount, detailInv.currency)}</p>
+   860→                </div>
+   861→              </div>
+   862→
+   863→              <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
+   864→                <DetailField label="Perusahaan" value={detailInv.companyName} />
+   865→                <DetailField label="Brand" value={detailInv.brandName} />
+   866→                <DetailField label="Opportunity" value={`${detailInv.opportunityCode} · ${detailInv.opportunityTitle}`} />
+   867→                {detailInv.projectCode && <DetailField label="Project" value={detailInv.projectCode} />}
+   868→                <DetailField label="Nilai Dasar" value={formatMoney(detailInv.amount, detailInv.currency)} />
+   869→                <DetailField label="PPN" value={`${detailInv.taxPct}%`} />
+   870→                <DetailField label="Diterbitkan" value={formatDate(detailInv.issuedAt)} />
+   871→                <DetailField label="Jatuh Tempo" value={formatDate(detailInv.dueDate)} />
+   872→                <DetailField label="Dibuat" value={formatDate(detailInv.createdAt)} />
+   873→              </div>
+   874→
+   875→              {detailInv.notes && (
+   876→                <div>
+   877→                  <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-slate-400">Catatan</p>
+   878→                  <p className="whitespace-pre-wrap rounded-lg bg-slate-50 p-3 text-sm text-slate-700">{detailInv.notes}</p>
+   879→                </div>
+   880→              )}
+   881→
+   882→              <div>
+   883→                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+   884→                  Riwayat Pembayaran ({detailInv.payments.length})
+   885→                </p>
+   886→                {detailInv.payments.length === 0 ? (
+   887→                  <p className="rounded-lg border border-dashed border-slate-200 p-4 text-center text-xs text-slate-500">
+   888→                    Belum ada pembayaran tercatat
+   889→                  </p>
+   890→                ) : (
+   891→                  <div className="max-h-56 space-y-2 overflow-y-auto pr-1 scrollbar-slim">
+   892→                    {[...detailInv.payments]
+   893→                      .sort((a, b) => new Date(b.paidAt).getTime() - new Date(a.paidAt).getTime())
+   894→                      .map(p => (
+   895→                        <div key={p.id} className="flex items-start justify-between gap-3 rounded-lg border border-slate-100 p-3">
+   896→                          <div className="min-w-0">
+   897→                            <p className="text-sm font-bold text-slate-900">{formatMoney(p.amount, detailInv.currency)}</p>
+   898→                            <p className="mt-0.5 flex flex-wrap items-center gap-2">
+   899→                              <MethodChip method={p.method} />
+   900→                              {p.reference && <span className="font-mono text-[10px] text-slate-400">{p.reference}</span>}
+   901→                            </p>
+   902→                            {p.note && <p className="mt-1 text-xs italic text-slate-500">“{p.note}”</p>}
+   903→                          </div>
+   904→                          <div className="shrink-0 text-right">
+   905→                            <p className="text-[11px] font-medium text-slate-700">{formatDate(p.paidAt, true)}</p>
+   906→                            {p.recordedByName && <p className="text-[10px] text-slate-400">dicatat {p.recordedByName}</p>}
+   907→                          </div>
+   908→                        </div>
+   909→                      ))}
+   910→                  </div>
+   911→                )}
+   912→              </div>
+   913→
+   914→              {cancelArmed && (
+   915→                <Alert variant="destructive" className="border-rose-200">
+   916→                  <Ban className="h-4 w-4" />
+   917→                  <AlertTitle>Batalkan invoice {detailInv.code}?</AlertTitle>
+   918→                  <AlertDescription>
+   919→                    <p>Status akan berubah menjadi Dibatalkan dan invoice tidak dapat dibayar. Tindakan ini tidak dapat diurungkan.</p>
+   920→                    <div className="mt-2 flex gap-2">
+   921→                      <Button size="sm" variant="destructive" onClick={submitCancel} disabled={cancelSubmitting}>
+   922→                        {cancelSubmitting && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
+   923→                        Ya, Batalkan
+   924→                      </Button>
+   925→                      <Button size="sm" variant="outline" onClick={() => setCancelArmed(false)} disabled={cancelSubmitting}>
+   926→                        Tidak, Kembali
+   927→                      </Button>
+   928→                    </div>
+   929→                  </AlertDescription>
+   930→                </Alert>
+   931→              )}
+   932→            </div>
+   933→          )}
+   934→          <DialogFooter className="sm:justify-between">
+   935→            {detailInv?.opportunityId ? (
+   936→              <Button
+   937→                variant="outline"
+   938→                size="sm"
+   939→                onClick={() => { const id = detailInv.opportunityId; setDetailInv(null); openOpportunity(id) }}
+   940→              >
+   941→                <ArrowUpRight className="mr-1 h-3.5 w-3.5" />
+   942→                Buka Opportunity {detailInv.opportunityCode}
+   943→              </Button>
+   944→            ) : <span />}
+   945→            <Button
+   946→              variant="outline"
+   947→              size="sm"
+   948→              onClick={() => setPrintInvOpen(true)}
+   949→              className="gap-1.5"
+   950→            >
+   951→              <Printer className="h-3.5 w-3.5" /> Cetak / PDF
+   952→            </Button>
+   953→            {detailInv && detailInv.paidAmount === 0 && detailInv.status !== 'CANCELLED' && !cancelArmed && (
+   954→              <Button
+   955→                variant="outline"
+   956→                size="sm"
+   957→                className="border-rose-200 text-rose-600 hover:bg-rose-50 hover:text-rose-700"
+   958→                onClick={() => setCancelArmed(true)}
+   959→              >
+   960→                <Ban className="mr-1 h-3.5 w-3.5" />
+   961→                Batalkan Invoice
+   962→              </Button>
+   963→            )}
+   964→          </DialogFooter>
+   965→        </DialogContent>
+   966→      </Dialog>
+   967→
+   968→      {/* ================= PRINT: INVOICE ================= */}
+   969→      {detailInv && (
+   970→        <PrintOverlay open={printInvOpen} docTitle={`${detailInv.code} — ${detailInv.title}`} onClose={() => setPrintInvOpen(false)}>
+   971→          <InvoicePrintBody inv={detailInv} />
+   972→        </PrintOverlay>
+   973→      )}
+   974→
+   975→      {/* ================= DIALOG: BUAT INVOICE ================= */}
+   976→      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+   977→        <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto rounded-xl">
+   978→          <DialogHeader>
+   979→            <DialogTitle className="flex items-center gap-2">
+   980→              <ReceiptText className="h-4 w-4 text-teal-600" />
+   981→              Buat Invoice
+   982→            </DialogTitle>
+   983→            <DialogDescription>Buat invoice dari deal Won atau quotation yang disetujui.</DialogDescription>
+   984→          </DialogHeader>
+   985→          <div className="space-y-4">
+   986→            {createError && (
+   987→              <p className="rounded-lg bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700">{createError}</p>
+   988→            )}
+   989→
+   990→            <div className="space-y-1.5">
+   991→              <Label>Opportunity (Deal Won) *</Label>
+   992→              <Select value={fOppId} onValueChange={handleOppChange} disabled={optsLoading}>
+   993→                <SelectTrigger aria-label="Pilih opportunity">
+   994→                  <SelectValue placeholder={optsLoading ? 'Memuat deal…' : 'Pilih opportunity'} />
+   995→                </SelectTrigger>
+   996→                <SelectContent>
+   997→                  {wonOpps.length === 0 ? (
+   998→                    <p className="px-3 py-6 text-center text-xs text-slate-500">
+   999→                      {optsLoading ? 'Memuat daftar deal…' : 'Tidak ada opportunity berstatus Won'}
+  1000→                    </p>
+  1001→                  ) : wonOpps.map(o => (
+  1002→                    <SelectItem key={o.id} value={o.id}>{o.code} · {o.title} — {o.companyName}</SelectItem>
+  1003→                  ))}
+  1004→                </SelectContent>
+  1005→              </Select>
+  1006→              <p className="text-[11px] text-slate-500">Hanya opportunity berstatus Won yang dapat dibuatkan invoice.</p>
+  1007→            </div>
+  1008→
+  1009→            <div className="space-y-1.5">
+  1010→              <Label>Quotation (opsional)</Label>
+  1011→              <Select value={fQuoteId} onValueChange={handleQuoteChange} disabled={optsLoading}>
+  1012→                <SelectTrigger aria-label="Pilih quotation">
+  1013→                  <SelectValue placeholder={optsLoading ? 'Memuat quotation…' : 'Pilih quotation disetujui'} />
+  1014→                </SelectTrigger>
+  1015→                <SelectContent>
+  1016→                  <SelectItem value="none">— Tanpa quotation —</SelectItem>
+  1017→                  {acceptedQuotes.map(q => (
+  1018→                    <SelectItem key={q.id} value={q.id}>
+  1019→                      {q.code} · {q.title} — {q.companyName} ({formatMoney(q.total, q.currency, true)})
+  1020→                    </SelectItem>
+  1021→                  ))}
+  1022→                </SelectContent>
+  1023→              </Select>
+  1024→              <p className="text-[11px] text-slate-500">Memilih quotation otomatis mengisi judul, nominal, dan catatan dari quotation disetujui.</p>
+  1025→            </div>
+  1026→
+  1027→            <div className="space-y-1.5">
+  1028→              <Label htmlFor="inv-title">Judul Invoice *</Label>
+  1029→              <Input
+  1030→                id="inv-title"
+  1031→                value={fTitle}
+  1032→                onChange={(e) => setFTitle(e.target.value)}
+  1033→                placeholder="cth. Website Company Profile — Tahap 1"
+  1034→              />
+  1035→            </div>
+  1036→
+  1037→            <div className="grid grid-cols-2 gap-3">
+  1038→              <div className="space-y-1.5">
+  1039→                <Label htmlFor="inv-amount">Nominal *</Label>
+  1040→                <Input
+  1041→                  id="inv-amount"
+  1042→                  type="number"
+  1043→                  min={0}
+  1044→                  value={fAmount}
+  1045→                  onChange={(e) => { setFAmount(e.target.value); setCreateError(null) }}
+  1046→                  placeholder="0"
+  1047→                />
+  1048→              </div>
+  1049→              <div className="space-y-1.5">
+  1050→                <Label htmlFor="inv-tax">PPN %</Label>
+  1051→                <Input
+  1052→                  id="inv-tax"
+  1053→                  type="number"
+  1054→                  min={0}
+  1055→                  max={100}
+  1056→                  value={fTaxPct}
+  1057→                  onChange={(e) => setFTaxPct(e.target.value)}
+  1058→                />
+  1059→                <p className="text-[11px] text-slate-500">Persentase PPN (default 0)</p>
+  1060→              </div>
+  1061→            </div>
+  1062→
+  1063→            <div className="space-y-1.5">
+  1064→              <Label htmlFor="inv-due">Jatuh Tempo</Label>
+  1065→              <Input id="inv-due" type="date" value={fDueDate} onChange={(e) => setFDueDate(e.target.value)} />
+  1066→            </div>
+  1067→
+  1068→            <div className="space-y-1.5">
+  1069→              <Label htmlFor="inv-notes">Catatan</Label>
+  1070→              <Textarea
+  1071→                id="inv-notes"
+  1072→                rows={2}
+  1073→                value={fNotes}
+  1074→                onChange={(e) => setFNotes(e.target.value)}
+  1075→                placeholder="Catatan invoice (opsional)"
+  1076→              />
+  1077→            </div>
+  1078→
+  1079→            {totalPreview > 0 && (
+  1080→              <div className="flex items-center justify-between rounded-lg bg-teal-50 px-3 py-2 text-sm">
+  1081→                <span className="text-teal-800">Total tagihan (termasuk PPN)</span>
+  1082→                <span className="font-bold text-teal-900">{formatMoney(totalPreview)}</span>
+  1083→              </div>
+  1084→            )}
+  1085→          </div>
+  1086→          <DialogFooter>
+  1087→            <Button variant="outline" onClick={() => setCreateOpen(false)} disabled={createSubmitting}>Batal</Button>
+  1088→            <Button
+  1089→              onClick={submitCreate}
+  1090→              disabled={createSubmitting || optsLoading}
+  1091→              className="bg-teal-600 text-white hover:bg-teal-700"
+  1092→            >
+  1093→              {createSubmitting && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
+  1094→              Buat Invoice
+  1095→            </Button>
+  1096→          </DialogFooter>
+  1097→        </DialogContent>
+  1098→      </Dialog>
+  1099→    </div>
+  1100→  )
+  1101→}
+  1102→

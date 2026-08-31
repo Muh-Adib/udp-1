@@ -1,0 +1,713 @@
+     1→/* ============ Client Portal — read-only per company (role CLIENT) ============ */
+     2→'use client'
+     3→
+     4→import React, { useCallback, useEffect, useState } from 'react'
+     5→import { portalApi } from './api-client'
+     6→import { useCrmStore } from './crm-store'
+     7→import { BrandChip, EmptyState, RefreshButton } from './shared'
+     8→import { daysUntil, formatDate, formatMoney, projectStatusMeta } from '@/lib/crm-constants'
+     9→import type {
+    10→  PortalDTO, PortalInvoiceDTO, PortalQuotationDTO,
+    11→  QuotationDetailDTO, InvoiceDTO,
+    12→} from '@/lib/crm-types'
+    13→import { Button } from '@/components/ui/button'
+    14→import { Card, CardContent } from '@/components/ui/card'
+    15→import { Progress } from '@/components/ui/progress'
+    16→import { Skeleton } from '@/components/ui/skeleton'
+    17→import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+    18→import {
+    19→  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+    20→} from '@/components/ui/dialog'
+    21→import {
+    22→  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+    23→} from '@/components/ui/table'
+    24→import { useToast } from '@/hooks/use-toast'
+    25→import { cn } from '@/lib/utils'
+    26→import { PrintOverlay, QuotationPrintBody, InvoicePrintBody } from './print-document'
+    27→import {
+    28→  Building2, CalendarClock, CheckCircle2, Circle, FileText, FolderKanban,
+    29→  Info, Mail, Phone, Printer, Wallet,
+    30→} from 'lucide-react'
+    31→
+    32→const SCROLLBAR = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300'
+    33→const errMsg = (e: unknown) => (e instanceof Error ? e.message : 'Terjadi kesalahan')
+    34→
+    35→const QUO_STATUS: Record<string, { label: string; cls: string }> = {
+    36→  DRAFT: { label: 'Draft', cls: 'bg-slate-100 text-slate-600' },
+    37→  SENT: { label: 'Terkirim', cls: 'bg-amber-50 text-amber-700' },
+    38→  ACCEPTED: { label: 'Disetujui', cls: 'bg-emerald-50 text-emerald-700' },
+    39→  REJECTED: { label: 'Ditolak', cls: 'bg-rose-50 text-rose-700' },
+    40→  EXPIRED: { label: 'Kadaluarsa', cls: 'bg-slate-100 text-slate-500' },
+    41→}
+    42→
+    43→const INV_STATUS: Record<string, { label: string; cls: string }> = {
+    44→  UNPAID: { label: 'Belum Dibayar', cls: 'bg-rose-50 text-rose-700' },
+    45→  PARTIAL: { label: 'Terbayar Sebagian', cls: 'bg-amber-50 text-amber-700' },
+    46→  PAID: { label: 'Lunas', cls: 'bg-emerald-50 text-emerald-700' },
+    47→  CANCELLED: { label: 'Dibatalkan', cls: 'bg-slate-100 text-slate-500' },
+    48→}
+    49→
+    50→function StatusBadge({ meta }: { meta: { label: string; cls: string } }) {
+    51→  return (
+    52→    <span className={cn('inline-flex shrink-0 items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold', meta.cls)}>
+    53→      {meta.label}
+    54→    </span>
+    55→  )
+    56→}
+    57→
+    58→type Tone = 'default' | 'amber' | 'rose' | 'emerald'
+    59→const TONE_ICON: Record<Tone, string> = {
+    60→  default: 'bg-slate-100 text-slate-600',
+    61→  amber: 'bg-amber-100 text-amber-700',
+    62→  rose: 'bg-rose-100 text-rose-700',
+    63→  emerald: 'bg-emerald-100 text-emerald-700',
+    64→}
+    65→
+    66→function KpiCard({ icon, label, value, hint, tone = 'default', valueClass }: {
+    67→  icon: React.ReactNode; label: string; value: string; hint: string
+    68→  tone?: Tone; valueClass?: string
+    69→}) {
+    70→  return (
+    71→    <Card className="rounded-xl border-slate-200 shadow-sm transition-shadow hover:shadow-md">
+    72→      <CardContent className="p-4">
+    73→        <div className="flex items-start justify-between gap-2">
+    74→          <p className="text-xs font-medium text-slate-500">{label}</p>
+    75→          <div className={cn('flex h-8 w-8 shrink-0 items-center justify-center rounded-lg', TONE_ICON[tone])}>{icon}</div>
+    76→        </div>
+    77→        <p className={cn('mt-2 truncate text-xl font-bold tracking-tight text-slate-900', valueClass)}>{value}</p>
+    78→        <p className="mt-1 text-[11px] leading-snug text-slate-400">{hint}</p>
+    79→      </CardContent>
+    80→    </Card>
+    81→  )
+    82→}
+    83→
+    84→function validUntilText(q: PortalQuotationDTO): { text: string; urgent: boolean } {
+    85→  if (!q.validUntil) return { text: 'Tanpa masa berlaku', urgent: false }
+    86→  const d = daysUntil(q.validUntil)
+    87→  if (d === null) return { text: `Berlaku hingga ${formatDate(q.validUntil)}`, urgent: false }
+    88→  if (d < 0) return { text: `Berlaku hingga ${formatDate(q.validUntil)} · masa berlaku lewat`, urgent: q.status === 'SENT' }
+    89→  if (d === 0) return { text: `Berlaku hingga ${formatDate(q.validUntil)} · berakhir hari ini`, urgent: true }
+    90→  return { text: `Berlaku hingga ${formatDate(q.validUntil)} · ${d} hari lagi`, urgent: q.status === 'SENT' && d <= 7 }
+    91→}
+    92→
+    93→function dueInfoOf(inv: PortalInvoiceDTO): { text: string; overdue: boolean } {
+    94→  if (!inv.dueDate) return { text: 'Tanpa jatuh tempo', overdue: false }
+    95→  const remaining = Math.max(0, inv.total - inv.paidAmount)
+    96→  const d = daysUntil(inv.dueDate)
+    97→  if (d === null) return { text: `Jatuh tempo ${formatDate(inv.dueDate)}`, overdue: false }
+    98→  if (d < 0) {
+    99→    const overdue = remaining > 0 && inv.status !== 'CANCELLED'
+   100→    return {
+   101→      text: `Jatuh tempo ${formatDate(inv.dueDate)}${overdue ? ` · terlambat ${Math.abs(d)} hari` : ''}`,
+   102→      overdue,
+   103→    }
+   104→  }
+   105→  if (d === 0) return { text: `Jatuh tempo ${formatDate(inv.dueDate)} · hari ini`, overdue: false }
+   106→  return { text: `Jatuh tempo ${formatDate(inv.dueDate)} · ${d} hari lagi`, overdue: false }
+   107→}
+   108→
+   109→export default function ClientPortalView() {
+   110→  const user = useCrmStore((s) => s.user)
+   111→  const { toast } = useToast()
+   112→
+   113→  const [data, setData] = useState<PortalDTO | null>(null)
+   114→  const [loading, setLoading] = useState(true)
+   115→  const [error, setError] = useState<string | null>(null)
+   116→
+   117→  const [quoDetail, setQuoDetail] = useState<PortalQuotationDTO | null>(null)
+   118→  const [invDetail, setInvDetail] = useState<PortalInvoiceDTO | null>(null)
+   119→  const [printTarget, setPrintTarget] = useState<'quotation' | 'invoice' | null>(null)
+   120→
+   121→  const load = useCallback(async () => {
+   122→    setLoading(true)
+   123→    setError(null)
+   124→    try {
+   125→      setData(await portalApi.get())
+   126→    } catch (e) {
+   127→      const msg = errMsg(e)
+   128→      setError(msg)
+   129→      toast({ variant: 'destructive', title: 'Gagal memuat portal', description: msg })
+   130→    } finally {
+   131→      setLoading(false)
+   132→    }
+   133→  }, [toast])
+   134→
+   135→  useEffect(() => { void load() }, [load])
+   136→
+   137→  /* ---------- Build print-ready DTOs (semua field required diisi dari data portal) ---------- */
+   138→  const buildQuotationDetail = (q: PortalQuotationDTO): QuotationDetailDTO => ({
+   139→    id: q.id,
+   140→    code: q.code,
+   141→    title: q.title,
+   142→    status: q.status,
+   143→    version: q.version,
+   144→    currency: q.currency,
+   145→    subtotal: q.subtotal,
+   146→    discountPct: q.discountPct,
+   147→    discountAmount: q.discountAmount,
+   148→    taxPct: q.taxPct,
+   149→    taxAmount: q.taxAmount,
+   150→    total: q.total,
+   151→    validUntil: q.validUntil,
+   152→    notes: null,
+   153→    discountApprovedById: null,
+   154→    discountApprovedByName: null,
+   155→    discountApprovedAt: null,
+   156→    sentAt: q.sentAt,
+   157→    decidedAt: q.decidedAt,
+   158→    createdById: '',
+   159→    createdByName: null,
+   160→    createdAt: q.createdAt,
+   161→    opportunityId: '',
+   162→    opportunityCode: '',
+   163→    opportunityTitle: '',
+   164→    opportunityStage: '',
+   165→    brandId: '',
+   166→    brandName: q.brandName,
+   167→    brandColor: q.brandColor,
+   168→    companyId: data?.company.id ?? '',
+   169→    companyName: data?.company.name ?? '',
+   170→    itemsCount: q.items.length,
+   171→    items: q.items.map((it, i) => ({
+   172→      id: it.id,
+   173→      description: it.description,
+   174→      qty: it.qty,
+   175→      unitPrice: it.unitPrice,
+   176→      sortOrder: i,
+   177→      lineTotal: it.lineTotal,
+   178→    })),
+   179→  })
+   180→
+   181→  const buildInvoiceDetail = (inv: PortalInvoiceDTO): InvoiceDTO => ({
+   182→    id: inv.id,
+   183→    code: inv.code,
+   184→    title: inv.title,
+   185→    status: inv.status,
+   186→    currency: inv.currency,
+   187→    amount: inv.amount,
+   188→    taxPct: inv.taxPct,
+   189→    total: inv.total,
+   190→    paidAmount: inv.paidAmount,
+   191→    dueDate: inv.dueDate,
+   192→    issuedAt: inv.issuedAt,
+   193→    notes: null,
+   194→    opportunityId: '',
+   195→    opportunityCode: '',
+   196→    opportunityTitle: '',
+   197→    projectId: null,
+   198→    projectCode: inv.projectCode,
+   199→    brandId: '',
+   200→    brandName: inv.brandName,
+   201→    brandColor: inv.brandColor,
+   202→    companyId: data?.company.id ?? '',
+   203→    companyName: data?.company.name ?? '',
+   204→    payments: inv.payments.map((p) => ({
+   205→      id: p.id,
+   206→      amount: p.amount,
+   207→      method: p.method,
+   208→      reference: p.reference,
+   209→      paidAt: p.paidAt,
+   210→      note: null,
+   211→      recordedByName: null,
+   212→    })),
+   213→    createdAt: inv.issuedAt,
+   214→  })
+   215→
+   216→  /* ---------- Error state ---------- */
+   217→  if (error && !data) {
+   218→    return (
+   219→      <EmptyState
+   220→        icon={<Info className="h-5 w-5" />}
+   221→        title="Gagal memuat portal"
+   222→        description={error}
+   223→        action={<Button variant="outline" size="sm" onClick={() => void load()}>Coba lagi</Button>}
+   224→      />
+   225→    )
+   226→  }
+   227→
+   228→  /* ---------- Loading skeleton ---------- */
+   229→  if (!data) {
+   230→    return (
+   231→      <div className="space-y-5">
+   232→        <div className="flex items-start justify-between gap-3">
+   233→          <div className="space-y-2">
+   234→            <Skeleton className="h-6 w-64" />
+   235→            <Skeleton className="h-4 w-80" />
+   236→          </div>
+   237→          <Skeleton className="h-9 w-24 rounded-md" />
+   238→        </div>
+   239→        <Skeleton className="h-36 w-full rounded-2xl" />
+   240→        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+   241→          {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-28 rounded-xl" />)}
+   242→        </div>
+   243→        <Skeleton className="h-9 w-72 rounded-md" />
+   244→        <div className="grid gap-4 lg:grid-cols-2">
+   245→          {Array.from({ length: 2 }).map((_, i) => <Skeleton key={i} className="h-48 rounded-xl" />)}
+   246→        </div>
+   247→      </div>
+   248→    )
+   249→  }
+   250→
+   251→  const { company, projects, quotations, invoices, summary } = data
+   252→  const outstanding = summary.outstandingTotal
+   253→
+   254→  return (
+   255→    <div className="space-y-5">
+   256→      {/* ================= Header ================= */}
+   257→      <div className="flex flex-wrap items-start justify-between gap-3">
+   258→        <div className="flex items-start gap-3">
+   259→          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-slate-900 text-white shadow-sm">
+   260→            <Building2 className="h-5 w-5" />
+   261→          </div>
+   262→          <div className="min-w-0">
+   263→            <h2 className="truncate text-lg font-bold tracking-tight text-slate-900">
+   264→              Selamat datang, {user?.name ?? 'Klien'}
+   265→            </h2>
+   266→            <p className="truncate text-sm text-slate-500">
+   267→              {company.name} · {company.industry ?? '—'} · {company.city ?? '—'}, {company.country}
+   268→            </p>
+   269→          </div>
+   270→        </div>
+   271→        <RefreshButton onClick={() => void load()} loading={loading} />
+   272→      </div>
+   273→
+   274→      {/* ================= Banner kontak ================= */}
+   275→      <section aria-label="Kontak Anda di Grupa Kreasi" className="rounded-2xl bg-slate-900 p-5 text-white shadow-sm">
+   276→        <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Kontak Anda di Grupa Kreasi</p>
+   277→        <p className="mt-1 text-sm text-slate-300">Tim pendamping account untuk {company.name}.</p>
+   278→        {company.contacts.length > 0 ? (
+   279→          <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+   280→            {company.contacts.map((c) => (
+   281→              <div key={c.id} className="rounded-xl border border-white/10 bg-white/5 p-3.5">
+   282→                <p className="truncate text-sm font-semibold text-white">{c.name}</p>
+   283→                {c.position && <p className="truncate text-xs text-slate-400">{c.position}</p>}
+   284→                <div className="mt-2 space-y-1 text-xs text-slate-300">
+   285→                  {c.email && (
+   286→                    <p className="flex items-center gap-1.5 truncate">
+   287→                      <Mail className="h-3.5 w-3.5 shrink-0 text-slate-500" />
+   288→                      <span className="truncate">{c.email}</span>
+   289→                    </p>
+   290→                  )}
+   291→                  {c.phone && (
+   292→                    <p className="flex items-center gap-1.5">
+   293→                      <Phone className="h-3.5 w-3.5 shrink-0 text-slate-500" />
+   294→                      {c.phone}
+   295→                    </p>
+   296→                  )}
+   297→                </div>
+   298→              </div>
+   299→            ))}
+   300→          </div>
+   301→        ) : (
+   302→          <p className="mt-3 text-xs text-slate-400">Belum ada kontak yang terdaftar untuk perusahaan Anda.</p>
+   303→        )}
+   304→      </section>
+   305→
+   306→      {/* ================= KPI ================= */}
+   307→      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+   308→        <KpiCard
+   309→          icon={<FolderKanban className="h-4 w-4" />}
+   310→          label="Proyek Aktif"
+   311→          value={String(summary.activeProjects)}
+   312→          hint="Proyek yang sedang berjalan di brand kami"
+   313→        />
+   314→        <KpiCard
+   315→          icon={<FileText className="h-4 w-4" />}
+   316→          label="Penawaran Menunggu Keputusan"
+   317→          value={String(summary.openQuotations)}
+   318→          hint="Penawaran berstatus Terkirim"
+   319→          tone="amber"
+   320→        />
+   321→        <KpiCard
+   322→          icon={<Wallet className="h-4 w-4" />}
+   323→          label="Outstanding Tagihan"
+   324→          value={outstanding > 0 ? formatMoney(outstanding) : 'Lunas'}
+   325→          hint={outstanding > 0 ? 'Total sisa tagihan belum dibayar' : 'Semua tagihan sudah dibayar'}
+   326→          tone={outstanding > 0 ? 'rose' : 'emerald'}
+   327→          valueClass={outstanding > 0 ? 'text-rose-700' : 'text-emerald-700'}
+   328→        />
+   329→        <KpiCard
+   330→          icon={<CalendarClock className="h-4 w-4" />}
+   331→          label="Jatuh Tempo Terdekat"
+   332→          value={summary.nextDueDate ? formatDate(summary.nextDueDate) : '—'}
+   333→          hint="Jatuh tempo invoice dengan sisa tagihan"
+   334→        />
+   335→      </div>
+   336→
+   337→      {/* ================= Tabs ================= */}
+   338→      <Tabs defaultValue="proyek">
+   339→        <TabsList className="bg-slate-100">
+   340→          <TabsTrigger value="proyek" className="gap-1.5">Proyek</TabsTrigger>
+   341→          <TabsTrigger value="penawaran" className="gap-1.5">Penawaran</TabsTrigger>
+   342→          <TabsTrigger value="invoice" className="gap-1.5">Invoice</TabsTrigger>
+   343→        </TabsList>
+   344→
+   345→        {/* ---------- Proyek ---------- */}
+   346→        <TabsContent value="proyek" className="mt-4">
+   347→          {projects.length === 0 ? (
+   348→            <EmptyState icon={<FolderKanban className="h-5 w-5" />} title="Belum ada proyek berjalan" description="Proyek akan tampil di sini setelah kesepakatan kerja dimulai." />
+   349→          ) : (
+   350→            <div className="grid gap-4 lg:grid-cols-2">
+   351→              {projects.map((p) => {
+   352→                const pMeta = projectStatusMeta(p.status)
+   353→                return (
+   354→                  <Card key={p.id} className="rounded-xl border-slate-200 shadow-sm">
+   355→                    <CardContent className="space-y-3 p-4">
+   356→                      <div className="flex items-start justify-between gap-2">
+   357→                        <div className="min-w-0">
+   358→                          <div className="flex flex-wrap items-center gap-2">
+   359→                            <BrandChip name={p.brandName} color={p.brandColor} />
+   360→                            <span className="font-mono text-[11px] text-slate-400">{p.code}</span>
+   361→                          </div>
+   362→                          <p className="mt-1.5 text-sm font-semibold leading-snug text-slate-900">{p.name}</p>
+   363→                        </div>
+   364→                        <span className={cn('inline-flex shrink-0 items-center rounded-md px-2 py-0.5 text-[11px] font-semibold', pMeta.bg, pMeta.color)}>
+   365→                          {pMeta.label}
+   366→                        </span>
+   367→                      </div>
+   368→
+   369→                      <div>
+   370→                        <div className="mb-1 flex items-center justify-between text-xs text-slate-500">
+   371→                          <span>Progress</span>
+   372→                          <span className="font-semibold text-slate-700">{p.progress}%</span>
+   373→                        </div>
+   374→                        <Progress value={p.progress} className="h-2" />
+   375→                      </div>
+   376→
+   377→                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+   378→                        <span>{p.managerName ? `Project Manager: ${p.managerName}` : 'Project Manager: —'}</span>
+   379→                        <span>
+   380→                          {p.startDate ? `Mulai ${formatDate(p.startDate)}` : 'Belum mulai'}
+   381→                          {p.endDate ? ` · Target ${formatDate(p.endDate)}` : ''}
+   382→                        </span>
+   383→                      </div>
+   384→
+   385→                      {p.milestones.length > 0 && (
+   386→                        <div className="rounded-lg border border-slate-100 bg-slate-50/60 p-3">
+   387→                          <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-slate-400">Milestone</p>
+   388→                          <ul className="space-y-1.5">
+   389→                            {p.milestones.map((m) => (
+   390→                              <li key={m.id} className="flex items-center gap-2 text-xs">
+   391→                                {m.status === 'DONE'
+   392→                                  ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+   393→                                  : <Circle className="h-3.5 w-3.5 shrink-0 text-slate-300" />}
+   394→                                <span className={cn('flex-1', m.status === 'DONE' ? 'text-slate-600 line-through decoration-slate-300' : 'text-slate-700')}>
+   395→                                  {m.name}
+   396→                                </span>
+   397→                                {m.dueDate && <span className="shrink-0 text-[11px] text-slate-400">{formatDate(m.dueDate)}</span>}
+   398→                              </li>
+   399→                            ))}
+   400→                          </ul>
+   401→                        </div>
+   402→                      )}
+   403→                    </CardContent>
+   404→                  </Card>
+   405→                )
+   406→              })}
+   407→            </div>
+   408→          )}
+   409→        </TabsContent>
+   410→
+   411→        {/* ---------- Penawaran ---------- */}
+   412→        <TabsContent value="penawaran" className="mt-4">
+   413→          {quotations.length === 0 ? (
+   414→            <EmptyState icon={<FileText className="h-5 w-5" />} title="Belum ada penawaran" description="Penawaran resmi yang telah dikirim akan tampil di sini." />
+   415→          ) : (
+   416→            <div className="grid gap-4 lg:grid-cols-2">
+   417→              {quotations.map((q) => {
+   418→                const vu = validUntilText(q)
+   419→                return (
+   420→                  <Card key={q.id} className="rounded-xl border-slate-200 shadow-sm">
+   421→                    <CardContent className="space-y-3 p-4">
+   422→                      <div className="flex items-start justify-between gap-2">
+   423→                        <div className="min-w-0">
+   424→                          <div className="flex flex-wrap items-center gap-2">
+   425→                            <BrandChip name={q.brandName} color={q.brandColor} />
+   426→                            <span className="font-mono text-[11px] text-slate-400">{q.code}</span>
+   427→                          </div>
+   428→                          <p className="mt-1.5 line-clamp-2 text-sm font-semibold leading-snug text-slate-900">{q.title}</p>
+   429→                        </div>
+   430→                        <StatusBadge meta={QUO_STATUS[q.status] ?? QUO_STATUS.DRAFT} />
+   431→                      </div>
+   432→
+   433→                      <p className="text-xl font-bold tracking-tight text-slate-900">{formatMoney(q.total, q.currency)}</p>
+   434→                      <p className={cn('text-xs', vu.urgent ? 'font-medium text-amber-700' : 'text-slate-500')}>{vu.text}</p>
+   435→
+   436→                      <div className="flex items-center justify-between gap-2 pt-1">
+   437→                        <span className="text-[11px] text-slate-400">Versi v{q.version}</span>
+   438→                        <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setQuoDetail(q)}>
+   439→                          Lihat Detail
+   440→                        </Button>
+   441→                      </div>
+   442→                    </CardContent>
+   443→                  </Card>
+   444→                )
+   445→              })}
+   446→            </div>
+   447→          )}
+   448→        </TabsContent>
+   449→
+   450→        {/* ---------- Invoice ---------- */}
+   451→        <TabsContent value="invoice" className="mt-4">
+   452→          {invoices.length === 0 ? (
+   453→            <EmptyState icon={<Wallet className="h-5 w-5" />} title="Belum ada invoice" description="Invoice yang diterbitkan untuk perusahaan Anda akan tampil di sini." />
+   454→          ) : (
+   455→            <div className="grid gap-4 lg:grid-cols-2">
+   456→              {invoices.map((inv) => {
+   457→                const due = dueInfoOf(inv)
+   458→                const paidPct = inv.total > 0 ? Math.min(100, Math.round((inv.paidAmount / inv.total) * 100)) : 0
+   459→                return (
+   460→                  <Card key={inv.id} className="rounded-xl border-slate-200 shadow-sm">
+   461→                    <CardContent className="space-y-3 p-4">
+   462→                      <div className="flex items-start justify-between gap-2">
+   463→                        <div className="min-w-0">
+   464→                          <div className="flex flex-wrap items-center gap-2">
+   465→                            <BrandChip name={inv.brandName} color={inv.brandColor} />
+   466→                            <span className="font-mono text-[11px] text-slate-400">{inv.code}</span>
+   467→                            {inv.projectCode && (
+   468→                              <span className="inline-flex items-center rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] font-medium text-slate-600">
+   469→                                {inv.projectCode}
+   470→                              </span>
+   471→                            )}
+   472→                          </div>
+   473→                          <p className="mt-1.5 line-clamp-2 text-sm font-semibold leading-snug text-slate-900">{inv.title}</p>
+   474→                        </div>
+   475→                        <StatusBadge meta={INV_STATUS[inv.status] ?? INV_STATUS.UNPAID} />
+   476→                      </div>
+   477→
+   478→                      <div>
+   479→                        <div className="mb-1 flex items-center justify-between text-xs text-slate-500">
+   480→                          <span>Terbayar {formatMoney(inv.paidAmount, inv.currency)} / {formatMoney(inv.total, inv.currency)}</span>
+   481→                          <span className="font-semibold text-slate-700">{paidPct}%</span>
+   482→                        </div>
+   483→                        <Progress value={paidPct} className="h-2" />
+   484→                      </div>
+   485→
+   486→                      <div className="flex items-center justify-between gap-2">
+   487→                        <p className={cn('text-xs', due.overdue ? 'font-semibold text-rose-600' : 'text-slate-500')}>{due.text}</p>
+   488→                        <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setInvDetail(inv)}>
+   489→                          Lihat Detail
+   490→                        </Button>
+   491→                      </div>
+   492→                    </CardContent>
+   493→                  </Card>
+   494→                )
+   495→              })}
+   496→            </div>
+   497→          )}
+   498→        </TabsContent>
+   499→      </Tabs>
+   500→
+   501→      {/* ================= Footer note ================= */}
+   502→      <p className="flex items-start gap-1.5 text-xs text-slate-400">
+   503→        <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+   504→        Data yang ditampilkan terbatas pada perusahaan Anda. Hubungi tim account manager untuk pertanyaan.
+   505→      </p>
+   506→
+   507→      {/* ================= Dialog Penawaran ================= */}
+   508→      <Dialog
+   509→        open={quoDetail !== null}
+   510→        onOpenChange={(open) => { if (!open) { setQuoDetail(null); setPrintTarget(null) } }}
+   511→      >
+   512→        <DialogContent
+   513→          className={cn('max-h-[90vh] max-w-2xl overflow-y-auto', SCROLLBAR)}
+   514→          onInteractOutside={(e) => { if (printTarget) e.preventDefault() }}
+   515→        >
+   516→          {quoDetail && (
+   517→            <>
+   518→              <DialogHeader className="text-left">
+   519→                <div className="flex flex-wrap items-center gap-2">
+   520→                  <BrandChip name={quoDetail.brandName} color={quoDetail.brandColor} />
+   521→                  <span className="font-mono text-xs text-slate-400">{quoDetail.code}</span>
+   522→                  <StatusBadge meta={QUO_STATUS[quoDetail.status] ?? QUO_STATUS.DRAFT} />
+   523→                </div>
+   524→                <DialogTitle className="text-left text-base leading-snug">{quoDetail.title}</DialogTitle>
+   525→                <DialogDescription className="text-left">
+   526→                  Penawaran resmi dari {quoDetail.brandName} untuk {company.name} · v{quoDetail.version}
+   527→                </DialogDescription>
+   528→              </DialogHeader>
+   529→
+   530→              <div className="grid grid-cols-2 gap-2 rounded-lg border border-slate-100 bg-slate-50/60 p-3 text-xs text-slate-600">
+   531→                <p><span className="text-slate-400">Dikirim:</span> {formatDate(quoDetail.sentAt)}</p>
+   532→                <p><span className="text-slate-400">Berlaku hingga:</span> {formatDate(quoDetail.validUntil)}</p>
+   533→                {quoDetail.decidedAt && <p><span className="text-slate-400">Diputuskan:</span> {formatDate(quoDetail.decidedAt, true)}</p>}
+   534→                <p><span className="text-slate-400">Dibuat:</span> {formatDate(quoDetail.createdAt)}</p>
+   535→              </div>
+   536→
+   537→              <div className={cn('max-h-64 overflow-y-auto rounded-lg border border-slate-100', SCROLLBAR)}>
+   538→                <Table>
+   539→                  <TableHeader>
+   540→                    <TableRow className="bg-slate-50">
+   541→                      <TableHead className="w-10 text-slate-500">No</TableHead>
+   542→                      <TableHead className="text-slate-500">Deskripsi</TableHead>
+   543→                      <TableHead className="w-16 text-right text-slate-500">Qty</TableHead>
+   544→                      <TableHead className="w-32 text-right text-slate-500">Harga</TableHead>
+   545→                      <TableHead className="w-36 text-right text-slate-500">Jumlah</TableHead>
+   546→                    </TableRow>
+   547→                  </TableHeader>
+   548→                  <TableBody>
+   549→                    {quoDetail.items.map((it, i) => (
+   550→                      <TableRow key={it.id ?? i}>
+   551→                        <TableCell className="text-slate-400">{i + 1}</TableCell>
+   552→                        <TableCell className="font-medium text-slate-800">{it.description}</TableCell>
+   553→                        <TableCell className="text-right text-slate-600">{it.qty}</TableCell>
+   554→                        <TableCell className="text-right text-slate-600">{formatMoney(it.unitPrice, quoDetail.currency)}</TableCell>
+   555→                        <TableCell className="text-right font-semibold text-slate-800">{formatMoney(it.lineTotal, quoDetail.currency)}</TableCell>
+   556→                      </TableRow>
+   557→                    ))}
+   558→                  </TableBody>
+   559→                </Table>
+   560→              </div>
+   561→
+   562→              <div className="ml-auto w-full max-w-xs space-y-1 rounded-lg border border-slate-200 p-3 text-xs">
+   563→                <div className="flex items-center justify-between text-slate-600">
+   564→                  <span>Subtotal</span>
+   565→                  <span className="font-semibold text-slate-800">{formatMoney(quoDetail.subtotal, quoDetail.currency)}</span>
+   566→                </div>
+   567→                {quoDetail.discountPct > 0 && (
+   568→                  <div className="flex items-center justify-between text-slate-600">
+   569→                    <span>Diskon ({quoDetail.discountPct}%)</span>
+   570→                    <span className="font-semibold text-slate-800">- {formatMoney(quoDetail.discountAmount, quoDetail.currency)}</span>
+   571→                  </div>
+   572→                )}
+   573→                <div className="flex items-center justify-between text-slate-600">
+   574→                  <span>PPN ({quoDetail.taxPct}%)</span>
+   575→                  <span className="font-semibold text-slate-800">{formatMoney(quoDetail.taxAmount, quoDetail.currency)}</span>
+   576→                </div>
+   577→                <div className="flex items-center justify-between border-t-2 border-slate-900 pt-1.5 text-[13px] font-bold text-slate-900">
+   578→                  <span>Total</span>
+   579→                  <span>{formatMoney(quoDetail.total, quoDetail.currency)}</span>
+   580→                </div>
+   581→              </div>
+   582→
+   583→              <DialogFooter className="flex-row flex-wrap gap-2 border-t border-slate-100 pt-3 sm:justify-end">
+   584→                <Button
+   585→                  variant="outline"
+   586→                  className="gap-1.5"
+   587→                  onClick={() => setPrintTarget('quotation')}
+   588→                >
+   589→                  <Printer className="h-4 w-4" /> Cetak / PDF
+   590→                </Button>
+   591→                <Button variant="ghost" onClick={() => { setQuoDetail(null); setPrintTarget(null) }}>Tutup</Button>
+   592→              </DialogFooter>
+   593→            </>
+   594→          )}
+   595→        </DialogContent>
+   596→      </Dialog>
+   597→
+   598→      {/* ================= Dialog Invoice ================= */}
+   599→      <Dialog
+   600→        open={invDetail !== null}
+   601→        onOpenChange={(open) => { if (!open) { setInvDetail(null); setPrintTarget(null) } }}
+   602→      >
+   603→        <DialogContent
+   604→          className={cn('max-h-[90vh] max-w-2xl overflow-y-auto', SCROLLBAR)}
+   605→          onInteractOutside={(e) => { if (printTarget) e.preventDefault() }}
+   606→        >
+   607→          {invDetail && (
+   608→            <>
+   609→              <DialogHeader className="text-left">
+   610→                <div className="flex flex-wrap items-center gap-2">
+   611→                  <BrandChip name={invDetail.brandName} color={invDetail.brandColor} />
+   612→                  <span className="font-mono text-xs text-slate-400">{invDetail.code}</span>
+   613→                  <StatusBadge meta={INV_STATUS[invDetail.status] ?? INV_STATUS.UNPAID} />
+   614→                </div>
+   615→                <DialogTitle className="text-left text-base leading-snug">{invDetail.title}</DialogTitle>
+   616→                <DialogDescription className="text-left">
+   617→                  Invoice dari {invDetail.brandName} untuk {company.name}
+   618→                  {invDetail.projectCode ? ` · Proyek ${invDetail.projectCode}` : ''}
+   619→                </DialogDescription>
+   620→              </DialogHeader>
+   621→
+   622→              <div className="grid grid-cols-2 gap-2 rounded-lg border border-slate-100 bg-slate-50/60 p-3 text-xs text-slate-600">
+   623→                <p><span className="text-slate-400">Diterbitkan:</span> {formatDate(invDetail.issuedAt)}</p>
+   624→                <p><span className="text-slate-400">Jatuh tempo:</span> {formatDate(invDetail.dueDate)}</p>
+   625→                <p><span className="text-slate-400">Nilai (sebelum PPN):</span> {formatMoney(invDetail.amount, invDetail.currency)}</p>
+   626→                <p><span className="text-slate-400">PPN:</span> {invDetail.taxPct}%</p>
+   627→              </div>
+   628→
+   629→              <div className="rounded-lg border border-slate-200 p-3">
+   630→                <div className="mb-2 flex items-center justify-between text-xs">
+   631→                  <span className="text-slate-500">
+   632→                    Terbayar <span className="font-semibold text-slate-800">{formatMoney(invDetail.paidAmount, invDetail.currency)}</span> / {formatMoney(invDetail.total, invDetail.currency)}
+   633→                  </span>
+   634→                  <span className={cn('font-semibold', invDetail.total - invDetail.paidAmount > 0 ? 'text-rose-600' : 'text-emerald-700')}>
+   635→                    Sisa {formatMoney(Math.max(0, invDetail.total - invDetail.paidAmount), invDetail.currency)}
+   636→                  </span>
+   637→                </div>
+   638→                <Progress
+   639→                  value={invDetail.total > 0 ? Math.min(100, Math.round((invDetail.paidAmount / invDetail.total) * 100)) : 0}
+   640→                  className="h-2"
+   641→                />
+   642→              </div>
+   643→
+   644→              <div>
+   645→                <p className="mb-1.5 text-[10px] font-bold uppercase tracking-widest text-slate-400">Riwayat Pembayaran</p>
+   646→                {invDetail.payments.length === 0 ? (
+   647→                  <p className="rounded-lg border border-dashed border-slate-200 bg-slate-50/50 px-3 py-4 text-center text-xs text-slate-400">
+   648→                    Belum ada pembayaran tercatat.
+   649→                  </p>
+   650→                ) : (
+   651→                  <div className={cn('max-h-52 overflow-y-auto rounded-lg border border-slate-100', SCROLLBAR)}>
+   652→                    <Table>
+   653→                      <TableHeader>
+   654→                        <TableRow className="bg-slate-50">
+   655→                          <TableHead className="text-slate-500">Tanggal</TableHead>
+   656→                          <TableHead className="text-slate-500">Metode</TableHead>
+   657→                          <TableHead className="text-slate-500">Referensi</TableHead>
+   658→                          <TableHead className="text-right text-slate-500">Jumlah</TableHead>
+   659→                        </TableRow>
+   660→                      </TableHeader>
+   661→                      <TableBody>
+   662→                        {invDetail.payments.map((p) => (
+   663→                          <TableRow key={p.id}>
+   664→                            <TableCell className="text-slate-600">{formatDate(p.paidAt)}</TableCell>
+   665→                            <TableCell className="text-slate-600">{p.method}</TableCell>
+   666→                            <TableCell className="text-slate-500">{p.reference || '—'}</TableCell>
+   667→                            <TableCell className="text-right font-semibold text-emerald-700">{formatMoney(p.amount, invDetail.currency)}</TableCell>
+   668→                          </TableRow>
+   669→                        ))}
+   670→                      </TableBody>
+   671→                    </Table>
+   672→                  </div>
+   673→                )}
+   674→              </div>
+   675→
+   676→              <DialogFooter className="flex-row flex-wrap gap-2 border-t border-slate-100 pt-3 sm:justify-end">
+   677→                <Button
+   678→                  variant="outline"
+   679→                  className="gap-1.5"
+   680→                  onClick={() => setPrintTarget('invoice')}
+   681→                >
+   682→                  <Printer className="h-4 w-4" /> Cetak / PDF
+   683→                </Button>
+   684→                <Button variant="ghost" onClick={() => { setInvDetail(null); setPrintTarget(null) }}>Tutup</Button>
+   685→              </DialogFooter>
+   686→            </>
+   687→          )}
+   688→        </DialogContent>
+   689→      </Dialog>
+   690→
+   691→      {/* ================= Print overlays ================= */}
+   692→      {printTarget === 'quotation' && quoDetail && (
+   693→        <PrintOverlay
+   694→          open
+   695→          docTitle={`${quoDetail.code} — ${quoDetail.title}`}
+   696→          onClose={() => setPrintTarget(null)}
+   697→        >
+   698→          <QuotationPrintBody q={buildQuotationDetail(quoDetail)} />
+   699→        </PrintOverlay>
+   700→      )}
+   701→      {printTarget === 'invoice' && invDetail && (
+   702→        <PrintOverlay
+   703→          open
+   704→          docTitle={`${invDetail.code} — ${invDetail.title}`}
+   705→          onClose={() => setPrintTarget(null)}
+   706→        >
+   707→          <InvoicePrintBody inv={buildInvoiceDetail(invDetail)} />
+   708→        </PrintOverlay>
+   709→      )}
+   710→    </div>
+   711→  )
+   712→}
+   713→

@@ -1,0 +1,691 @@
+     1→     1→/* ============ Command Center — Dashboard Direktur ============ */
+     2→     2→'use client'
+     3→     3→
+     4→     4→import React, { useCallback, useEffect, useState } from 'react'
+     5→     5→import { crmApi } from './api-client'
+     6→     6→import { useCrmStore } from './crm-store'
+     7→     7→import {
+     8→     8→  BrandChip, ChannelIcon, EmptyState, LoadingRows, PriorityBadge, RefreshButton, StageBadge, UserAvatar,
+     9→     9→} from './shared'
+    10→    10→import {
+    11→    11→  channelMeta, daysUntil, formatDate, formatMoney, lostReasonLabel, projectStatusMeta, stageMeta, timeAgo,
+    12→    12→} from '@/lib/crm-constants'
+    13→    13→import type { DashboardDTO, TaskDTO } from '@/lib/crm-types'
+    14→    14→import { Button } from '@/components/ui/button'
+    15→    15→import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+    16→    16→import { Progress } from '@/components/ui/progress'
+    17→    17→import { Skeleton } from '@/components/ui/skeleton'
+    18→    18→import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+    19→    19→import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+    20→    20→import { useToast } from '@/hooks/use-toast'
+    21→    21→import { cn } from '@/lib/utils'
+    22→    22→import {
+    23→    23→  Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis,
+    24→    24→} from 'recharts'
+    25→    25→import {
+    26→    26→  AlertTriangle, Building2, CalendarClock, Check, ChevronRight, Clock, Inbox, ListTodo, Loader2,
+    27→    27→  Sparkles, Target, Timer, TrendingUp, Trophy, Users, Wallet, XCircle,
+    28→    28→} from 'lucide-react'
+    29→    29→
+    30→    30→/* Warna bar per channel (hex, agar aman dipakai di style inline) */
+    31→    31→const CHANNEL_HEX: Record<string, string> = {
+    32→    32→  WHATSAPP: '#059669',
+    33→    33→  EMAIL: '#d97706',
+    34→    34→  INSTAGRAM: '#e11d48',
+    35→    35→  WEBSITE: '#0d9488',
+    36→    36→  PHONE: '#ea580c',
+    37→    37→  MEETING: '#7c3aed',
+    38→    38→}
+    39→    39→
+    40→    40→const fmtNum = (n: number) => n.toLocaleString('id-ID', { maximumFractionDigits: 1 })
+    41→    41→const pctOf = (value: number, total: number) => (total > 0 ? Math.round((value / total) * 100) : 0)
+    42→    42→
+    43→    43→type Tone = 'default' | 'warning' | 'danger' | 'positive'
+    44→    44→const TONES: Record<Tone, { card: string; icon: string }> = {
+    45→    45→  default: { card: 'border-slate-200 bg-white', icon: 'bg-slate-100 text-slate-600' },
+    46→    46→  warning: { card: 'border-amber-200 bg-amber-50', icon: 'bg-amber-100 text-amber-700' },
+    47→    47→  danger: { card: 'border-rose-200 bg-rose-50', icon: 'bg-rose-100 text-rose-700' },
+    48→    48→  positive: { card: 'border-teal-200 bg-teal-50/60', icon: 'bg-teal-100 text-teal-700' },
+    49→    49→}
+    50→    50→
+    51→    51→function KpiCard({ icon, label, value, hint, tone = 'default' }: {
+    52→    52→  icon: React.ReactNode; label: string; value: string; hint: string; tone?: Tone
+    53→    53→}) {
+    54→    54→  const t = TONES[tone]
+    55→    55→  return (
+    56→    56→    <Card className={cn('rounded-xl shadow-sm transition-shadow hover:shadow-md', t.card)}>
+    57→    57→      <CardContent className="p-4">
+    58→    58→        <div className="flex items-start justify-between gap-2">
+    59→    59→          <p className="text-xs font-medium text-slate-500">{label}</p>
+    60→    60→          <div className={cn('flex h-8 w-8 shrink-0 items-center justify-center rounded-lg', t.icon)}>{icon}</div>
+    61→    61→        </div>
+    62→    62→        <p className="mt-2 text-2xl font-bold tracking-tight text-slate-900">{value}</p>
+    63→    63→        <p className="mt-1 text-[11px] leading-snug text-slate-400">{hint}</p>
+    64→    64→      </CardContent>
+    65→    65→    </Card>
+    66→    66→  )
+    67→    67→}
+    68→    68→
+    69→    69→function dueInfo(task: TaskDTO): { label: string; overdue: boolean } {
+    70→    70→  if (!task.dueDate) return { label: 'Tanpa tenggat', overdue: false }
+    71→    71→  const d = daysUntil(task.dueDate)
+    72→    72→  if (d === null) return { label: formatDate(task.dueDate), overdue: false }
+    73→    73→  if (d < 0) return { label: `${formatDate(task.dueDate)} · terlambat ${Math.abs(d)} hari`, overdue: true }
+    74→    74→  if (d === 0) return { label: `${formatDate(task.dueDate)} · hari ini`, overdue: false }
+    75→    75→  return { label: `${formatDate(task.dueDate)} · ${d} hari lagi`, overdue: false }
+    76→    76→}
+    77→    77→
+    78→    78→export default function DashboardView() {
+    79→    79→  const openOpportunity = useCrmStore((s) => s.openOpportunity)
+    80→    80→  const openCompany = useCrmStore((s) => s.openCompany)
+    81→    81→  const { toast } = useToast()
+    82→    82→
+    83→    83→  const [data, setData] = useState<DashboardDTO | null>(null)
+    84→    84→  const [loading, setLoading] = useState(true)
+    85→    85→  const [error, setError] = useState<string | null>(null)
+    86→    86→  const [lastUpdated, setLastUpdated] = useState<string | null>(null)
+    87→    87→  const [completingIds, setCompletingIds] = useState<Set<string>>(new Set())
+    88→    88→
+    89→    89→  const load = useCallback(async () => {
+    90→    90→    setLoading(true)
+    91→    91→    setError(null)
+    92→    92→    try {
+    93→    93→      const res = await crmApi.dashboard()
+    94→    94→      setData(res)
+    95→    95→      setLastUpdated(new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }))
+    96→    96→    } catch (e) {
+    97→    97→      setError(e instanceof Error ? e.message : 'Gagal memuat dashboard')
+    98→    98→    } finally {
+    99→    99→      setLoading(false)
+   100→   100→    }
+   101→   101→  }, [])
+   102→   102→
+   103→   103→  useEffect(() => { void load() }, [load])
+   104→   104→
+   105→   105→  const handleCompleteTask = async (task: TaskDTO) => {
+   106→   106→    setCompletingIds((prev) => new Set(prev).add(task.id))
+   107→   107→    try {
+   108→   108→      await crmApi.updateTask(task.id, { status: 'DONE' })
+   109→   109→      toast({ title: 'Task diselesaikan', description: task.title })
+   110→   110→      await load()
+   111→   111→    } catch (e) {
+   112→   112→      toast({
+   113→   113→        title: 'Gagal menyelesaikan task',
+   114→   114→        description: e instanceof Error ? e.message : 'Coba lagi',
+   115→   115→        variant: 'destructive',
+   116→   116→      })
+   117→   117→    } finally {
+   118→   118→      setCompletingIds((prev) => {
+   119→   119→        const next = new Set(prev)
+   120→   120→        next.delete(task.id)
+   121→   121→        return next
+   122→   122→      })
+   123→   123→    }
+   124→   124→  }
+   125→   125→
+   126→   126→  /* ---------- Loading & error ---------- */
+   127→   127→  if (loading && !data) {
+   128→   128→    return (
+   129→   129→      <div className="space-y-5">
+   130→   130→        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+   131→   131→          {Array.from({ length: 8 }).map((_, i) => (
+   132→   132→            <Skeleton key={i} className="h-[104px] rounded-xl" />
+   133→   133→          ))}
+   134→   134→        </div>
+   135→   135→        <Card className="rounded-xl border-slate-200">
+   136→   136→          <CardContent className="p-6">
+   137→   137→            <LoadingRows rows={4} />
+   138→   138→          </CardContent>
+   139→   139→        </Card>
+   140→   140→      </div>
+   141→   141→    )
+   142→   142→  }
+   143→   143→  if (error && !data) {
+   144→   144→    return (
+   145→   145→      <Card className="mx-auto max-w-lg rounded-xl border-rose-200 bg-rose-50">
+   146→   146→        <CardContent className="flex flex-col items-center gap-3 p-6 text-center">
+   147→   147→          <AlertTriangle className="h-8 w-8 text-rose-500" />
+   148→   148→          <div>
+   149→   149→            <p className="font-semibold text-rose-800">Gagal memuat dashboard</p>
+   150→   150→            <p className="mt-1 text-sm text-rose-600">{error}</p>
+   151→   151→          </div>
+   152→   152→          <Button variant="outline" onClick={() => void load()} className="border-rose-300 hover:bg-rose-100">
+   153→   153→            Coba lagi
+   154→   154→          </Button>
+   155→   155→        </CardContent>
+   156→   156→      </Card>
+   157→   157→    )
+   158→   158→  }
+   159→   159→  if (!data) return null
+   160→   160→
+   161→   161→  const k = data.kpis
+   162→   162→  const maxBrandCount = Math.max(...data.leadsByBrand.map((b) => b.count), 1)
+   163→   163→  const maxChannel = Math.max(...data.leadsByChannel.map((c) => c.count), 1)
+   164→   164→  const maxCountry = Math.max(...data.leadsByCountry.map((c) => c.count), 1)
+   165→   165→  const maxLost = Math.max(...data.lostReasons.map((r) => r.count), 1)
+   166→   166→  const wonTotal = data.wonLost.won + data.wonLost.lost
+   167→   167→  const winRatio = wonTotal > 0 ? Math.round((data.wonLost.won / wonTotal) * 100) : 0
+   168→   168→  const upcoming = data.upcomingTasks.slice(0, 8)
+   169→   169→  const activities = data.recentInteractions.slice(0, 8)
+   170→   170→  const funnelData = data.funnel.map((f) => ({ name: stageMeta(f.stage).label, count: f.count }))
+   171→   171→
+   172→   172→  const kpis: { key: string; icon: React.ReactNode; label: string; value: string; hint: string; tone?: Tone }[] = [
+   173→   173→    { key: 'open', icon: <Users className="h-4 w-4" />, label: 'Total Lead Aktif', value: String(k.totalOpenLeads), hint: 'Opportunity dengan stage terbuka' },
+   174→   174→    { key: 'new', icon: <Sparkles className="h-4 w-4" />, label: 'Lead Baru Minggu Ini', value: String(k.newThisWeek), hint: 'Masuk dalam 7 hari terakhir', tone: 'positive' },
+   175→   175→    { key: 'unread', icon: <Inbox className="h-4 w-4" />, label: 'Belum Dibalas', value: String(k.unreadInbound), hint: 'Pesan masuk menunggu respons', tone: k.unreadInbound > 0 ? 'warning' : 'default' },
+   176→   176→    { key: 'pipeline', icon: <Wallet className="h-4 w-4" />, label: 'Pipeline Value', value: formatMoney(k.pipelineValue, 'IDR', true), hint: 'Nilai seluruh lead aktif (IDR)' },
+   177→   177→    { key: 'weighted', icon: <Target className="h-4 w-4" />, label: 'Weighted Pipeline', value: formatMoney(k.weightedPipeline, 'IDR', true), hint: 'Nilai × probabilitas per stage' },
+   178→   178→    { key: 'winrate', icon: <Trophy className="h-4 w-4" />, label: 'Win Rate', value: `${fmtNum(k.winRate)}%`, hint: 'Persentase deal yang dimenangkan' },
+   179→   179→    { key: 'response', icon: <Timer className="h-4 w-4" />, label: 'Avg Response Time', value: `${fmtNum(k.avgResponseHours)} jam`, hint: 'Rata-rata waktu balas pesan masuk' },
+   180→   180→    { key: 'overdue', icon: <AlertTriangle className="h-4 w-4" />, label: 'Overdue Tasks', value: String(k.overdueTasks), hint: 'Task melewati jatuh tempo', tone: k.overdueTasks > 0 ? 'danger' : 'default' },
+   181→   181→  ]
+   182→   182→
+   183→   183→  const forecasts: { key: string; label: string; value: number; bar: string }[] = [
+   184→   184→    { key: '30', label: '≤ 30 Hari', value: k.forecast30, bar: '[&>div]:bg-teal-600' },
+   185→   185→    { key: '60', label: '≤ 60 Hari', value: k.forecast60, bar: '[&>div]:bg-teal-400' },
+   186→   186→    { key: '90', label: '≤ 90 Hari', value: k.forecast90, bar: '[&>div]:bg-amber-500' },
+   187→   187→  ]
+   188→   188→
+   189→   189→  return (
+   190→   190→    <div className="space-y-5">
+   191→   191→      {/* Error stale banner */}
+   192→   192→      {error && (
+   193→   193→        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
+   194→   194→          <span className="inline-flex items-center gap-2"><AlertTriangle className="h-4 w-4" /> Gagal memuat data terbaru: {error}</span>
+   195→   195→          <Button size="sm" variant="outline" className="h-7 border-amber-300 hover:bg-amber-100" onClick={() => void load()}>Coba lagi</Button>
+   196→   196→        </div>
+   197→   197→      )}
+   198→   198→
+   199→   199→      <Tabs defaultValue="ringkasan" className="space-y-5">
+   200→   200→        <div className="flex flex-wrap items-center justify-between gap-3">
+   201→   201→          <TabsList className="grid h-auto w-full grid-cols-3 gap-1 p-1 sm:inline-flex sm:w-auto">
+   202→   202→            <TabsTrigger value="ringkasan" className="px-3 py-1.5 text-xs sm:text-sm">Ringkasan</TabsTrigger>
+   203→   203→            <TabsTrigger value="analitik" className="px-3 py-1.5 text-xs sm:text-sm">Funnel &amp; Analitik</TabsTrigger>
+   204→   204→            <TabsTrigger value="tim" className="px-3 py-1.5 text-xs sm:text-sm">Tim Marketing</TabsTrigger>
+   205→   205→          </TabsList>
+   206→   206→          <div className="flex items-center gap-3">
+   207→   207→            {lastUpdated && <span className="text-[11px] text-slate-400">Diperbarui {lastUpdated}</span>}
+   208→   208→            <RefreshButton onClick={() => void load()} loading={loading} />
+   209→   209→          </div>
+   210→   210→        </div>
+   211→   211→
+   212→   212→        {/* ================= TAB RINGKASAN ================= */}
+   213→   213→        <TabsContent value="ringkasan" className="space-y-5">
+   214→   214→          {/* KPI grid */}
+   215→   215→          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+   216→   216→            {kpis.map((item) => (
+   217→   217→              <KpiCard key={item.key} icon={item.icon} label={item.label} value={item.value} hint={item.hint} tone={item.tone} />
+   218→   218→            ))}
+   219→   219→          </div>
+   220→   220→
+   221→   221→          {/* Forecast penutupan */}
+   222→   222→          <Card className="rounded-xl border-slate-200">
+   223→   223→            <CardHeader className="pb-3">
+   224→   224→              <CardTitle className="flex items-center gap-2 text-base">
+   225→   225→                <CalendarClock className="h-4 w-4 text-teal-600" /> Forecast Penutupan
+   226→   226→              </CardTitle>
+   227→   227→              <CardDescription>Proyeksi nilai deal yang diperkirakan closing dalam rentang waktu berikut</CardDescription>
+   228→   228→            </CardHeader>
+   229→   229→            <CardContent>
+   230→   230→              <div className="grid gap-4 sm:grid-cols-3">
+   231→   231→                {forecasts.map((f) => (
+   232→   232→                  <div key={f.key} className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+   233→   233→                    <div className="flex items-baseline justify-between gap-2">
+   234→   234→                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{f.label}</p>
+   235→   235→                      <p className="text-[11px] text-slate-400">{pctOf(f.value, k.pipelineValue)}% pipeline</p>
+   236→   236→                    </div>
+   237→   237→                    <p className="mt-1.5 text-xl font-bold text-slate-900">{formatMoney(f.value, 'IDR', true)}</p>
+   238→   238→                    <Progress value={pctOf(f.value, k.pipelineValue)} className={cn('mt-2.5 h-2 bg-slate-100', f.bar)} />
+   239→   239→                  </div>
+   240→   240→                ))}
+   241→   241→              </div>
+   242→   242→            </CardContent>
+   243→   243→          </Card>
+   244→   244→
+   245→   245→          {/* Lead per brand */}
+   246→   246→          <Card className="rounded-xl border-slate-200">
+   247→   247→            <CardHeader className="pb-3">
+   248→   248→              <CardTitle className="text-base">Lead per Brand</CardTitle>
+   249→   249→              <CardDescription>Jumlah lead aktif dan total nilai per brand</CardDescription>
+   250→   250→            </CardHeader>
+   251→   251→            <CardContent>
+   252→   252→              {data.leadsByBrand.length === 0 ? (
+   253→   253→                <EmptyState icon={<Users className="h-5 w-5" />} title="Belum ada lead aktif" description="Lead akan muncul di sini setelah opportunity dibuat." />
+   254→   254→              ) : (
+   255→   255→                <div className="space-y-4">
+   256→   256→                  {data.leadsByBrand.map((b) => (
+   257→   257→                    <div key={b.brandId}>
+   258→   258→                      <div className="mb-1.5 flex flex-wrap items-center gap-2">
+   259→   259→                        <BrandChip name={b.name} color={b.color} />
+   260→   260→                        <span className="text-xs font-semibold text-slate-700">{b.count} lead</span>
+   261→   261→                        <span className="ml-auto text-xs font-medium text-slate-500">{formatMoney(b.value, 'IDR', true)}</span>
+   262→   262→                      </div>
+   263→   263→                      <Progress
+   264→   264→                        value={pctOf(b.count, maxBrandCount)}
+   265→   265→                        className="h-2 bg-slate-100 [&>div]:bg-current"
+   266→   266→                        style={{ color: b.color }}
+   267→   267→                      />
+   268→   268→                    </div>
+   269→   269→                  ))}
+   270→   270→                </div>
+   271→   271→              )}
+   272→   272→            </CardContent>
+   273→   273→          </Card>
+   274→   274→
+   275→   275→          {/* Kanal + Negara */}
+   276→   276→          <div className="grid gap-4 lg:grid-cols-2">
+   277→   277→            <Card className="rounded-xl border-slate-200">
+   278→   278→              <CardHeader className="pb-3">
+   279→   279→                <CardTitle className="text-base">Lead per Kanal</CardTitle>
+   280→   280→                <CardDescription>Dari mana lead masuk</CardDescription>
+   281→   281→              </CardHeader>
+   282→   282→              <CardContent>
+   283→   283→                {data.leadsByChannel.length === 0 ? (
+   284→   284→                  <EmptyState icon={<Inbox className="h-5 w-5" />} title="Belum ada data kanal" />
+   285→   285→                ) : (
+   286→   286→                  <div className="space-y-3">
+   287→   287→                    {data.leadsByChannel.map((c) => {
+   288→   288→                      const meta = channelMeta(c.channel)
+   289→   289→                      return (
+   290→   290→                        <div key={c.channel} className="flex items-center gap-3">
+   291→   291→                          <div className={cn('flex h-8 w-8 shrink-0 items-center justify-center rounded-full', meta.bg)}>
+   292→   292→                            <ChannelIcon channel={c.channel} className="h-4 w-4" />
+   293→   293→                          </div>
+   294→   294→                          <div className="min-w-0 flex-1">
+   295→   295→                            <div className="flex items-center justify-between gap-2">
+   296→   296→                              <p className="truncate text-xs font-medium text-slate-700">{meta.label}</p>
+   297→   297→                              <p className="text-xs font-semibold text-slate-900">{c.count}</p>
+   298→   298→                            </div>
+   299→   299→                            <Progress
+   300→   300→                              value={pctOf(c.count, maxChannel)}
+   301→   301→                              className="mt-1 h-1.5 bg-slate-100 [&>div]:bg-current"
+   302→   302→                              style={{ color: CHANNEL_HEX[c.channel] ?? '#64748b' }}
+   303→   303→                            />
+   304→   304→                          </div>
+   305→   305→                        </div>
+   306→   306→                      )
+   307→   307→                    })}
+   308→   308→                  </div>
+   309→   309→                )}
+   310→   310→              </CardContent>
+   311→   311→            </Card>
+   312→   312→
+   313→   313→            <Card className="rounded-xl border-slate-200">
+   314→   314→              <CardHeader className="pb-3">
+   315→   315→                <CardTitle className="text-base">Lead per Negara</CardTitle>
+   316→   316→                <CardDescription>Sebaran geografis lead aktif</CardDescription>
+   317→   317→              </CardHeader>
+   318→   318→              <CardContent>
+   319→   319→                {data.leadsByCountry.length === 0 ? (
+   320→   320→                  <EmptyState icon={<Users className="h-5 w-5" />} title="Belum ada data negara" />
+   321→   321→                ) : (
+   322→   322→                  <div className="space-y-3">
+   323→   323→                    {data.leadsByCountry.map((c) => (
+   324→   324→                      <div key={c.country}>
+   325→   325→                        <div className="flex items-center justify-between gap-2">
+   326→   326→                          <p className="truncate text-xs font-medium text-slate-700">{c.country}</p>
+   327→   327→                          <p className="text-xs font-semibold text-slate-900">{c.count}</p>
+   328→   328→                        </div>
+   329→   329→                        <Progress value={pctOf(c.count, maxCountry)} className="mt-1 h-1.5 bg-slate-100 [&>div]:bg-slate-500" />
+   330→   330→                      </div>
+   331→   331→                    ))}
+   332→   332→                  </div>
+   333→   333→                )}
+   334→   334→              </CardContent>
+   335→   335→            </Card>
+   336→   336→          </div>
+   337→   337→
+   338→   338→          {/* Task mendatang + aktivitas terbaru */}
+   339→   339→          <div className="grid gap-4 lg:grid-cols-2">
+   340→   340→            <Card className="rounded-xl border-slate-200">
+   341→   341→              <CardHeader className="pb-3">
+   342→   342→                <CardTitle className="flex items-center gap-2 text-base">
+   343→   343→                  <ListTodo className="h-4 w-4 text-amber-600" /> Task Mendatang
+   344→   344→                </CardTitle>
+   345→   345→                <CardDescription>Follow-up dan aktivitas yang perlu diselesaikan</CardDescription>
+   346→   346→              </CardHeader>
+   347→   347→              <CardContent>
+   348→   348→                {upcoming.length === 0 ? (
+   349→   349→                  <EmptyState icon={<Check className="h-5 w-5" />} title="Tidak ada task mendatang" description="Semua task sudah selesai atau belum dijadwalkan." />
+   350→   350→                ) : (
+   351→   351→                  <div className="space-y-2">
+   352→   352→                    {upcoming.map((task) => {
+   353→   353→                      const due = dueInfo(task)
+   354→   354→                      return (
+   355→   355→                        <div key={task.id} className="flex items-start gap-3 rounded-lg border border-slate-100 p-3 transition-colors hover:bg-slate-50">
+   356→   356→                          <div className="min-w-0 flex-1">
+   357→   357→                            <div className="flex flex-wrap items-center gap-2">
+   358→   358→                              <PriorityBadge priority={task.priority} />
+   359→   359→                              <p className="truncate text-sm font-medium text-slate-900">{task.title}</p>
+   360→   360→                            </div>
+   361→   361→                            <p className="mt-0.5 truncate text-xs text-slate-500">
+   362→   362→                              {task.opportunityTitle ?? task.companyName ?? 'Tanpa konteks'}
+   363→   363→                            </p>
+   364→   364→                            <span className={cn('mt-1 inline-flex items-center gap-1 text-[11px]', due.overdue ? 'font-semibold text-rose-600' : 'text-slate-400')}>
+   365→   365→                              <Clock className="h-3 w-3" /> {due.label}
+   366→   366→                            </span>
+   367→   367→                          </div>
+   368→   368→                          <div className="flex shrink-0 flex-col items-end gap-1.5">
+   369→   369→                            <UserAvatar name={task.assigneeName ?? '?'} color={task.assigneeColor} size={24} />
+   370→   370→                            <Button
+   371→   371→                              size="sm"
+   372→   372→                              variant="outline"
+   373→   373→                              className="h-6 gap-1 rounded-full px-2.5 text-[11px]"
+   374→   374→                              disabled={completingIds.has(task.id)}
+   375→   375→                              onClick={() => void handleCompleteTask(task)}
+   376→   376→                            >
+   377→   377→                              {completingIds.has(task.id)
+   378→   378→                                ? <Loader2 className="h-3 w-3 animate-spin" />
+   379→   379→                                : <Check className="h-3 w-3 text-emerald-600" />}
+   380→   380→                              Selesai
+   381→   381→                            </Button>
+   382→   382→                          </div>
+   383→   383→                        </div>
+   384→   384→                      )
+   385→   385→                    })}
+   386→   386→                  </div>
+   387→   387→                )}
+   388→   388→              </CardContent>
+   389→   389→            </Card>
+   390→   390→
+   391→   391→            <Card className="rounded-xl border-slate-200">
+   392→   392→              <CardHeader className="pb-3">
+   393→   393→                <CardTitle className="text-base">Aktivitas Terbaru</CardTitle>
+   394→   394→                <CardDescription>Pesan masuk dan keluar lintas kanal</CardDescription>
+   395→   395→              </CardHeader>
+   396→   396→              <CardContent>
+   397→   397→                {activities.length === 0 ? (
+   398→   398→                  <EmptyState icon={<Inbox className="h-5 w-5" />} title="Belum ada aktivitas" description="Interaksi dengan kontak akan tampil di sini." />
+   399→   399→                ) : (
+   400→   400→                  <div className="space-y-2">
+   401→   401→                    {activities.map((a) => {
+   402→   402→                      const clickable = Boolean(a.opportunityId)
+   403→   403→                      const inner = (
+   404→   404→                        <>
+   405→   405→                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100">
+   406→   406→                            <ChannelIcon channel={a.channel} className="h-4 w-4" />
+   407→   407→                          </div>
+   408→   408→                          <div className="min-w-0 flex-1">
+   409→   409→                            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+   410→   410→                              <p className="truncate text-sm font-semibold text-slate-900">{a.contactName}</p>
+   411→   411→                              {a.companyName && <span className="truncate text-xs text-slate-500">{a.companyName}</span>}
+   412→   412→                              <BrandChip name={a.brandName} color={a.brandColor} size="xs" />
+   413→   413→                              <span className="ml-auto shrink-0 text-[11px] text-slate-400">{timeAgo(a.sentAt)}</span>
+   414→   414→                            </div>
+   415→   415→                            <p className="mt-0.5 line-clamp-2 text-xs leading-snug text-slate-500">{a.body}</p>
+   416→   416→                          </div>
+   417→   417→                          {clickable && <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-slate-300" />}
+   418→   418→                        </>
+   419→   419→                      )
+   420→   420→                      const cls = 'flex w-full items-start gap-3 rounded-lg border border-slate-100 p-3 text-left transition-colors'
+   421→   421→                      return clickable ? (
+   422→   422→                        <button
+   423→   423→                          key={a.id}
+   424→   424→                          type="button"
+   425→   425→                          className={cn(cls, 'cursor-pointer hover:border-teal-200 hover:bg-teal-50/40')}
+   426→   426→                          onClick={() => a.opportunityId && openOpportunity(a.opportunityId)}
+   427→   427→                        >
+   428→   428→                          {inner}
+   429→   429→                        </button>
+   430→   430→                      ) : (
+   431→   431→                        <div key={a.id} className={cls}>{inner}</div>
+   432→   432→                      )
+   433→   433→                    })}
+   434→   434→                  </div>
+   435→   435→                )}
+   436→   436→              </CardContent>
+   437→   437→            </Card>
+   438→   438→          </div>
+   439→   439→        </TabsContent>
+   440→   440→
+   441→   441→        {/* ================= TAB FUNNEL & ANALITIK ================= */}
+   442→   442→        <TabsContent value="analitik" className="space-y-5">
+   443→   443→          <Card className="rounded-xl border-slate-200">
+   444→   444→            <CardHeader className="pb-3">
+   445→   445→              <CardTitle className="flex items-center gap-2 text-base">
+   446→   446→                <TrendingUp className="h-4 w-4 text-teal-600" /> Funnel Lead
+   447→   447→              </CardTitle>
+   448→   448→              <CardDescription>Jumlah lead pada setiap tahap pipeline</CardDescription>
+   449→   449→            </CardHeader>
+   450→   450→            <CardContent>
+   451→   451→              {funnelData.length === 0 ? (
+   452→   452→                <EmptyState icon={<Target className="h-5 w-5" />} title="Belum ada data funnel" />
+   453→   453→              ) : (
+   454→   454→                <div className="h-[280px] w-full">
+   455→   455→                  <ResponsiveContainer width="100%" height="100%">
+   456→   456→                    <BarChart data={funnelData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+   457→   457→                      <defs>
+   458→   458→                        <linearGradient id="funnelGrad" x1="0" y1="0" x2="0" y2="1">
+   459→   459→                          <stop offset="0%" stopColor="#f59e0b" />
+   460→   460→                          <stop offset="100%" stopColor="#0d9488" />
+   461→   461→                        </linearGradient>
+   462→   462→                      </defs>
+   463→   463→                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+   464→   464→                      <XAxis
+   465→   465→                        dataKey="name"
+   466→   466→                        tick={{ fontSize: 10, fill: '#64748b' }}
+   467→   467→                        interval={0}
+   468→   468→                        angle={-32}
+   469→   469→                        textAnchor="end"
+   470→   470→                        height={76}
+   471→   471→                        tickLine={false}
+   472→   472→                      />
+   473→   473→                      <YAxis tick={{ fontSize: 11, fill: '#64748b' }} allowDecimals={false} width={32} tickLine={false} axisLine={false} />
+   474→   474→                      <Tooltip cursor={{ fill: '#f1f5f9' }} contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12 }} />
+   475→   475→                      <Bar dataKey="count" name="Jumlah lead" fill="url(#funnelGrad)" radius={[6, 6, 0, 0]} maxBarSize={44} />
+   476→   476→                    </BarChart>
+   477→   477→                  </ResponsiveContainer>
+   478→   478→                </div>
+   479→   479→              )}
+   480→   480→            </CardContent>
+   481→   481→          </Card>
+   482→   482→
+   483→   483→          <div className="grid gap-4 lg:grid-cols-2">
+   484→   484→            {/* Alasan lost */}
+   485→   485→            <Card className="rounded-xl border-slate-200">
+   486→   486→              <CardHeader className="pb-3">
+   487→   487→                <CardTitle className="flex items-center gap-2 text-base">
+   488→   488→                  <XCircle className="h-4 w-4 text-rose-500" /> Alasan Lost
+   489→   489→                </CardTitle>
+   490→   490→                <CardDescription>Mengapa deal tidak jadi — peluang perbaikan proses</CardDescription>
+   491→   491→              </CardHeader>
+   492→   492→              <CardContent>
+   493→   493→                {data.lostReasons.length === 0 ? (
+   494→   494→                  <EmptyState icon={<Check className="h-5 w-5" />} title="Belum ada lead lost" description="Bagus — belum ada deal yang gagal di periode ini." />
+   495→   495→                ) : (
+   496→   496→                  <div className="space-y-3">
+   497→   497→                    {data.lostReasons.map((r) => (
+   498→   498→                      <div key={r.reason}>
+   499→   499→                        <div className="flex items-center justify-between gap-2">
+   500→   500→                          <p className="truncate text-xs font-medium text-slate-700">{lostReasonLabel(r.reason) ?? r.reason}</p>
+   501→   501→                          <p className="text-xs font-semibold text-slate-900">{r.count}</p>
+   502→   502→                        </div>
+   503→   503→                        <Progress value={pctOf(r.count, maxLost)} className="mt-1 h-1.5 bg-slate-100 [&>div]:bg-rose-400" />
+   504→   504→                      </div>
+   505→   505→                    ))}
+   506→   506→                  </div>
+   507→   507→                )}
+   508→   508→              </CardContent>
+   509→   509→            </Card>
+   510→   510→
+   511→   511→            {/* Pipeline per stage */}
+   512→   512→            <Card className="rounded-xl border-slate-200">
+   513→   513→              <CardHeader className="pb-3">
+   514→   514→                <CardTitle className="text-base">Pipeline per Stage</CardTitle>
+   515→   515→                <CardDescription>Jumlah dan nilai lead pada tiap tahap</CardDescription>
+   516→   516→              </CardHeader>
+   517→   517→              <CardContent>
+   518→   518→                {data.funnel.length === 0 ? (
+   519→   519→                  <EmptyState icon={<Target className="h-5 w-5" />} title="Belum ada pipeline" />
+   520→   520→                ) : (
+   521→   521→                  <Table>
+   522→   522→                    <TableHeader>
+   523→   523→                      <TableRow>
+   524→   524→                        <TableHead className="text-xs">Stage</TableHead>
+   525→   525→                        <TableHead className="text-right text-xs">Lead</TableHead>
+   526→   526→                        <TableHead className="text-right text-xs">Nilai</TableHead>
+   527→   527→                      </TableRow>
+   528→   528→                    </TableHeader>
+   529→   529→                    <TableBody>
+   530→   530→                      {data.funnel.map((f) => (
+   531→   531→                        <TableRow key={f.stage}>
+   532→   532→                          <TableCell><StageBadge stage={f.stage} /></TableCell>
+   533→   533→                          <TableCell className="text-right text-sm font-medium">{f.count}</TableCell>
+   534→   534→                          <TableCell className="text-right text-sm text-slate-500">{formatMoney(f.value, 'IDR', true)}</TableCell>
+   535→   535→                        </TableRow>
+   536→   536→                      ))}
+   537→   537→                    </TableBody>
+   538→   538→                  </Table>
+   539→   539→                )}
+   540→   540→              </CardContent>
+   541→   541→            </Card>
+   542→   542→          </div>
+   543→   543→
+   544→   544→          <div className="grid gap-4 lg:grid-cols-2">
+   545→   545→            {/* Status project */}
+   546→   546→            <Card className="rounded-xl border-slate-200">
+   547→   547→              <CardHeader className="pb-3">
+   548→   548→                <CardTitle className="text-base">Status Project</CardTitle>
+   549→   549→                <CardDescription>Distribusi pekerjaan pasca-deal</CardDescription>
+   550→   550→              </CardHeader>
+   551→   551→              <CardContent>
+   552→   552→                {data.projectsStatus.length === 0 ? (
+   553→   553→                  <EmptyState icon={<Target className="h-5 w-5" />} title="Belum ada project" description="Project otomatis dibuat saat opportunity ditandai Won." />
+   554→   554→                ) : (
+   555→   555→                  <div className="flex flex-wrap gap-2">
+   556→   556→                    {data.projectsStatus.map((p) => {
+   557→   557→                      const meta = projectStatusMeta(p.status)
+   558→   558→                      return (
+   559→   559→                        <span key={p.status} className={cn('inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium', meta.bg, meta.color)}>
+   560→   560→                          {meta.label}
+   561→   561→                          <span className="rounded-full bg-white/70 px-1.5 text-[11px] font-bold">{p.count}</span>
+   562→   562→                        </span>
+   563→   563→                      )
+   564→   564→                    })}
+   565→   565→                  </div>
+   566→   566→                )}
+   567→   567→              </CardContent>
+   568→   568→            </Card>
+   569→   569→
+   570→   570→            {/* Perusahaan teratas */}
+   571→   571→            <Card className="rounded-xl border-slate-200">
+   572→   572→              <CardHeader className="pb-3">
+   573→   573→                <CardTitle className="flex items-center gap-2 text-base">
+   574→   574→                  <Building2 className="h-4 w-4 text-teal-600" /> Perusahaan Teratas
+   575→   575→                </CardTitle>
+   576→   576→                <CardDescription>Nilai pipeline terbesar — klik untuk membuka detail</CardDescription>
+   577→   577→              </CardHeader>
+   578→   578→              <CardContent>
+   579→   579→                {data.topCompanies.length === 0 ? (
+   580→   580→                  <EmptyState icon={<Building2 className="h-5 w-5" />} title="Belum ada perusahaan" />
+   581→   581→                ) : (
+   582→   582→                  <div className="space-y-1.5">
+   583→   583→                    {data.topCompanies.map((c) => (
+   584→   584→                      <button
+   585→   585→                        key={c.companyId}
+   586→   586→                        type="button"
+   587→   587→                        onClick={() => openCompany(c.companyId)}
+   588→   588→                        className="flex w-full items-center gap-3 rounded-lg border border-slate-100 px-3 py-2.5 text-left transition-colors hover:border-teal-200 hover:bg-teal-50/40"
+   589→   589→                      >
+   590→   590→                        <div className="min-w-0 flex-1">
+   591→   591→                          <p className="truncate text-sm font-semibold text-slate-900">{c.name}</p>
+   592→   592→                          <p className="text-xs text-slate-500">{c.country} · {c.openOpps} open</p>
+   593→   593→                        </div>
+   594→   594→                        <span className="shrink-0 text-sm font-semibold text-slate-700">{formatMoney(c.totalValue, 'IDR', true)}</span>
+   595→   595→                        <ChevronRight className="h-4 w-4 shrink-0 text-slate-300" />
+   596→   596→                      </button>
+   597→   597→                    ))}
+   598→   598→                  </div>
+   599→   599→                )}
+   600→   600→              </CardContent>
+   601→   601→            </Card>
+   602→   602→          </div>
+   603→   603→        </TabsContent>
+   604→   604→
+   605→   605→        {/* ================= TAB TIM MARKETING ================= */}
+   606→   606→        <TabsContent value="tim" className="space-y-5">
+   607→   607→          <div className="grid gap-4 lg:grid-cols-3">
+   608→   608→            <Card className="rounded-xl border-slate-200 lg:col-span-2">
+   609→   609→              <CardHeader className="pb-3">
+   610→   610→                <CardTitle className="flex items-center gap-2 text-base">
+   611→   611→                  <Users className="h-4 w-4 text-violet-600" /> Performa Marketing
+   612→   612→                </CardTitle>
+   613→   613→                <CardDescription>Open, won, lost, dan kecepatan respons per marketer</CardDescription>
+   614→   614→              </CardHeader>
+   615→   615→              <CardContent>
+   616→   616→                {data.marketingPerf.length === 0 ? (
+   617→   617→                  <EmptyState icon={<Users className="h-5 w-5" />} title="Belum ada data marketing" />
+   618→   618→                ) : (
+   619→   619→                  <Table>
+   620→   620→                    <TableHeader>
+   621→   621→                      <TableRow>
+   622→   622→                        <TableHead className="text-xs">Marketing</TableHead>
+   623→   623→                        <TableHead className="text-right text-xs">Open</TableHead>
+   624→   624→                        <TableHead className="text-right text-xs">Won</TableHead>
+   625→   625→                        <TableHead className="text-right text-xs">Lost</TableHead>
+   626→   626→                        <TableHead className="text-right text-xs">Avg Response</TableHead>
+   627→   627→                      </TableRow>
+   628→   628→                    </TableHeader>
+   629→   629→                    <TableBody>
+   630→   630→                      {data.marketingPerf.map((m) => (
+   631→   631→                        <TableRow key={m.userId}>
+   632→   632→                          <TableCell>
+   633→   633→                            <div className="flex items-center gap-2.5">
+   634→   634→                              <UserAvatar name={m.name} color={m.color} size={28} />
+   635→   635→                              <span className="text-sm font-medium text-slate-900">{m.name}</span>
+   636→   636→                            </div>
+   637→   637→                          </TableCell>
+   638→   638→                          <TableCell className="text-right text-sm font-medium">{m.open}</TableCell>
+   639→   639→                          <TableCell className="text-right text-sm font-semibold text-emerald-700">{m.won}</TableCell>
+   640→   640→                          <TableCell className="text-right text-sm font-semibold text-rose-600">{m.lost}</TableCell>
+   641→   641→                          <TableCell className="text-right text-sm text-slate-500">
+   642→   642→                            {m.avgResponseHours > 0 ? `${fmtNum(m.avgResponseHours)} jam` : '—'}
+   643→   643→                          </TableCell>
+   644→   644→                        </TableRow>
+   645→   645→                      ))}
+   646→   646→                    </TableBody>
+   647→   647→                  </Table>
+   648→   648→                )}
+   649→   649→              </CardContent>
+   650→   650→            </Card>
+   651→   651→
+   652→   652→            <Card className="rounded-xl border-slate-200">
+   653→   653→              <CardHeader className="pb-3">
+   654→   654→                <CardTitle className="flex items-center gap-2 text-base">
+   655→   655→                  <Trophy className="h-4 w-4 text-amber-500" /> Won / Lost Summary
+   656→   656→                </CardTitle>
+   657→   657→                <CardDescription>Total deal yang sudah ditutup</CardDescription>
+   658→   658→              </CardHeader>
+   659→   659→              <CardContent className="space-y-4">
+   660→   660→                <div className="grid grid-cols-2 gap-3">
+   661→   661→                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+   662→   662→                    <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Won</p>
+   663→   663→                    <p className="mt-1 text-3xl font-bold text-emerald-800">{data.wonLost.won}</p>
+   664→   664→                  </div>
+   665→   665→                  <div className="rounded-xl border border-rose-200 bg-rose-50 p-4">
+   666→   666→                    <p className="text-xs font-semibold uppercase tracking-wide text-rose-700">Lost</p>
+   667→   667→                    <p className="mt-1 text-3xl font-bold text-rose-800">{data.wonLost.lost}</p>
+   668→   668→                  </div>
+   669→   669→                </div>
+   670→   670→                <div>
+   671→   671→                  <div className="flex items-center justify-between text-xs text-slate-500">
+   672→   672→                    <span>Rasio kemenangan</span>
+   673→   673→                    <span className="font-semibold text-slate-700">{winRatio}%</span>
+   674→   674→                  </div>
+   675→   675→                  <Progress value={winRatio} className="mt-1.5 h-2 bg-slate-100 [&>div]:bg-emerald-500" />
+   676→   676→                  <p className="mt-2 text-xs text-slate-500">
+   677→   677→                    {data.wonLost.won} dari {wonTotal} deal selesai berhasil dimenangkan.
+   678→   678→                  </p>
+   679→   679→                </div>
+   680→   680→                <div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-500">
+   681→   681→                  <p><span className="font-semibold text-slate-700">{data.marketingPerf.length} marketer</span> aktif menangani pipeline lintas brand.</p>
+   682→   682→                </div>
+   683→   683→              </CardContent>
+   684→   684→            </Card>
+   685→   685→          </div>
+   686→   686→        </TabsContent>
+   687→   687→      </Tabs>
+   688→   688→    </div>
+   689→   689→  )
+   690→   690→}
+   691→   691→

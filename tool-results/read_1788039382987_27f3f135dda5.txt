@@ -1,0 +1,562 @@
+   451→  const openNewCompany = useCallback(() => {
+   452→    setCompanyForm(EMPTY_COMPANY_FORM)
+   453→    setNewCompanyOpen(true)
+   454→  }, [])
+   455→
+   456→  const openNewContact = useCallback(() => {
+   457→    setContactForm(EMPTY_CONTACT_FORM)
+   458→    setNewContactOpen(true)
+   459→  }, [])
+   460→
+   461→  const openQuickAdd = useCallback(() => {
+   462→    setQuickForm(EMPTY_QUICK_FORM)
+   463→    setQuickAddOpen(true)
+   464→  }, [])
+   465→
+   466→  const openOppDialog = useCallback((c: ContactDTO) => {
+   467→    setSelectedContact(null)
+   468→    setOppForm({ ...EMPTY_OPP_FORM, brandId: brands[0]?.id ?? '' })
+   469→    setOppDialogContact(c)
+   470→  }, [brands])
+   471→
+   472→  /* muat opsi perusahaan setiap kali dialog kontak baru dibuka */
+   473→  useEffect(() => {
+   474→    if (!newContactOpen) return
+   475→    let cancelled = false
+   476→    setCompanyOptionsLoading(true)
+   477→    crmApi.companies()
+   478→      .then((list) => { if (!cancelled) setCompanyOptions(list) })
+   479→      .catch(() => { /* biarkan opsi lama; tidak blocking */ })
+   480→      .finally(() => { if (!cancelled) setCompanyOptionsLoading(false) })
+   481→    return () => { cancelled = true }
+   482→  }, [newContactOpen])
+   483→
+   484→  /* ---------- Mutations ---------- */
+   485→
+   486→  const submitNewCompany = async () => {
+   487→    if (!companyForm.name.trim()) {
+   488→      toast({ title: 'Nama perusahaan wajib diisi', variant: 'destructive' })
+   489→      return
+   490→    }
+   491→    setCompanySubmitting(true)
+   492→    try {
+   493→      const created = await crmApi.createCompany({
+   494→        name: companyForm.name.trim(),
+   495→        industry: companyForm.industry === 'NONE' ? '' : companyForm.industry,
+   496→        website: companyForm.website,
+   497→        country: companyForm.country,
+   498→        city: companyForm.city,
+   499→        size: companyForm.size,
+   500→        taxId: companyForm.taxId,
+   501→        currency: companyForm.currency,
+   502→        tags: companyForm.tags,
+   503→        notes: companyForm.notes,
+   504→      })
+   505→      toast({ title: 'Perusahaan dibuat', description: `${created.name} berhasil ditambahkan.` })
+   506→      setNewCompanyOpen(false)
+   507→      setCompanyForm(EMPTY_COMPANY_FORM)
+   508→      await loadCompanies(true)
+   509→    } catch (e) {
+   510→      toast({
+   511→        title: 'Gagal membuat perusahaan',
+   512→        description: e instanceof Error ? e.message : 'Terjadi kesalahan',
+   513→        variant: 'destructive',
+   514→      })
+   515→    } finally {
+   516→      setCompanySubmitting(false)
+   517→    }
+   518→  }
+   519→
+   520→  const submitNewContact = async () => {
+   521→    if (!contactForm.firstName.trim()) {
+   522→      toast({ title: 'Nama depan wajib diisi', variant: 'destructive' })
+   523→      return
+   524→    }
+   525→    setContactSubmitting(true)
+   526→    try {
+   527→      const created = await crmApi.createContact({
+   528→        firstName: contactForm.firstName.trim(),
+   529→        lastName: contactForm.lastName,
+   530→        position: contactForm.position,
+   531→        email: contactForm.email,
+   532→        whatsapp: contactForm.whatsapp,
+   533→        phone: contactForm.phone,
+   534→        companyId: contactForm.companyId !== 'NONE' ? contactForm.companyId : undefined,
+   535→        country: contactForm.country,
+   536→        city: contactForm.city,
+   537→        language: contactForm.language,
+   538→        preferredChannel: contactForm.preferredChannel,
+   539→        tags: contactForm.tags,
+   540→      })
+   541→      toast({ title: 'Kontak ditambahkan', description: `${created.fullName} berhasil disimpan.` })
+   542→      setNewContactOpen(false)
+   543→      setContactForm(EMPTY_CONTACT_FORM)
+   544→      void loadContacts(true)
+   545→      void loadCompanies(true) // contactsCount ikut segar
+   546→      if (created.companyId && sheetOpen && sheetCompanyId === created.companyId) {
+   547→        void fetchDetail(created.companyId, true)
+   548→      }
+   549→    } catch (e) {
+   550→      toast({
+   551→        title: 'Gagal menambah kontak',
+   552→        description: e instanceof Error ? e.message : 'Terjadi kesalahan',
+   553→        variant: 'destructive',
+   554→      })
+   555→    } finally {
+   556→      setContactSubmitting(false)
+   557→    }
+   558→  }
+   559→
+   560→  const submitQuickContact = async () => {
+   561→    if (!detail || !sheetCompanyId) return
+   562→    if (!quickForm.firstName.trim()) {
+   563→      toast({ title: 'Nama depan wajib diisi', variant: 'destructive' })
+   564→      return
+   565→    }
+   566→    setQuickSubmitting(true)
+   567→    try {
+   568→      const created = await crmApi.createContact({
+   569→        companyId: sheetCompanyId,
+   570→        firstName: quickForm.firstName.trim(),
+   571→        lastName: quickForm.lastName,
+   572→        position: quickForm.position,
+   573→        email: quickForm.email,
+   574→        whatsapp: quickForm.whatsapp,
+   575→        preferredChannel: quickForm.preferredChannel,
+   576→        country: detail.country,
+   577→      })
+   578→      toast({ title: 'Kontak ditambahkan', description: `${created.fullName} ditambahkan ke ${detail.name}.` })
+   579→      setQuickAddOpen(false)
+   580→      setQuickForm(EMPTY_QUICK_FORM)
+   581→      setDetail((prev) => (prev && prev.id === sheetCompanyId
+   582→        ? { ...prev, contacts: [created, ...prev.contacts], contactsCount: prev.contactsCount + 1 }
+   583→        : prev))
+   584→      void loadCompanies(true)
+   585→      void loadContacts(true)
+   586→    } catch (e) {
+   587→      toast({
+   588→        title: 'Gagal menambah kontak',
+   589→        description: e instanceof Error ? e.message : 'Terjadi kesalahan',
+   590→        variant: 'destructive',
+   591→      })
+   592→    } finally {
+   593→      setQuickSubmitting(false)
+   594→    }
+   595→  }
+   596→
+   597→  const submitOpportunity = async () => {
+   598→    const contact = oppDialogContact
+   599→    if (!contact) return
+   600→    const companyId = contact.company?.id ?? contact.companyId ?? undefined
+   601→    if (!oppForm.title.trim()) {
+   602→      toast({ title: 'Judul opportunity wajib diisi', variant: 'destructive' })
+   603→      return
+   604→    }
+   605→    if (!oppForm.brandId) {
+   606→      toast({ title: 'Brand wajib dipilih', variant: 'destructive' })
+   607→      return
+   608→    }
+   609→    if (!companyId) {
+   610→      toast({ title: 'Kontak belum terhubung ke perusahaan', description: 'Opportunity wajib memiliki perusahaan.', variant: 'destructive' })
+   611→      return
+   612→    }
+   613→    setOppSubmitting(true)
+   614→    try {
+   615→      const oppBrand = brands.find((b) => b.id === oppForm.brandId)
+   616→      const created = await crmApi.createOpportunity({
+   617→        title: oppForm.title.trim(),
+   618→        contactId: contact.id,
+   619→        companyId,
+   620→        sourceBrandId: oppForm.brandId,
+   621→        executingBrandId: oppForm.brandId,
+   622→        serviceId: oppForm.serviceId || undefined,
+   623→        estimatedValue: Number(oppForm.value) || 0,
+   624→        currency: oppBrand?.primaryCurrency ?? 'IDR',
+   625→        leadSource: 'REFERRAL',
+   626→        channel: 'WHATSAPP',
+   627→      })
+   628→      toast({ title: 'Opportunity dibuat', description: `${created.code} — ${created.title}` })
+   629→      setOppDialogContact(null)
+   630→      setOppForm(EMPTY_OPP_FORM)
+   631→      void loadCompanies(true)
+   632→      openOpportunity(created.id)
+   633→    } catch (e) {
+   634→      toast({
+   635→        title: 'Gagal membuat opportunity',
+   636→        description: e instanceof Error ? e.message : 'Terjadi kesalahan',
+   637→        variant: 'destructive',
+   638→      })
+   639→    } finally {
+   640→      setOppSubmitting(false)
+   641→    }
+   642→  }
+   643→
+   644→  const oppBrand = brands.find((b) => b.id === oppForm.brandId)
+   645→  const oppServices = oppBrand?.services ?? []
+   646→  const oppCurrency = oppBrand?.primaryCurrency ?? 'IDR'
+   647→
+   648→  /* ================================================================ */
+   649→
+   650→  return (
+   651→    <div className="flex flex-col gap-4">
+   652→      {/* ---------- Toolbar ---------- */}
+   653→      <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+   654→        <div className="relative flex-1">
+   655→          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+   656→          <Input
+   657→            value={searchInput}
+   658→            onChange={(e) => setSearchInput(e.target.value)}
+   659→            placeholder="Cari nama, industri, kota…"
+   660→            className="h-9 pr-8 pl-9"
+   661→            aria-label="Cari perusahaan atau kontak"
+   662→          />
+   663→          {searchInput && (
+   664→            <button
+   665→              type="button"
+   666→              onClick={() => setSearchInput('')}
+   667→              aria-label="Hapus pencarian"
+   668→              className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-full p-0.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+   669→            >
+   670→              <X className="h-3.5 w-3.5" />
+   671→            </button>
+   672→          )}
+   673→        </div>
+   674→        <div className="flex flex-wrap items-center gap-2">
+   675→          <Select value={country} onValueChange={setCountry}>
+   676→            <SelectTrigger className="h-9 w-[150px] sm:w-[180px]" aria-label="Filter negara">
+   677→              <SelectValue placeholder="Semua negara" />
+   678→            </SelectTrigger>
+   679→            <SelectContent>
+   680→              <SelectItem value="all">Semua negara</SelectItem>
+   681→              {countries.map((c) => (
+   682→                <SelectItem key={c} value={c}>{c}</SelectItem>
+   683→              ))}
+   684→            </SelectContent>
+   685→          </Select>
+   686→          <RefreshButton onClick={refreshAll} loading={companiesLoading || contactsLoading} />
+   687→          <Button
+   688→            onClick={tab === 'companies' ? openNewCompany : openNewContact}
+   689→            className="h-9 gap-1.5 bg-teal-600 text-white hover:bg-teal-700"
+   690→          >
+   691→            <Plus className="h-4 w-4" />
+   692→            {tab === 'companies' ? 'Perusahaan Baru' : 'Kontak Baru'}
+   693→          </Button>
+   694→        </div>
+   695→      </div>
+   696→
+   697→      {/* ---------- Error banners ---------- */}
+   698→      {companiesError && <ErrorBanner message={companiesError} onRetry={() => void loadCompanies()} />}
+   699→      {contactsError && <ErrorBanner message={contactsError} onRetry={() => void loadContacts()} />}
+   700→
+   701→      {/* ---------- Tabs ---------- */}
+   702→      <Tabs value={tab} onValueChange={(v) => setTab(v as 'companies' | 'contacts')}>
+   703→        <TabsList className="h-9 w-fit bg-slate-100 p-1">
+   704→          <TabsTrigger value="companies" className="gap-1.5 rounded-md px-3 text-[13px]">
+   705→            <Building2 className="h-3.5 w-3.5" />
+   706→            Perusahaan
+   707→            <span className="ml-0.5 rounded-full bg-slate-200/90 px-1.5 text-[10px] font-semibold tabular-nums text-slate-600">
+   708→              {filteredCompanies.length}
+   709→            </span>
+   710→          </TabsTrigger>
+   711→          <TabsTrigger value="contacts" className="gap-1.5 rounded-md px-3 text-[13px]">
+   712→            <Users className="h-3.5 w-3.5" />
+   713→            Kontak
+   714→            <span className="ml-0.5 rounded-full bg-slate-200/90 px-1.5 text-[10px] font-semibold tabular-nums text-slate-600">
+   715→              {filteredContacts.length}
+   716→            </span>
+   717→          </TabsTrigger>
+   718→        </TabsList>
+   719→
+   720→        {/* ---------- Tab Perusahaan ---------- */}
+   721→        <TabsContent value="companies" className="mt-4">
+   722→          {companiesLoading ? (
+   723→            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+   724→              {Array.from({ length: 6 }).map((_, i) => (
+   725→                <Skeleton key={i} className="h-44 rounded-xl" />
+   726→              ))}
+   727→            </div>
+   728→          ) : filteredCompanies.length === 0 ? (
+   729→            <EmptyState
+   730→              icon={<Building2 className="h-5 w-5" />}
+   731→              title={hasFilter ? 'Tidak ada perusahaan yang cocok' : 'Belum ada perusahaan'}
+   732→              description={
+   733→                hasFilter
+   734→                  ? `Tidak ditemukan perusahaan untuk pencarian “${search}”${country !== 'all' ? ` di ${country}` : ''}. Coba ubah kata kunci atau filter negara.`
+   735→                  : 'Mulai bangun basis data klien dengan menambahkan perusahaan pertama Anda.'
+   736→              }
+   737→              action={!hasFilter ? (
+   738→                <Button onClick={openNewCompany} className="gap-1.5 bg-teal-600 text-white hover:bg-teal-700">
+   739→                  <Plus className="h-4 w-4" />
+   740→                  Perusahaan Baru
+   741→                </Button>
+   742→              ) : undefined}
+   743→            />
+   744→          ) : (
+   745→            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+   746→              {filteredCompanies.map((c) => (
+   747→                <CompanyCard key={c.id} company={c} onOpen={() => openCompanySheet(c.id)} />
+   748→              ))}
+   749→            </div>
+   750→          )}
+   751→        </TabsContent>
+   752→
+   753→        {/* ---------- Tab Kontak ---------- */}
+   754→        <TabsContent value="contacts" className="mt-4">
+   755→          {contactsLoading ? (
+   756→            <LoadingRows rows={6} />
+   757→          ) : filteredContacts.length === 0 ? (
+   758→            <EmptyState
+   759→              icon={<Users className="h-5 w-5" />}
+   760→              title={hasFilter ? 'Tidak ada kontak yang cocok' : 'Belum ada kontak'}
+   761→              description={
+   762→                hasFilter
+   763→                  ? `Tidak ditemukan kontak untuk pencarian “${search}”${country !== 'all' ? ` di ${country}` : ''}. Coba ubah kata kunci atau filter negara.`
+   764→                  : 'Tambahkan kontak pertama Anda, atau tambahkan kontak langsung dari detail perusahaan.'
+   765→              }
+   766→              action={!hasFilter ? (
+   767→                <Button onClick={openNewContact} className="gap-1.5 bg-teal-600 text-white hover:bg-teal-700">
+   768→                  <Plus className="h-4 w-4" />
+   769→                  Kontak Baru
+   770→                </Button>
+   771→              ) : undefined}
+   772→            />
+   773→          ) : (
+   774→            <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+   775→              <div className="overflow-x-auto">
+   776→                <Table>
+   777→                  <TableHeader>
+   778→                    <TableRow className="bg-slate-50/80 hover:bg-slate-50/80">
+   779→                      <TableHead className="text-[11px] uppercase tracking-wider text-slate-500">Nama</TableHead>
+   780→                      <TableHead className="text-[11px] uppercase tracking-wider text-slate-500">Posisi</TableHead>
+   781→                      <TableHead className="text-[11px] uppercase tracking-wider text-slate-500">Perusahaan</TableHead>
+   782→                      <TableHead className="text-[11px] uppercase tracking-wider text-slate-500">Email</TableHead>
+   783→                      <TableHead className="text-[11px] uppercase tracking-wider text-slate-500">WhatsApp</TableHead>
+   784→                      <TableHead className="text-[11px] uppercase tracking-wider text-slate-500">Negara / Kota</TableHead>
+   785→                      <TableHead className="text-[11px] uppercase tracking-wider text-slate-500">Kanal Preferensi</TableHead>
+   786→                      <TableHead className="text-[11px] uppercase tracking-wider text-slate-500">Consent</TableHead>
+   787→                      <TableHead className="text-[11px] uppercase tracking-wider text-slate-500">Dibuat</TableHead>
+   788→                    </TableRow>
+   789→                  </TableHeader>
+   790→                  <TableBody>
+   791→                    {filteredContacts.map((ct) => {
+   792→                      const comp = ct.company ?? null
+   793→                      return (
+   794→                        <TableRow
+   795→                          key={ct.id}
+   796→                          onClick={() => setSelectedContact(ct)}
+   797→                          className="cursor-pointer transition-colors hover:bg-slate-50/80"
+   798→                          title="Klik untuk detail kontak"
+   799→                        >
+   800→                          <TableCell>
+   801→                            <div className="flex items-center gap-2.5">
+   802→                              <UserAvatar name={ct.fullName} color={avatarColorFor(ct.fullName)} size={30} />
+   803→                              <div className="min-w-0">
+   804→                                <p className="flex items-center gap-1 truncate text-[13px] font-semibold text-slate-800">
+   805→                                  {ct.fullName}
+   806→                                  {ct.isPrimary && <Star className="h-3 w-3 shrink-0 fill-amber-400 text-amber-400" aria-label="Kontak utama" />}
+   807→                                </p>
+   808→                                {ct.tags.length > 0 && (
+   809→                                  <div className="mt-0.5 flex flex-wrap gap-1">
+   810→                                    {ct.tags.slice(0, 2).map((t) => (
+   811→                                      <Badge key={t} variant="outline" className="px-1.5 py-0 text-[10px] font-normal text-slate-500">{t}</Badge>
+   812→                                    ))}
+   813→                                    {ct.tags.length > 2 && (
+   814→                                      <span className="text-[10px] text-slate-400">+{ct.tags.length - 2}</span>
+   815→                                    )}
+   816→                                  </div>
+   817→                                )}
+   818→                              </div>
+   819→                            </div>
+   820→                          </TableCell>
+   821→                          <TableCell>
+   822→                            <span className="block max-w-[140px] truncate text-[13px] text-slate-600" title={ct.position ?? undefined}>
+   823→                              {ct.position ?? '—'}
+   824→                            </span>
+   825→                          </TableCell>
+   826→                          <TableCell onClick={(e) => e.stopPropagation()}>
+   827→                            {comp ? (
+   828→                              <button
+   829→                                type="button"
+   830→                                onClick={() => openCompanySheet(comp.id)}
+   831→                                title={`Buka detail ${comp.name}`}
+   832→                                className="inline-flex max-w-[170px] items-center gap-1 rounded-md px-1.5 py-0.5 text-[13px] font-medium text-teal-700 transition hover:bg-teal-50 hover:underline"
+   833→                              >
+   834→                                <Building2 className="h-3 w-3 shrink-0" />
+   835→                                <span className="truncate">{comp.name}</span>
+   836→                              </button>
+   837→                            ) : (
+   838→                              <span className="text-slate-400">—</span>
+   839→                            )}
+   840→                          </TableCell>
+   841→                          <TableCell>
+   842→                            <span className="block max-w-[180px] truncate text-[13px] text-slate-600" title={ct.email ?? undefined}>
+   843→                              {ct.email ?? '—'}
+   844→                            </span>
+   845→                          </TableCell>
+   846→                          <TableCell>
+   847→                            <span className="text-[13px] tabular-nums text-slate-600">{ct.whatsapp ?? '—'}</span>
+   848→                          </TableCell>
+   849→                          <TableCell>
+   850→                            <span className="text-[13px] text-slate-600">
+   851→                              {[ct.city, ct.country].filter(Boolean).join(', ') || '—'}
+   852→                            </span>
+   853→                          </TableCell>
+   854→                          <TableCell>
+   855→                            <span className="inline-flex items-center gap-1.5">
+   856→                              <ChannelIcon channel={ct.preferredChannel} />
+   857→                              <span className="text-[13px] text-slate-600">{channelMeta(ct.preferredChannel).label}</span>
+   858→                            </span>
+   859→                          </TableCell>
+   860→                          <TableCell><ConsentBadge status={ct.consentStatus} /></TableCell>
+   861→                          <TableCell>
+   862→                            <span className="whitespace-nowrap text-[13px] text-slate-500">{formatDate(ct.createdAt)}</span>
+   863→                          </TableCell>
+   864→                        </TableRow>
+   865→                      )
+   866→                    })}
+   867→                  </TableBody>
+   868→                </Table>
+   869→              </div>
+   870→            </div>
+   871→          )}
+   872→        </TabsContent>
+   873→      </Tabs>
+   874→
+   875→      {/* ---------- Company Detail Sheet ---------- */}
+   876→      <Sheet open={sheetOpen} onOpenChange={handleSheetChange}>
+   877→        <SheetContent side="right" className={cn('flex w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-xl')}>
+   878→          <SheetHeader className="border-b border-slate-100 p-5 pr-12">
+   879→            <SheetTitle className="text-lg font-bold text-slate-900">
+   880→              {detailLoading ? <Skeleton className="h-6 w-2/3" /> : detailError ? 'Detail Perusahaan' : (detail?.name ?? 'Detail Perusahaan')}
+   881→            </SheetTitle>
+   882→            {!detailLoading && !detailError && detail && (
+   883→              <SheetDescription className="text-xs">
+   884→                {[detail.industry, [detail.city, detail.country].filter(Boolean).join(', ')].filter(Boolean).join(' · ') || 'Perusahaan'}
+   885→              </SheetDescription>
+   886→            )}
+   887→            {detailLoading && <SheetDescription className="sr-only">Memuat detail perusahaan</SheetDescription>}
+   888→            {detailError && <SheetDescription className="sr-only">Gagal memuat detail perusahaan</SheetDescription>}
+   889→          </SheetHeader>
+   890→
+   891→          <div className={cn('flex-1 overflow-y-auto p-5', SCROLLBAR)}>
+   892→            {detailLoading && (
+   893→              <div className="space-y-4">
+   894→                <div className="grid grid-cols-2 gap-2.5">
+   895→                  {Array.from({ length: 4 }).map((_, i) => (
+   896→                    <Skeleton key={i} className="h-16 rounded-lg" />
+   897→                  ))}
+   898→                </div>
+   899→                <LoadingRows rows={4} />
+   900→              </div>
+   901→            )}
+   902→
+   903→            {detailError && (
+   904→              <ErrorBanner message={detailError} onRetry={() => sheetCompanyId && void fetchDetail(sheetCompanyId)} />
+   905→            )}
+   906→
+   907→            {!detailLoading && !detailError && detail && (
+   908→              <div className="space-y-6">
+   909→                {/* Profil */}
+   910→                <div className="space-y-3">
+   911→                  <div className="flex flex-col gap-1.5 text-xs text-slate-600">
+   912→                    {detail.website && (
+   913→                      <a
+   914→                        href={websiteUrlOf(detail.website)}
+   915→                        target="_blank"
+   916→                        rel="noreferrer"
+   917→                        className="inline-flex w-fit max-w-full items-center gap-1.5 font-medium text-teal-700 hover:underline"
+   918→                      >
+   919→                        <Globe className="h-3.5 w-3.5 shrink-0" />
+   920→                        <span className="truncate">{detail.website}</span>
+   921→                        <ExternalLink className="h-3 w-3 shrink-0" />
+   922→                      </a>
+   923→                    )}
+   924→                    {detail.address && (
+   925→                      <span className="flex items-start gap-1.5">
+   926→                        <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" />
+   927→                        <span>{detail.address}</span>
+   928→                      </span>
+   929→                    )}
+   930→                    <span className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-slate-500">
+   931→                      {detail.size && (
+   932→                        <span className="inline-flex items-center gap-1">
+   933→                          <Building className="h-3.5 w-3.5" />{detail.size}
+   934→                        </span>
+   935→                      )}
+   936→                      {detail.taxId && (
+   937→                        <span className="inline-flex items-center gap-1">
+   938→                          <Hash className="h-3.5 w-3.5" />{detail.taxId}
+   939→                        </span>
+   940→                      )}
+   941→                      <span className="inline-flex items-center gap-1">
+   942→                        <Wallet className="h-3.5 w-3.5" />{detail.currency}
+   943→                      </span>
+   944→                      {detail.ownerName && (
+   945→                        <span className="inline-flex items-center gap-1">
+   946→                          <User className="h-3.5 w-3.5" />{detail.ownerName}
+   947→                        </span>
+   948→                      )}
+   949→                    </span>
+   950→                    {detail.tags.length > 0 && (
+   951→                      <div className="flex flex-wrap gap-1 pt-0.5">
+   952→                        {detail.tags.map((t) => (
+   953→                          <Badge key={t} variant="outline" className="px-1.5 py-0 text-[10px] font-normal text-slate-500">{t}</Badge>
+   954→                        ))}
+   955→                      </div>
+   956→                    )}
+   957→                  </div>
+   958→
+   959→                  {detail.notes && (
+   960→                    <div className="rounded-lg bg-slate-50 p-3">
+   961→                      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Catatan</p>
+   962→                      <p className="mt-1 whitespace-pre-line text-xs leading-relaxed text-slate-600">{detail.notes}</p>
+   963→                    </div>
+   964→                  )}
+   965→
+   966→                  {/* Statistik */}
+   967→                  <div className="grid grid-cols-2 gap-2.5">
+   968→                    <StatTile label="Total Nilai Pipeline" value={formatMoney(detail.totalValue, detail.currency, true)} icon={Wallet} />
+   969→                    <StatTile label="Nilai Won" value={formatMoney(detail.wonValue, detail.currency, true)} icon={Trophy} tone="emerald" />
+   970→                    <StatTile label="Kontak" value={String(detail.contactsCount)} icon={Users} />
+   971→                    <StatTile label="Opportunity" value={String(detail.opportunitiesCount)} icon={Target} />
+   972→                  </div>
+   973→                </div>
+   974→
+   975→                {/* Kontak */}
+   976→                <section>
+   977→                  <div className="mb-2.5 flex items-center justify-between gap-2">
+   978→                    <h3 className="text-sm font-semibold text-slate-800">
+   979→                      Kontak <span className="font-normal text-slate-400">({detail.contacts.length})</span>
+   980→                    </h3>
+   981→                    <Button
+   982→                      size="sm"
+   983→                      variant="outline"
+   984→                      className="h-7 gap-1 border-teal-200 px-2.5 text-xs text-teal-700 hover:bg-teal-50"
+   985→                      onClick={openQuickAdd}
+   986→                    >
+   987→                      <UserPlus className="h-3.5 w-3.5" />
+   988→                      Kontak
+   989→                    </Button>
+   990→                  </div>
+   991→                  {detail.contacts.length === 0 ? (
+   992→                    <p className="rounded-lg border border-dashed border-slate-200 bg-slate-50/60 p-3 text-xs text-slate-500">
+   993→                      Belum ada kontak di perusahaan ini. Gunakan tombol “Kontak” untuk menambahkan.
+   994→                    </p>
+   995→                  ) : (
+   996→                    <div className={cn('max-h-72 space-y-1.5 overflow-y-auto pr-1', SCROLLBAR)}>
+   997→                      {detail.contacts.map((ct) => (
+   998→                        <div key={ct.id} className="rounded-lg border border-slate-100 p-2.5 transition hover:border-slate-200">
+   999→                          <div className="flex items-center gap-2.5">
+  1000→                            <UserAvatar name={ct.fullName} color={avatarColorFor(ct.fullName)} size={30} />
+  1001→                            <div className="min-w-0 flex-1">
+  1002→                              <p className="flex items-center gap-1.5 truncate text-[13px] font-semibold text-slate-800">
+  1003→                                <span className="truncate">{ct.fullName}</span>
+  1004→                                {ct.isPrimary && (
+  1005→                                  <span
+  1006→                                    className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-amber-50 px-1.5 py-0.5 text-[9px] font-semibold text-amber-700"
+  1007→                                    title="Kontak utama"
+  1008→                                  >
+  1009→                                    <Star className="h-2.5 w-2.5 fill-amber-400 text-amber-400" />
+  1010→                                    Utama
+
+[showing lines 451-1010 of 1610; use offset=1011 with limit to continue reading]

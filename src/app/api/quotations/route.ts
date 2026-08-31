@@ -1,93 +1,159 @@
-import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { requireAuth } from "@/lib/auth";
-import { logAudit } from "@/lib/audit";
-import { mapQuotation, nextDocNumber } from "@/lib/ops";
-import type { QuotationItemDTO } from "@/lib/crm-types";
+/* ============ /api/quotations — list + filters + auto-expire, create ============ */
+import { NextRequest, NextResponse } from 'next/server'
+import { db } from '@/lib/db'
+import {
+  getSessionUser, generateQuotationCode, parseDate,
+  quotationInclude, mapQuotationDetail, mapQuotation,
+} from '@/lib/crm-server'
+import { logAudit } from '@/lib/audit'
 
-/** GET /api/quotations — daftar penawaran. */
-export async function GET() {
-  const user = await requireAuth(["OWNER", "MANAGER", "MARKETER", "FINANCE"]);
-  if (!user) return NextResponse.json({ error: "Tidak diizinkan" }, { status: 401 });
+export const dynamic = 'force-dynamic'
 
-  const quotations = await db.quotation.findMany({
-    include: {
-      lead: { include: { contact: true, company: true } },
-      projects: { select: { code: true }, take: 1 },
-    },
-    orderBy: { createdAt: "desc" },
-    take: 200,
-  });
+interface ItemInput { description: string; qty: number; unitPrice: number }
 
-  const dtos = quotations.map((q) =>
-    mapQuotation(q, {
-      lead: {
-        code: q.lead.code,
-        subject: q.lead.subject,
-        contactName: q.lead.contact.name,
-        companyName: q.lead.company?.name ?? null,
-      },
-      projectCode: q.projects[0]?.code ?? null,
-    })
-  );
-
-  return NextResponse.json({ quotations: dtos });
+/** Parse & validate quotation items payload. Returns items or an error message. */
+function parseItems(raw: unknown): { items: ItemInput[] } | { error: string } {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return { error: 'Minimal satu item penawaran wajib diisi' }
+  }
+  const items: ItemInput[] = []
+  for (const entry of raw) {
+    const description = typeof entry?.description === 'string' ? entry.description.trim() : ''
+    const qty = Number(entry?.qty)
+    const unitPrice = Number(entry?.unitPrice)
+    if (!description) return { error: 'Deskripsi item wajib diisi' }
+    if (!Number.isFinite(qty) || qty <= 0) return { error: 'Qty setiap item harus lebih dari 0' }
+    if (!Number.isFinite(unitPrice) || unitPrice < 0) return { error: 'Harga satuan tidak boleh negatif' }
+    items.push({ description, qty, unitPrice })
+  }
+  return { items }
 }
 
-/** POST /api/quotations — buat penawaran dari lead (estimasi → QT). */
-export async function POST(req: Request) {
-  const user = await requireAuth(["OWNER", "MANAGER", "MARKETER"]);
-  if (!user) return NextResponse.json({ error: "Tidak diizinkan" }, { status: 401 });
+/** Compute quotation totals (money rounded to integer). */
+function computeTotals(items: ItemInput[], discountPct: number, taxPct: number) {
+  const subtotal = Math.round(items.reduce((sum, it) => sum + it.qty * it.unitPrice, 0))
+  const discountAmount = Math.round((subtotal * discountPct) / 100)
+  const taxAmount = Math.round(((subtotal - discountAmount) * taxPct) / 100)
+  const total = subtotal - discountAmount + taxAmount
+  return { subtotal, discountAmount, taxAmount, total }
+}
 
-  const body = await req.json().catch(() => null);
-  if (!body?.leadId || !body?.title || !Array.isArray(body?.items) || body.items.length === 0) {
-    return NextResponse.json({ error: "Lead, judul, dan minimal 1 item wajib diisi" }, { status: 400 });
+/** GET ?status=&brandId=&opportunityId= → QuotationDTO[] (desc createdAt).
+ *  Auto-expires SENT quotations whose validUntil has passed before mapping. */
+export async function GET(req: NextRequest) {
+  const session = await getSessionUser()
+  if (!session) return NextResponse.json({ error: 'Belum login' }, { status: 401 })
+
+  const { searchParams } = new URL(req.url)
+  const status = searchParams.get('status') ?? ''
+  const brandId = searchParams.get('brandId') ?? ''
+  const opportunityId = searchParams.get('opportunityId') ?? ''
+
+  /* --- auto-expire pass (global, before listing/mapping) --- */
+  const now = new Date()
+  const stale = await db.quotation.findMany({
+    where: { status: 'SENT', validUntil: { lt: now } },
+    select: { id: true, code: true, title: true },
+  })
+  for (const q of stale) {
+    await db.quotation.update({ where: { id: q.id }, data: { status: 'EXPIRED' } })
+    await logAudit({
+      userId: session.id,
+      userName: session.name,
+      action: 'QUOTATION_EXPIRED',
+      entityType: 'Quotation',
+      entityId: q.id,
+      entityLabel: `${q.code} — ${q.title}`,
+      oldValue: { status: 'SENT' },
+      newValue: { status: 'EXPIRED' },
+      req,
+    })
   }
 
-  const lead = await db.lead.findUnique({ where: { id: body.leadId } });
-  if (!lead) return NextResponse.json({ error: "Lead tidak ditemukan" }, { status: 404 });
-
-  const items: QuotationItemDTO[] = body.items
-    .filter((it: { desc?: string }) => it?.desc)
-    .map((it: { desc: string; qty?: number; price?: number }) => ({
-      desc: String(it.desc),
-      qty: Math.max(1, Number(it.qty) || 1),
-      price: Math.max(0, Math.round(Number(it.price) || 0)),
-    }));
-  if (items.length === 0) return NextResponse.json({ error: "Item penawaran tidak valid" }, { status: 400 });
-
-  const subtotal = items.reduce((s, it) => s + it.qty * it.price, 0);
-  const discountPct = Math.min(100, Math.max(0, Number(body.discountPct) || 0));
-  const ppnPct = body.ppnPct === 0 ? 0 : Math.min(50, Math.max(0, Number(body.ppnPct ?? 11)));
-  const afterDiscount = Math.round(subtotal * (1 - discountPct / 100));
-  const grandTotal = Math.round(afterDiscount * (1 + ppnPct / 100));
-
-  const quotation = await db.quotation.create({
-    data: {
-      number: await nextDocNumber("QT"),
-      leadId: lead.id,
-      brand: lead.brand,
-      title: String(body.title),
-      itemsJson: JSON.stringify(items),
-      subtotal,
-      discountPct,
-      ppnPct,
-      grandTotal,
-      status: "DRAFT",
-      notes: body.notes ? String(body.notes) : null,
+  const quotations = await db.quotation.findMany({
+    where: {
+      ...(status ? { status } : {}),
+      ...(brandId ? { brandId } : {}),
+      ...(opportunityId ? { opportunityId } : {}),
     },
-  });
+    include: quotationInclude,
+    orderBy: { createdAt: 'desc' },
+  })
 
-  // Sinkronkan funnel: penawaran dibuat → stage PROPOSAL
-  await db.lead.update({
-    where: { id: lead.id },
-    data: { stage: lead.stage === "NEW" || lead.stage === "QUALIFIED" ? "PROPOSAL" : lead.stage, status: "QUOTED", estValue: lead.estValue > 0 ? lead.estValue : grandTotal },
-  });
+  return NextResponse.json(quotations.map(mapQuotation))
+}
 
-  await db.notification.create({
-    data: { role: "FINANCE", title: `Penawaran baru ${quotation.number}`, body: `${quotation.title} — ${grandTotal.toLocaleString("id-ID")} (menunggu review keuangan)`, type: "SYSTEM" },
-  });
-  await logAudit({ actorName: user.name, action: "QUOTATION_CREATED", entity: "Quotation", entityId: quotation.id, detail: `${quotation.number} — ${quotation.title}` });
+/**
+ * POST — create quotation from an opportunity.
+ * Body: { opportunityId, title?, items: [{description, qty, unitPrice}],
+ *         discountPct?, taxPct?, validUntil?, notes? }
+ * brandId/companyId/currency inherit from the opportunity.
+ */
+export async function POST(req: NextRequest) {
+  const session = await getSessionUser()
+  if (!session) return NextResponse.json({ error: 'Belum login' }, { status: 401 })
 
-  return NextResponse.json({ quotation: mapQuotation(quotation) }, { status: 201 });
+  const body = await req.json().catch(() => null)
+  const opportunityId = typeof body?.opportunityId === 'string' ? body.opportunityId : ''
+  if (!opportunityId) return NextResponse.json({ error: 'Opportunity wajib dipilih' }, { status: 400 })
+
+  const opp = await db.opportunity.findFirst({ where: { id: opportunityId, isDeleted: false } })
+  if (!opp) return NextResponse.json({ error: 'Opportunity tidak ditemukan' }, { status: 404 })
+
+  const parsedItems = parseItems(body?.items)
+  if ('error' in parsedItems) return NextResponse.json({ error: parsedItems.error }, { status: 400 })
+
+  const rawDiscount = Number(body?.discountPct ?? 0)
+  const rawTax = Number(body?.taxPct ?? 11)
+  const discountPct = Number.isFinite(rawDiscount) ? Math.min(100, Math.max(0, rawDiscount)) : 0
+  const taxPct = Number.isFinite(rawTax) ? Math.min(100, Math.max(0, rawTax)) : 11
+  const title = typeof body?.title === 'string' && body.title.trim() ? body.title.trim() : opp.title
+  const notes = typeof body?.notes === 'string' && body.notes.trim() ? body.notes.trim() : null
+  const validUntil = parseDate(body?.validUntil)
+
+  const totals = computeTotals(parsedItems.items, discountPct, taxPct)
+  const code = await generateQuotationCode()
+
+  const created = await db.quotation.create({
+    data: {
+      code,
+      opportunityId: opp.id,
+      brandId: opp.executingBrandId,
+      companyId: opp.companyId,
+      title,
+      status: 'DRAFT',
+      currency: opp.currency,
+      subtotal: totals.subtotal,
+      discountPct,
+      discountAmount: totals.discountAmount,
+      taxPct,
+      taxAmount: totals.taxAmount,
+      total: totals.total,
+      validUntil,
+      notes,
+      createdById: session.id,
+      items: {
+        create: parsedItems.items.map((it, index) => ({
+          description: it.description,
+          qty: it.qty,
+          unitPrice: it.unitPrice,
+          sortOrder: index,
+        })),
+      },
+    },
+    include: { ...quotationInclude, items: { orderBy: { sortOrder: 'asc' as const } } },
+  })
+
+  await logAudit({
+    userId: session.id,
+    userName: session.name,
+    action: 'QUOTATION_CREATE',
+    entityType: 'Quotation',
+    entityId: created.id,
+    entityLabel: `${code} — ${title}`,
+    newValue: { code, total: totals.total },
+    req,
+  })
+
+  return NextResponse.json(mapQuotationDetail(created))
 }

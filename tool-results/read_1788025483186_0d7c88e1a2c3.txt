@@ -1,0 +1,505 @@
+     1→   230→                      type="button"
+     2→   231→                      onClick={() => openOpportunity(b.opportunityId)}
+     3→   232→                      className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-rose-100/60"
+     4→   233→                    >
+     5→   234→                      <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: b.brandColor }} />
+     6→   235→                      <span className="min-w-0 flex-1 truncate text-xs text-rose-900">
+     7→   236→                        <span className="font-semibold">{b.code}</span> · {b.companyName} — {b.title}
+     8→   237→                      </span>
+     9→   238→                      <span className="shrink-0 text-xs font-semibold text-rose-700">
+    10→   239→                        {fmtNum(b.waitingHours)} jam / SLA {b.slaHours} jam
+    11→   240→                      </span>
+    12→   241→                      {b.ownerName && (
+    13→   242→                        <span
+    14→   243→                          className="hidden shrink-0 items-center gap-1.5 rounded-full bg-white/70 py-0.5 pl-0.5 pr-2 sm:inline-flex"
+    15→   244→                          title={b.ownerName}
+    16→   245→                        >
+    17→   246→                          <UserAvatar name={b.ownerName} color="#be123c" size={18} />
+    18→   247→                          <span className="text-[11px] font-medium text-rose-800">{b.ownerName.split(' ')[0]}</span>
+    19→   248→                        </span>
+    20→   249→                      )}
+    21→   250→                    </button>
+    22→   251→                  ))}
+    23→   252→                </div>
+    24→   253→              </AlertDescription>
+    25→   254→            </Alert>
+    26→   255→          )}
+    27→   256→
+    28→   257→          {/* KPI grid */}
+    29→   258→          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    30→   259→            {kpis.map((item) => (
+    31→   260→              <KpiCard key={item.key} icon={item.icon} label={item.label} value={item.value} hint={item.hint} tone={item.tone} />
+    32→   261→            ))}
+    33→   262→          </div>
+    34→   263→
+    35→   264→          {/* Forecast penutupan */}
+    36→   265→          <Card className="rounded-xl border-slate-200">
+    37→   266→            <CardHeader className="pb-3">
+    38→   267→              <CardTitle className="flex items-center gap-2 text-base">
+    39→   268→                <CalendarClock className="h-4 w-4 text-teal-600" /> Forecast Penutupan
+    40→   269→              </CardTitle>
+    41→   270→              <CardDescription>Proyeksi nilai deal yang diperkirakan closing dalam rentang waktu berikut</CardDescription>
+    42→   271→            </CardHeader>
+    43→   272→            <CardContent>
+    44→   273→              <div className="grid gap-4 sm:grid-cols-3">
+    45→   274→                {forecasts.map((f) => (
+    46→   275→                  <div key={f.key} className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+    47→   276→                    <div className="flex items-baseline justify-between gap-2">
+    48→   277→                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{f.label}</p>
+    49→   278→                      <p className="text-[11px] text-slate-400">{pctOf(f.value, k.pipelineValue)}% pipeline</p>
+    50→   279→                    </div>
+    51→   280→                    <p className="mt-1.5 text-xl font-bold text-slate-900">{formatMoney(f.value, 'IDR', true)}</p>
+    52→   281→                    <Progress value={pctOf(f.value, k.pipelineValue)} className={cn('mt-2.5 h-2 bg-slate-100', f.bar)} />
+    53→   282→                  </div>
+    54→   283→                ))}
+    55→   284→              </div>
+    56→   285→            </CardContent>
+    57→   286→          </Card>
+    58→   287→
+    59→   288→          {/* Lead per brand */}
+    60→   289→          <Card className="rounded-xl border-slate-200">
+    61→   290→            <CardHeader className="pb-3">
+    62→   291→              <CardTitle className="text-base">Lead per Brand</CardTitle>
+    63→   292→              <CardDescription>Jumlah lead aktif dan total nilai per brand</CardDescription>
+    64→   293→            </CardHeader>
+    65→   294→            <CardContent>
+    66→   295→              {data.leadsByBrand.length === 0 ? (
+    67→   296→                <EmptyState icon={<Users className="h-5 w-5" />} title="Belum ada lead aktif" description="Lead akan muncul di sini setelah opportunity dibuat." />
+    68→   297→              ) : (
+    69→   298→                <div className="space-y-4">
+    70→   299→                  {data.leadsByBrand.map((b) => (
+    71→   300→                    <div key={b.brandId}>
+    72→   301→                      <div className="mb-1.5 flex flex-wrap items-center gap-2">
+    73→   302→                        <BrandChip name={b.name} color={b.color} />
+    74→   303→                        <span className="text-xs font-semibold text-slate-700">{b.count} lead</span>
+    75→   304→                        <span className="ml-auto text-xs font-medium text-slate-500">{formatMoney(b.value, 'IDR', true)}</span>
+    76→   305→                      </div>
+    77→   306→                      <Progress
+    78→   307→                        value={pctOf(b.count, maxBrandCount)}
+    79→   308→                        className="h-2 bg-slate-100 [&>div]:bg-current"
+    80→   309→                        style={{ color: b.color }}
+    81→   310→                      />
+    82→   311→                    </div>
+    83→   312→                  ))}
+    84→   313→                </div>
+    85→   314→              )}
+    86→   315→            </CardContent>
+    87→   316→          </Card>
+    88→   317→
+    89→   318→          {/* Kanal + Negara */}
+    90→   319→          <div className="grid gap-4 lg:grid-cols-2">
+    91→   320→            <Card className="rounded-xl border-slate-200">
+    92→   321→              <CardHeader className="pb-3">
+    93→   322→                <CardTitle className="text-base">Lead per Kanal</CardTitle>
+    94→   323→                <CardDescription>Dari mana lead masuk</CardDescription>
+    95→   324→              </CardHeader>
+    96→   325→              <CardContent>
+    97→   326→                {data.leadsByChannel.length === 0 ? (
+    98→   327→                  <EmptyState icon={<Inbox className="h-5 w-5" />} title="Belum ada data kanal" />
+    99→   328→                ) : (
+   100→   329→                  <div className="space-y-3">
+   101→   330→                    {data.leadsByChannel.map((c) => {
+   102→   331→                      const meta = channelMeta(c.channel)
+   103→   332→                      return (
+   104→   333→                        <div key={c.channel} className="flex items-center gap-3">
+   105→   334→                          <div className={cn('flex h-8 w-8 shrink-0 items-center justify-center rounded-full', meta.bg)}>
+   106→   335→                            <ChannelIcon channel={c.channel} className="h-4 w-4" />
+   107→   336→                          </div>
+   108→   337→                          <div className="min-w-0 flex-1">
+   109→   338→                            <div className="flex items-center justify-between gap-2">
+   110→   339→                              <p className="truncate text-xs font-medium text-slate-700">{meta.label}</p>
+   111→   340→                              <p className="text-xs font-semibold text-slate-900">{c.count}</p>
+   112→   341→                            </div>
+   113→   342→                            <Progress
+   114→   343→                              value={pctOf(c.count, maxChannel)}
+   115→   344→                              className="mt-1 h-1.5 bg-slate-100 [&>div]:bg-current"
+   116→   345→                              style={{ color: CHANNEL_HEX[c.channel] ?? '#64748b' }}
+   117→   346→                            />
+   118→   347→                          </div>
+   119→   348→                        </div>
+   120→   349→                      )
+   121→   350→                    })}
+   122→   351→                  </div>
+   123→   352→                )}
+   124→   353→              </CardContent>
+   125→   354→            </Card>
+   126→   355→
+   127→   356→            <Card className="rounded-xl border-slate-200">
+   128→   357→              <CardHeader className="pb-3">
+   129→   358→                <CardTitle className="text-base">Lead per Negara</CardTitle>
+   130→   359→                <CardDescription>Sebaran geografis lead aktif</CardDescription>
+   131→   360→              </CardHeader>
+   132→   361→              <CardContent>
+   133→   362→                {data.leadsByCountry.length === 0 ? (
+   134→   363→                  <EmptyState icon={<Users className="h-5 w-5" />} title="Belum ada data negara" />
+   135→   364→                ) : (
+   136→   365→                  <div className="space-y-3">
+   137→   366→                    {data.leadsByCountry.map((c) => (
+   138→   367→                      <div key={c.country}>
+   139→   368→                        <div className="flex items-center justify-between gap-2">
+   140→   369→                          <p className="truncate text-xs font-medium text-slate-700">{c.country}</p>
+   141→   370→                          <p className="text-xs font-semibold text-slate-900">{c.count}</p>
+   142→   371→                        </div>
+   143→   372→                        <Progress value={pctOf(c.count, maxCountry)} className="mt-1 h-1.5 bg-slate-100 [&>div]:bg-slate-500" />
+   144→   373→                      </div>
+   145→   374→                    ))}
+   146→   375→                  </div>
+   147→   376→                )}
+   148→   377→              </CardContent>
+   149→   378→            </Card>
+   150→   379→          </div>
+   151→   380→
+   152→   381→          {/* Task mendatang + aktivitas terbaru */}
+   153→   382→          <div className="grid gap-4 lg:grid-cols-2">
+   154→   383→            <Card className="rounded-xl border-slate-200">
+   155→   384→              <CardHeader className="pb-3">
+   156→   385→                <CardTitle className="flex items-center gap-2 text-base">
+   157→   386→                  <ListTodo className="h-4 w-4 text-amber-600" /> Task Mendatang
+   158→   387→                </CardTitle>
+   159→   388→                <CardDescription>Follow-up dan aktivitas yang perlu diselesaikan</CardDescription>
+   160→   389→              </CardHeader>
+   161→   390→              <CardContent>
+   162→   391→                {upcoming.length === 0 ? (
+   163→   392→                  <EmptyState icon={<Check className="h-5 w-5" />} title="Tidak ada task mendatang" description="Semua task sudah selesai atau belum dijadwalkan." />
+   164→   393→                ) : (
+   165→   394→                  <div className="space-y-2">
+   166→   395→                    {upcoming.map((task) => {
+   167→   396→                      const due = dueInfo(task)
+   168→   397→                      return (
+   169→   398→                        <div key={task.id} className="flex items-start gap-3 rounded-lg border border-slate-100 p-3 transition-colors hover:bg-slate-50">
+   170→   399→                          <div className="min-w-0 flex-1">
+   171→   400→                            <div className="flex flex-wrap items-center gap-2">
+   172→   401→                              <PriorityBadge priority={task.priority} />
+   173→   402→                              <p className="truncate text-sm font-medium text-slate-900">{task.title}</p>
+   174→   403→                            </div>
+   175→   404→                            <p className="mt-0.5 truncate text-xs text-slate-500">
+   176→   405→                              {task.opportunityTitle ?? task.companyName ?? 'Tanpa konteks'}
+   177→   406→                            </p>
+   178→   407→                            <span className={cn('mt-1 inline-flex items-center gap-1 text-[11px]', due.overdue ? 'font-semibold text-rose-600' : 'text-slate-400')}>
+   179→   408→                              <Clock className="h-3 w-3" /> {due.label}
+   180→   409→                            </span>
+   181→   410→                          </div>
+   182→   411→                          <div className="flex shrink-0 flex-col items-end gap-1.5">
+   183→   412→                            <UserAvatar name={task.assigneeName ?? '?'} color={task.assigneeColor} size={24} />
+   184→   413→                            <Button
+   185→   414→                              size="sm"
+   186→   415→                              variant="outline"
+   187→   416→                              className="h-6 gap-1 rounded-full px-2.5 text-[11px]"
+   188→   417→                              disabled={completingIds.has(task.id)}
+   189→   418→                              onClick={() => void handleCompleteTask(task)}
+   190→   419→                            >
+   191→   420→                              {completingIds.has(task.id)
+   192→   421→                                ? <Loader2 className="h-3 w-3 animate-spin" />
+   193→   422→                                : <Check className="h-3 w-3 text-emerald-600" />}
+   194→   423→                              Selesai
+   195→   424→                            </Button>
+   196→   425→                          </div>
+   197→   426→                        </div>
+   198→   427→                      )
+   199→   428→                    })}
+   200→   429→                  </div>
+   201→   430→                )}
+   202→   431→              </CardContent>
+   203→   432→            </Card>
+   204→   433→
+   205→   434→            <Card className="rounded-xl border-slate-200">
+   206→   435→              <CardHeader className="pb-3">
+   207→   436→                <CardTitle className="text-base">Aktivitas Terbaru</CardTitle>
+   208→   437→                <CardDescription>Pesan masuk dan keluar lintas kanal</CardDescription>
+   209→   438→              </CardHeader>
+   210→   439→              <CardContent>
+   211→   440→                {activities.length === 0 ? (
+   212→   441→                  <EmptyState icon={<Inbox className="h-5 w-5" />} title="Belum ada aktivitas" description="Interaksi dengan kontak akan tampil di sini." />
+   213→   442→                ) : (
+   214→   443→                  <div className="space-y-2">
+   215→   444→                    {activities.map((a) => {
+   216→   445→                      const clickable = Boolean(a.opportunityId)
+   217→   446→                      const inner = (
+   218→   447→                        <>
+   219→   448→                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100">
+   220→   449→                            <ChannelIcon channel={a.channel} className="h-4 w-4" />
+   221→   450→                          </div>
+   222→   451→                          <div className="min-w-0 flex-1">
+   223→   452→                            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+   224→   453→                              <p className="truncate text-sm font-semibold text-slate-900">{a.contactName}</p>
+   225→   454→                              {a.companyName && <span className="truncate text-xs text-slate-500">{a.companyName}</span>}
+   226→   455→                              <BrandChip name={a.brandName} color={a.brandColor} size="xs" />
+   227→   456→                              <span className="ml-auto shrink-0 text-[11px] text-slate-400">{timeAgo(a.sentAt)}</span>
+   228→   457→                            </div>
+   229→   458→                            <p className="mt-0.5 line-clamp-2 text-xs leading-snug text-slate-500">{a.body}</p>
+   230→   459→                          </div>
+   231→   460→                          {clickable && <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-slate-300" />}
+   232→   461→                        </>
+   233→   462→                      )
+   234→   463→                      const cls = 'flex w-full items-start gap-3 rounded-lg border border-slate-100 p-3 text-left transition-colors'
+   235→   464→                      return clickable ? (
+   236→   465→                        <button
+   237→   466→                          key={a.id}
+   238→   467→                          type="button"
+   239→   468→                          className={cn(cls, 'cursor-pointer hover:border-teal-200 hover:bg-teal-50/40')}
+   240→   469→                          onClick={() => a.opportunityId && openOpportunity(a.opportunityId)}
+   241→   470→                        >
+   242→   471→                          {inner}
+   243→   472→                        </button>
+   244→   473→                      ) : (
+   245→   474→                        <div key={a.id} className={cls}>{inner}</div>
+   246→   475→                      )
+   247→   476→                    })}
+   248→   477→                  </div>
+   249→   478→                )}
+   250→   479→              </CardContent>
+   251→   480→            </Card>
+   252→   481→          </div>
+   253→   482→        </TabsContent>
+   254→   483→
+   255→   484→        {/* ================= TAB FUNNEL & ANALITIK ================= */}
+   256→   485→        <TabsContent value="analitik" className="space-y-5">
+   257→   486→          <Card className="rounded-xl border-slate-200">
+   258→   487→            <CardHeader className="pb-3">
+   259→   488→              <CardTitle className="flex items-center gap-2 text-base">
+   260→   489→                <TrendingUp className="h-4 w-4 text-teal-600" /> Funnel Lead
+   261→   490→              </CardTitle>
+   262→   491→              <CardDescription>Jumlah lead pada setiap tahap pipeline</CardDescription>
+   263→   492→            </CardHeader>
+   264→   493→            <CardContent>
+   265→   494→              {funnelData.length === 0 ? (
+   266→   495→                <EmptyState icon={<Target className="h-5 w-5" />} title="Belum ada data funnel" />
+   267→   496→              ) : (
+   268→   497→                <div className="h-[280px] w-full">
+   269→   498→                  <ResponsiveContainer width="100%" height="100%">
+   270→   499→                    <BarChart data={funnelData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+   271→   500→                      <defs>
+   272→   501→                        <linearGradient id="funnelGrad" x1="0" y1="0" x2="0" y2="1">
+   273→   502→                          <stop offset="0%" stopColor="#f59e0b" />
+   274→   503→                          <stop offset="100%" stopColor="#0d9488" />
+   275→   504→                        </linearGradient>
+   276→   505→                      </defs>
+   277→   506→                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+   278→   507→                      <XAxis
+   279→   508→                        dataKey="name"
+   280→   509→                        tick={{ fontSize: 10, fill: '#64748b' }}
+   281→   510→                        interval={0}
+   282→   511→                        angle={-32}
+   283→   512→                        textAnchor="end"
+   284→   513→                        height={76}
+   285→   514→                        tickLine={false}
+   286→   515→                      />
+   287→   516→                      <YAxis tick={{ fontSize: 11, fill: '#64748b' }} allowDecimals={false} width={32} tickLine={false} axisLine={false} />
+   288→   517→                      <Tooltip cursor={{ fill: '#f1f5f9' }} contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12 }} />
+   289→   518→                      <Bar dataKey="count" name="Jumlah lead" fill="url(#funnelGrad)" radius={[6, 6, 0, 0]} maxBarSize={44} />
+   290→   519→                    </BarChart>
+   291→   520→                  </ResponsiveContainer>
+   292→   521→                </div>
+   293→   522→              )}
+   294→   523→            </CardContent>
+   295→   524→          </Card>
+   296→   525→
+   297→   526→          <div className="grid gap-4 lg:grid-cols-2">
+   298→   527→            {/* Alasan lost */}
+   299→   528→            <Card className="rounded-xl border-slate-200">
+   300→   529→              <CardHeader className="pb-3">
+   301→   530→                <CardTitle className="flex items-center gap-2 text-base">
+   302→   531→                  <XCircle className="h-4 w-4 text-rose-500" /> Alasan Lost
+   303→   532→                </CardTitle>
+   304→   533→                <CardDescription>Mengapa deal tidak jadi — peluang perbaikan proses</CardDescription>
+   305→   534→              </CardHeader>
+   306→   535→              <CardContent>
+   307→   536→                {data.lostReasons.length === 0 ? (
+   308→   537→                  <EmptyState icon={<Check className="h-5 w-5" />} title="Belum ada lead lost" description="Bagus — belum ada deal yang gagal di periode ini." />
+   309→   538→                ) : (
+   310→   539→                  <div className="space-y-3">
+   311→   540→                    {data.lostReasons.map((r) => (
+   312→   541→                      <div key={r.reason}>
+   313→   542→                        <div className="flex items-center justify-between gap-2">
+   314→   543→                          <p className="truncate text-xs font-medium text-slate-700">{lostReasonLabel(r.reason) ?? r.reason}</p>
+   315→   544→                          <p className="text-xs font-semibold text-slate-900">{r.count}</p>
+   316→   545→                        </div>
+   317→   546→                        <Progress value={pctOf(r.count, maxLost)} className="mt-1 h-1.5 bg-slate-100 [&>div]:bg-rose-400" />
+   318→   547→                      </div>
+   319→   548→                    ))}
+   320→   549→                  </div>
+   321→   550→                )}
+   322→   551→              </CardContent>
+   323→   552→            </Card>
+   324→   553→
+   325→   554→            {/* Pipeline per stage */}
+   326→   555→            <Card className="rounded-xl border-slate-200">
+   327→   556→              <CardHeader className="pb-3">
+   328→   557→                <CardTitle className="text-base">Pipeline per Stage</CardTitle>
+   329→   558→                <CardDescription>Jumlah dan nilai lead pada tiap tahap</CardDescription>
+   330→   559→              </CardHeader>
+   331→   560→              <CardContent>
+   332→   561→                {data.funnel.length === 0 ? (
+   333→   562→                  <EmptyState icon={<Target className="h-5 w-5" />} title="Belum ada pipeline" />
+   334→   563→                ) : (
+   335→   564→                  <Table>
+   336→   565→                    <TableHeader>
+   337→   566→                      <TableRow>
+   338→   567→                        <TableHead className="text-xs">Stage</TableHead>
+   339→   568→                        <TableHead className="text-right text-xs">Lead</TableHead>
+   340→   569→                        <TableHead className="text-right text-xs">Nilai</TableHead>
+   341→   570→                      </TableRow>
+   342→   571→                    </TableHeader>
+   343→   572→                    <TableBody>
+   344→   573→                      {data.funnel.map((f) => (
+   345→   574→                        <TableRow key={f.stage}>
+   346→   575→                          <TableCell><StageBadge stage={f.stage} /></TableCell>
+   347→   576→                          <TableCell className="text-right text-sm font-medium">{f.count}</TableCell>
+   348→   577→                          <TableCell className="text-right text-sm text-slate-500">{formatMoney(f.value, 'IDR', true)}</TableCell>
+   349→   578→                        </TableRow>
+   350→   579→                      ))}
+   351→   580→                    </TableBody>
+   352→   581→                  </Table>
+   353→   582→                )}
+   354→   583→              </CardContent>
+   355→   584→            </Card>
+   356→   585→          </div>
+   357→   586→
+   358→   587→          <div className="grid gap-4 lg:grid-cols-2">
+   359→   588→            {/* Status project */}
+   360→   589→            <Card className="rounded-xl border-slate-200">
+   361→   590→              <CardHeader className="pb-3">
+   362→   591→                <CardTitle className="text-base">Status Project</CardTitle>
+   363→   592→                <CardDescription>Distribusi pekerjaan pasca-deal</CardDescription>
+   364→   593→              </CardHeader>
+   365→   594→              <CardContent>
+   366→   595→                {data.projectsStatus.length === 0 ? (
+   367→   596→                  <EmptyState icon={<Target className="h-5 w-5" />} title="Belum ada project" description="Project otomatis dibuat saat opportunity ditandai Won." />
+   368→   597→                ) : (
+   369→   598→                  <div className="flex flex-wrap gap-2">
+   370→   599→                    {data.projectsStatus.map((p) => {
+   371→   600→                      const meta = projectStatusMeta(p.status)
+   372→   601→                      return (
+   373→   602→                        <span key={p.status} className={cn('inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium', meta.bg, meta.color)}>
+   374→   603→                          {meta.label}
+   375→   604→                          <span className="rounded-full bg-white/70 px-1.5 text-[11px] font-bold">{p.count}</span>
+   376→   605→                        </span>
+   377→   606→                      )
+   378→   607→                    })}
+   379→   608→                  </div>
+   380→   609→                )}
+   381→   610→              </CardContent>
+   382→   611→            </Card>
+   383→   612→
+   384→   613→            {/* Perusahaan teratas */}
+   385→   614→            <Card className="rounded-xl border-slate-200">
+   386→   615→              <CardHeader className="pb-3">
+   387→   616→                <CardTitle className="flex items-center gap-2 text-base">
+   388→   617→                  <Building2 className="h-4 w-4 text-teal-600" /> Perusahaan Teratas
+   389→   618→                </CardTitle>
+   390→   619→                <CardDescription>Nilai pipeline terbesar — klik untuk membuka detail</CardDescription>
+   391→   620→              </CardHeader>
+   392→   621→              <CardContent>
+   393→   622→                {data.topCompanies.length === 0 ? (
+   394→   623→                  <EmptyState icon={<Building2 className="h-5 w-5" />} title="Belum ada perusahaan" />
+   395→   624→                ) : (
+   396→   625→                  <div className="space-y-1.5">
+   397→   626→                    {data.topCompanies.map((c) => (
+   398→   627→                      <button
+   399→   628→                        key={c.companyId}
+   400→   629→                        type="button"
+   401→   630→                        onClick={() => openCompany(c.companyId)}
+   402→   631→                        className="flex w-full items-center gap-3 rounded-lg border border-slate-100 px-3 py-2.5 text-left transition-colors hover:border-teal-200 hover:bg-teal-50/40"
+   403→   632→                      >
+   404→   633→                        <div className="min-w-0 flex-1">
+   405→   634→                          <p className="truncate text-sm font-semibold text-slate-900">{c.name}</p>
+   406→   635→                          <p className="text-xs text-slate-500">{c.country} · {c.openOpps} open</p>
+   407→   636→                        </div>
+   408→   637→                        <span className="shrink-0 text-sm font-semibold text-slate-700">{formatMoney(c.totalValue, 'IDR', true)}</span>
+   409→   638→                        <ChevronRight className="h-4 w-4 shrink-0 text-slate-300" />
+   410→   639→                      </button>
+   411→   640→                    ))}
+   412→   641→                  </div>
+   413→   642→                )}
+   414→   643→              </CardContent>
+   415→   644→            </Card>
+   416→   645→          </div>
+   417→   646→        </TabsContent>
+   418→   647→
+   419→   648→        {/* ================= TAB TIM MARKETING ================= */}
+   420→   649→        <TabsContent value="tim" className="space-y-5">
+   421→   650→          <div className="grid gap-4 lg:grid-cols-3">
+   422→   651→            <Card className="rounded-xl border-slate-200 lg:col-span-2">
+   423→   652→              <CardHeader className="pb-3">
+   424→   653→                <CardTitle className="flex items-center gap-2 text-base">
+   425→   654→                  <Users className="h-4 w-4 text-violet-600" /> Performa Marketing
+   426→   655→                </CardTitle>
+   427→   656→                <CardDescription>Open, won, lost, dan kecepatan respons per marketer</CardDescription>
+   428→   657→              </CardHeader>
+   429→   658→              <CardContent>
+   430→   659→                {data.marketingPerf.length === 0 ? (
+   431→   660→                  <EmptyState icon={<Users className="h-5 w-5" />} title="Belum ada data marketing" />
+   432→   661→                ) : (
+   433→   662→                  <Table>
+   434→   663→                    <TableHeader>
+   435→   664→                      <TableRow>
+   436→   665→                        <TableHead className="text-xs">Marketing</TableHead>
+   437→   666→                        <TableHead className="text-right text-xs">Open</TableHead>
+   438→   667→                        <TableHead className="text-right text-xs">Won</TableHead>
+   439→   668→                        <TableHead className="text-right text-xs">Lost</TableHead>
+   440→   669→                        <TableHead className="text-right text-xs">Avg Response</TableHead>
+   441→   670→                      </TableRow>
+   442→   671→                    </TableHeader>
+   443→   672→                    <TableBody>
+   444→   673→                      {data.marketingPerf.map((m) => (
+   445→   674→                        <TableRow key={m.userId}>
+   446→   675→                          <TableCell>
+   447→   676→                            <div className="flex items-center gap-2.5">
+   448→   677→                              <UserAvatar name={m.name} color={m.color} size={28} />
+   449→   678→                              <span className="text-sm font-medium text-slate-900">{m.name}</span>
+   450→   679→                            </div>
+   451→   680→                          </TableCell>
+   452→   681→                          <TableCell className="text-right text-sm font-medium">{m.open}</TableCell>
+   453→   682→                          <TableCell className="text-right text-sm font-semibold text-emerald-700">{m.won}</TableCell>
+   454→   683→                          <TableCell className="text-right text-sm font-semibold text-rose-600">{m.lost}</TableCell>
+   455→   684→                          <TableCell className="text-right text-sm text-slate-500">
+   456→   685→                            {m.avgResponseHours > 0 ? `${fmtNum(m.avgResponseHours)} jam` : '—'}
+   457→   686→                          </TableCell>
+   458→   687→                        </TableRow>
+   459→   688→                      ))}
+   460→   689→                    </TableBody>
+   461→   690→                  </Table>
+   462→   691→                )}
+   463→   692→              </CardContent>
+   464→   693→            </Card>
+   465→   694→
+   466→   695→            <Card className="rounded-xl border-slate-200">
+   467→   696→              <CardHeader className="pb-3">
+   468→   697→                <CardTitle className="flex items-center gap-2 text-base">
+   469→   698→                  <Trophy className="h-4 w-4 text-amber-500" /> Won / Lost Summary
+   470→   699→                </CardTitle>
+   471→   700→                <CardDescription>Total deal yang sudah ditutup</CardDescription>
+   472→   701→              </CardHeader>
+   473→   702→              <CardContent className="space-y-4">
+   474→   703→                <div className="grid grid-cols-2 gap-3">
+   475→   704→                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+   476→   705→                    <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Won</p>
+   477→   706→                    <p className="mt-1 text-3xl font-bold text-emerald-800">{data.wonLost.won}</p>
+   478→   707→                  </div>
+   479→   708→                  <div className="rounded-xl border border-rose-200 bg-rose-50 p-4">
+   480→   709→                    <p className="text-xs font-semibold uppercase tracking-wide text-rose-700">Lost</p>
+   481→   710→                    <p className="mt-1 text-3xl font-bold text-rose-800">{data.wonLost.lost}</p>
+   482→   711→                  </div>
+   483→   712→                </div>
+   484→   713→                <div>
+   485→   714→                  <div className="flex items-center justify-between text-xs text-slate-500">
+   486→   715→                    <span>Rasio kemenangan</span>
+   487→   716→                    <span className="font-semibold text-slate-700">{winRatio}%</span>
+   488→   717→                  </div>
+   489→   718→                  <Progress value={winRatio} className="mt-1.5 h-2 bg-slate-100 [&>div]:bg-emerald-500" />
+   490→   719→                  <p className="mt-2 text-xs text-slate-500">
+   491→   720→                    {data.wonLost.won} dari {wonTotal} deal selesai berhasil dimenangkan.
+   492→   721→                  </p>
+   493→   722→                </div>
+   494→   723→                <div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-500">
+   495→   724→                  <p><span className="font-semibold text-slate-700">{data.marketingPerf.length} marketer</span> aktif menangani pipeline lintas brand.</p>
+   496→   725→                </div>
+   497→   726→              </CardContent>
+   498→   727→            </Card>
+   499→   728→          </div>
+   500→   729→        </TabsContent>
+   501→   730→      </Tabs>
+   502→   731→    </div>
+   503→   732→  )
+   504→   733→}
+   505→   734→

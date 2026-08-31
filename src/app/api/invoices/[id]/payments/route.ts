@@ -1,56 +1,79 @@
-import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { requireAuth } from "@/lib/auth";
-import { logAudit } from "@/lib/audit";
-import { mapInvoice } from "@/lib/ops";
+/* ============ /api/invoices/[id]/payments — record a payment ============ */
+import { NextRequest, NextResponse } from 'next/server'
+import { db } from '@/lib/db'
+import { getSessionUser, parseDate, invoiceInclude, mapInvoice } from '@/lib/crm-server'
+import { logAudit } from '@/lib/audit'
 
-type Ctx = { params: Promise<{ id: string }> };
+export const dynamic = 'force-dynamic'
 
-/** POST /api/invoices/[id]/payments — catat pembayaran invoice. */
-export async function POST(req: Request, ctx: Ctx) {
-  const user = await requireAuth(["OWNER", "FINANCE"]);
-  if (!user) return NextResponse.json({ error: "Tidak diizinkan" }, { status: 401 });
+/**
+ * POST — record a payment against an invoice.
+ * Body: { amount, method?, reference?, paidAt?, note? }
+ * Recomputes paidAmount from all payments and derives the invoice status:
+ * PAID when paidAmount >= total - 1 (rounding epsilon), PARTIAL when > 0, else UNPAID.
+ */
+export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  const session = await getSessionUser()
+  if (!session) return NextResponse.json({ error: 'Belum login' }, { status: 401 })
 
-  const { id } = await ctx.params;
-  const body = await req.json().catch(() => null);
-  const amount = Math.round(Number(body?.amount));
-  if (!amount || amount <= 0) return NextResponse.json({ error: "Nominal pembayaran tidak valid" }, { status: 400 });
+  const { id } = await ctx.params
+  const invoice = await db.invoice.findFirst({ where: { id }, include: invoiceInclude })
+  if (!invoice) return NextResponse.json({ error: 'Invoice tidak ditemukan' }, { status: 404 })
 
-  const invoice = await db.invoice.findUnique({ where: { id }, include: { payments: true } });
-  if (!invoice) return NextResponse.json({ error: "Invoice tidak ditemukan" }, { status: 404 });
-
-  const paidSoFar = invoice.payments.reduce((s, p) => s + p.amount, 0);
-  if (paidSoFar >= invoice.grandTotal) {
-    return NextResponse.json({ error: "Invoice sudah lunas" }, { status: 400 });
+  if (invoice.status === 'CANCELLED') {
+    return NextResponse.json({ error: 'Invoice telah dibatalkan' }, { status: 400 })
   }
+  if (invoice.status === 'PAID') {
+    return NextResponse.json({ error: 'Invoice sudah lunas' }, { status: 400 })
+  }
+
+  const body = await req.json().catch(() => null)
+  const amount = Number(body?.amount)
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return NextResponse.json({ error: 'Jumlah pembayaran harus lebih dari 0' }, { status: 400 })
+  }
+
+  const newPaid = invoice.paidAmount + amount
+  if (newPaid > invoice.total + 1) {
+    return NextResponse.json({ error: 'Total pembayaran melebihi nilai invoice' }, { status: 400 })
+  }
+
+  const method = typeof body?.method === 'string' && body.method.trim() ? body.method.trim() : 'TRANSFER'
+  const reference = typeof body?.reference === 'string' && body.reference.trim() ? body.reference.trim() : null
+  const note = typeof body?.note === 'string' && body.note.trim() ? body.note.trim() : null
+  const paidAt = parseDate(body?.paidAt) ?? new Date()
 
   await db.payment.create({
     data: {
-      invoiceId: invoice.id,
-      amount: Math.min(amount, invoice.grandTotal - paidSoFar),
-      method: ["TRANSFER", "CASH", "QRIS", "OTHER"].includes(body?.method) ? body.method : "TRANSFER",
-      note: body?.note ? String(body.note) : null,
-      paidAt: new Date(),
+      invoiceId: id,
+      amount,
+      method,
+      reference,
+      paidAt,
+      note,
+      recordedById: session.id,
     },
-  });
+  })
 
-  // Status DB di-update agar ringkasan cepat; status efektif tetap dihitung saat baca.
-  const newPaid = Math.min(invoice.grandTotal, paidSoFar + amount);
-  const status = newPaid >= invoice.grandTotal ? "PAID" : "PARTIAL";
-  await db.invoice.update({ where: { id }, data: { status } });
+  /* --- recompute from all payments --- */
+  const payments = await db.payment.findMany({ where: { invoiceId: id }, select: { amount: true } })
+  const paidAmount = Math.round(payments.reduce((sum, p) => sum + p.amount, 0))
+  const status = paidAmount >= invoice.total - 1 ? 'PAID' : paidAmount > 0 ? 'PARTIAL' : 'UNPAID'
 
-  // Invoice pelunasan dibayar penuh → proyek siap serah terima (notif untuk manajer)
-  if (status === "PAID" && invoice.projectId) {
-    const project = await db.project.findUnique({ where: { id: invoice.projectId } });
-    if (project) {
-      await db.notification.create({
-        data: { role: "MANAGER", title: `Pembayaran lunas untuk ${project.code}`, body: `${invoice.number} lunas — proyek "${project.name}" siap finalisasi/serah terima`, type: "SYSTEM" },
-      });
-    }
-  }
+  await db.invoice.update({ where: { id }, data: { paidAmount, status } })
 
-  await logAudit({ actorName: user.name, action: "PAYMENT_RECORDED", entity: "Invoice", entityId: id, detail: `${invoice.number} +${amount.toLocaleString("id-ID")} (${status})` });
+  await logAudit({
+    userId: session.id,
+    userName: session.name,
+    action: 'PAYMENT_RECORD',
+    entityType: 'Invoice',
+    entityId: id,
+    entityLabel: `${invoice.code} — ${invoice.title}`,
+    oldValue: { paidAmount: invoice.paidAmount, status: invoice.status },
+    newValue: { amount, method, paidAmount, status },
+    req,
+  })
 
-  const fresh = await db.invoice.findUnique({ where: { id }, include: { payments: { orderBy: { paidAt: "asc" } } } });
-  return NextResponse.json({ invoice: mapInvoice(fresh!, fresh!.payments) });
+  const updated = await db.invoice.findFirst({ where: { id }, include: invoiceInclude })
+  return NextResponse.json(mapInvoice(updated!))
 }

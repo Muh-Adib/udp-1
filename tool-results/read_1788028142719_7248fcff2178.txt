@@ -1,0 +1,878 @@
+     1→/* ============ Lead Inbox — Omnichannel + Anti-Duplikat ============ */
+     2→'use client'
+     3→
+     4→import { useCallback, useEffect, useMemo, useState } from 'react'
+     5→import { crmApi } from './api-client'
+     6→import { useCrmStore } from './crm-store'
+     7→import { BrandChip, ChannelIcon, EmptyState, LoadingRows, RefreshButton, UserAvatar } from './shared'
+     8→import { CHANNELS, channelMeta, PRIORITIES, timeAgo } from '@/lib/crm-constants'
+     9→import type { ContactDTO, DuplicateCandidate, InteractionDTO, OpportunityDTO } from '@/lib/crm-types'
+    10→import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+    11→import { Badge } from '@/components/ui/badge'
+    12→import { Button } from '@/components/ui/button'
+    13→import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+    14→import {
+    15→  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+    16→} from '@/components/ui/dialog'
+    17→import { Input } from '@/components/ui/input'
+    18→import { Label } from '@/components/ui/label'
+    19→import {
+    20→  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+    21→} from '@/components/ui/select'
+    22→import { Switch } from '@/components/ui/switch'
+    23→import { Textarea } from '@/components/ui/textarea'
+    24→import { useToast } from '@/hooks/use-toast'
+    25→import { cn } from '@/lib/utils'
+    26→import {
+    27→  AlertTriangle, Building2, Globe, Inbox, Loader2, Mail, Merge, Phone, Plus, Search, Send, X,
+    28→} from 'lucide-react'
+    29→
+    30→const NONE = '__none__'
+    31→const ALL = '__all__'
+    32→
+    33→/* Mapping channel → leadSource untuk create opportunity */
+    34→const CHANNEL_TO_LEAD_SOURCE: Record<string, string> = {
+    35→  WHATSAPP: 'WHATSAPP',
+    36→  EMAIL: 'EMAIL',
+    37→  INSTAGRAM: 'INSTAGRAM',
+    38→  WEBSITE: 'WEBSITE',
+    39→  PHONE: 'COLD_CALL',
+    40→  MEETING: 'REFERRAL',
+    41→}
+    42→
+    43→const MATCH_META: Record<string, { label: string; cls: string }> = {
+    44→  EMAIL: { label: 'Email', cls: 'border-amber-200 bg-amber-50 text-amber-700' },
+    45→  WHATSAPP: { label: 'WhatsApp', cls: 'border-emerald-200 bg-emerald-50 text-emerald-700' },
+    46→  PHONE: { label: 'Telepon', cls: 'border-orange-200 bg-orange-50 text-orange-700' },
+    47→}
+    48→
+    49→const dupKey = (c: DuplicateCandidate) => `${c.matchType}:${c.contactA.id}:${c.contactB.id}`
+    50→
+    51→const SCROLLBAR = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar-track]:bg-transparent'
+    52→
+    53→/* ---------- Kartu kontak kecil untuk dialog duplikat ---------- */
+    54→function DuplicateContactCard({ contact, tag }: { contact: ContactDTO; tag: string }) {
+    55→  return (
+    56→    <div className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-slate-50/70 p-3">
+    57→      <div className="flex items-center gap-2">
+    58→        <UserAvatar name={contact.fullName} color={tag === 'A' ? '#0d9488' : '#d97706'} size={26} />
+    59→        <p className="truncate text-sm font-semibold text-slate-900">{contact.fullName}</p>
+    60→        <span className="ml-auto rounded bg-white px-1.5 text-[10px] font-bold text-slate-400">KONTAK {tag}</span>
+    61→      </div>
+    62→      <p className="mt-1.5 truncate text-xs text-slate-500">{contact.company?.name ?? 'Tanpa perusahaan'}</p>
+    63→      <p className="mt-1 flex items-center gap-1.5 truncate text-xs text-slate-500">
+    64→        <Mail className="h-3 w-3 shrink-0 text-slate-400" /> {contact.email ?? '—'}
+    65→      </p>
+    66→      <p className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-slate-500">
+    67→        <Phone className="h-3 w-3 shrink-0 text-slate-400" /> {contact.whatsapp ?? contact.phone ?? '—'}
+    68→      </p>
+    69→    </div>
+    70→  )
+    71→}
+    72→
+    73→export default function InboxView() {
+    74→  const brands = useCrmStore((s) => s.brands)
+    75→  const openOpportunity = useCrmStore((s) => s.openOpportunity)
+    76→  const { toast } = useToast()
+    77→
+    78→  /* ---------- Filter state ---------- */
+    79→  const [searchInput, setSearchInput] = useState('')
+    80→  const [search, setSearch] = useState('')
+    81→  const [brandId, setBrandId] = useState('')
+    82→  const [channel, setChannel] = useState('')
+    83→  const [unreadOnly, setUnreadOnly] = useState(false)
+    84→
+    85→  /* ---------- Data state ---------- */
+    86→  const [interactions, setInteractions] = useState<InteractionDTO[]>([])
+    87→  const [opportunities, setOpportunities] = useState<OpportunityDTO[]>([])
+    88→  const [loading, setLoading] = useState(true)
+    89→  const [error, setError] = useState<string | null>(null)
+    90→
+    91→  /* ---------- Duplicate state ---------- */
+    92→  const [duplicates, setDuplicates] = useState<DuplicateCandidate[]>([])
+    93→  const [dismissed, setDismissed] = useState<Set<string>>(new Set())
+    94→  const [dupOpen, setDupOpen] = useState(false)
+    95→  const [mergingKey, setMergingKey] = useState<string | null>(null)
+    96→
+    97→  /* ---------- Dialog state ---------- */
+    98→  const [replyTarget, setReplyTarget] = useState<InteractionDTO | null>(null)
+    99→  const [replyChannel, setReplyChannel] = useState('WHATSAPP')
+   100→  const [replyBody, setReplyBody] = useState('')
+   101→  const [sending, setSending] = useState(false)
+   102→
+   103→  const [createTarget, setCreateTarget] = useState<InteractionDTO | null>(null)
+   104→  const [oppForm, setOppForm] = useState({ title: '', brandId: '', serviceId: NONE, estimatedValue: '', brief: '', priority: 'MEDIUM' })
+   105→  const [creating, setCreating] = useState(false)
+   106→
+   107→  const [webFormOpen, setWebFormOpen] = useState(false)
+   108→  const [wf, setWf] = useState({ name: '', email: '', whatsapp: '', brandId: '', serviceId: NONE, message: '' })
+   109→  const [submittingWf, setSubmittingWf] = useState(false)
+   110→
+   111→  /* ---------- Debounce search 400ms ---------- */
+   112→  useEffect(() => {
+   113→    const t = setTimeout(() => setSearch(searchInput.trim()), 400)
+   114→    return () => clearTimeout(t)
+   115→  }, [searchInput])
+   116→
+   117→  /* ---------- Query params (hanya yang terisi) ---------- */
+   118→  const params = useMemo(() => {
+   119→    const p = new URLSearchParams()
+   120→    if (brandId) p.set('brandId', brandId)
+   121→    if (channel) p.set('channel', channel)
+   122→    if (unreadOnly) p.set('unreadOnly', '1')
+   123→    if (search) p.set('search', search)
+   124→    return p.toString()
+   125→  }, [brandId, channel, unreadOnly, search])
+   126→
+   127→  const loadInteractions = useCallback(async () => {
+   128→    setLoading(true)
+   129→    setError(null)
+   130→    try {
+   131→      // opportunities ikut dimuat untuk komputasi SLA per lead (stage/createdAt/brand)
+   132→      const [msgs, opps] = await Promise.all([crmApi.interactions(params), crmApi.opportunities()])
+   133→      setInteractions(msgs)
+   134→      setOpportunities(opps)
+   135→    } catch (e) {
+   136→      setError(e instanceof Error ? e.message : 'Gagal memuat pesan')
+   137→    } finally {
+   138→      setLoading(false)
+   139→    }
+   140→  }, [params])
+   141→
+   142→  const loadDuplicates = useCallback(async () => {
+   143→    try {
+   144→      setDuplicates(await crmApi.duplicates())
+   145→    } catch {
+   146→      /* banner duplikat bersifat opsional — gagal senyap */
+   147→    }
+   148→  }, [])
+   149→
+   150→  useEffect(() => { void loadInteractions() }, [loadInteractions])
+   151→  useEffect(() => { void loadDuplicates() }, [loadDuplicates])
+   152→
+   153→  const visibleDuplicates = useMemo(
+   154→    () => duplicates.filter((d) => !dismissed.has(dupKey(d))),
+   155→    [duplicates, dismissed],
+   156→  )
+   157→  const unreadCount = interactions.filter((m) => !m.replied).length
+   158→
+   159→  /* ---------- SLA breach per lead (client-side, sama dgn dashboard) ---------- */
+   160→  // waitingSince = lastInboundAt (interaksi IN terakhir, fallback createdAt utk lead
+   161→  // yang belum pernah ada inbound). Breach bila waitingHours > slaHours brand
+   162→  // (sourceBrand ?? executingBrand, fallback 24).
+   163→  const slaBreaches = useMemo(() => {
+   164→    const map = new Map<string, { over: number; sla: number; brandName: string }>()
+   165→    const nowMs = Date.now()
+   166→    for (const o of opportunities) {
+   167→      if (o.stage !== 'NEW' && o.stage !== 'CONTACT_ATTEMPTED') continue
+   168→      const brand = brands.find((b) => b.id === o.sourceBrandId) ?? brands.find((b) => b.id === o.executingBrandId)
+   169→      const sla = brand?.slaHours ?? 24
+   170→      const waitingHours = (nowMs - new Date(o.lastInboundAt ?? o.createdAt).getTime()) / 3600000
+   171→      if (waitingHours > sla) {
+   172→        map.set(o.id, { over: Math.round(waitingHours - sla), sla, brandName: brand?.name ?? o.brandName })
+   173→      }
+   174→    }
+   175→    return map
+   176→  }, [opportunities, brands])
+   177→
+   178→  /* ---------- Aksi: reply ---------- */
+   179→  const openReply = (m: InteractionDTO) => {
+   180→    setReplyChannel(m.channel === 'EMAIL' ? 'EMAIL' : 'WHATSAPP')
+   181→    setReplyBody('')
+   182→    setReplyTarget(m)
+   183→  }
+   184→
+   185→  const handleSendReply = async () => {
+   186→    if (!replyTarget || !replyBody.trim()) return
+   187→    setSending(true)
+   188→    try {
+   189→      const body = replyBody.trim()
+   190→      if (replyTarget.opportunityId) {
+   191→        await crmApi.addInteraction(replyTarget.opportunityId, { channel: replyChannel, direction: 'OUT', body })
+   192→      } else {
+   193→        await crmApi.logInteraction({
+   194→          contactId: replyTarget.contactId,
+   195→          brandId: replyTarget.brandId,
+   196→          channel: replyChannel,
+   197→          direction: 'OUT',
+   198→          body,
+   199→        })
+   200→      }
+   201→      toast({ title: 'Balasan terkirim — draft disimpan di percakapan', description: `Kepada ${replyTarget.contactName} via ${channelMeta(replyChannel).label}.` })
+   202→      setReplyTarget(null)
+   203→      setReplyBody('')
+   204→      await loadInteractions()
+   205→    } catch (e) {
+   206→      toast({
+   207→        title: 'Gagal mengirim balasan',
+   208→        description: e instanceof Error ? e.message : 'Coba lagi',
+   209→        variant: 'destructive',
+   210→      })
+   211→    } finally {
+   212→      setSending(false)
+   213→    }
+   214→  }
+   215→
+   216→  /* ---------- Aksi: create opportunity ---------- */
+   217→  useEffect(() => {
+   218→    if (createTarget) {
+   219→      setOppForm({
+   220→        title: `Kebutuhan ${createTarget.brandName}`,
+   221→        brandId: createTarget.brandId,
+   222→        serviceId: NONE,
+   223→        estimatedValue: '',
+   224→        brief: createTarget.body,
+   225→        priority: 'MEDIUM',
+   226→      })
+   227→    }
+   228→  }, [createTarget])
+   229→
+   230→  const selectedBrand = brands.find((b) => b.id === oppForm.brandId)
+   231→  const brandServices = selectedBrand?.services ?? []
+   232→
+   233→  /** API opportunity butuh companyId — resolve dari kontak via endpoint contacts. */
+   234→  const resolveCompanyId = async (contactId: string, contactName: string): Promise<string | null> => {
+   235→    try {
+   236→      const list = await crmApi.contacts(`search=${encodeURIComponent(contactName)}`)
+   237→      const hit = list.find((c) => c.id === contactId)
+   238→      if (hit?.companyId) return hit.companyId
+   239→      const all = await crmApi.contacts()
+   240→      return all.find((c) => c.id === contactId)?.companyId ?? null
+   241→    } catch {
+   242→      return null
+   243→    }
+   244→  }
+   245→
+   246→  const handleCreateOpp = async () => {
+   247→    if (!createTarget) return
+   248→    if (!oppForm.title.trim()) {
+   249→      toast({ title: 'Judul wajib diisi', variant: 'destructive' })
+   250→      return
+   251→    }
+   252→    if (!oppForm.brandId) {
+   253→      toast({ title: 'Brand wajib dipilih', variant: 'destructive' })
+   254→      return
+   255→    }
+   256→    setCreating(true)
+   257→    try {
+   258→      const companyId = await resolveCompanyId(createTarget.contactId, createTarget.contactName)
+   259→      if (!companyId) {
+   260→        throw new Error('Company untuk kontak ini tidak ditemukan. Buat company terlebih dahulu di modul Contacts.')
+   261→      }
+   262→      const opp = await crmApi.createOpportunity({
+   263→        title: oppForm.title.trim(),
+   264→        companyId,
+   265→        contactId: createTarget.contactId,
+   266→        sourceBrandId: oppForm.brandId,
+   267→        executingBrandId: oppForm.brandId,
+   268→        serviceId: oppForm.serviceId === NONE ? undefined : oppForm.serviceId,
+   269→        leadSource: CHANNEL_TO_LEAD_SOURCE[createTarget.channel] ?? 'WEBSITE',
+   270→        channel: createTarget.channel,
+   271→        estimatedValue: oppForm.estimatedValue ? Number(oppForm.estimatedValue) : 0,
+   272→        brief: oppForm.brief.trim() || undefined,
+   273→        priority: oppForm.priority,
+   274→      })
+   275→      toast({ title: 'Opportunity dibuat', description: `${opp.code} — ${opp.title}` })
+   276→      setCreateTarget(null)
+   277→      openOpportunity(opp.id)
+   278→    } catch (e) {
+   279→      toast({
+   280→        title: 'Gagal membuat opportunity',
+   281→        description: e instanceof Error ? e.message : 'Coba lagi',
+   282→        variant: 'destructive',
+   283→      })
+   284→    } finally {
+   285→      setCreating(false)
+   286→    }
+   287→  }
+   288→
+   289→  /* ---------- Aksi: merge / keep separate ---------- */
+   290→  const handleMerge = async (c: DuplicateCandidate) => {
+   291→    const key = dupKey(c)
+   292→    setMergingKey(key)
+   293→    try {
+   294→      await crmApi.merge({ keepId: c.contactA.id, mergeId: c.contactB.id })
+   295→      toast({
+   296→        title: 'Duplikat digabung',
+   297→        description: `${c.contactA.fullName} dipertahankan; data ${c.contactB.fullName} digabungkan ke kontak utama.`,
+   298→      })
+   299→      setDupOpen(false)
+   300→      await Promise.all([loadDuplicates(), loadInteractions()])
+   301→    } catch (e) {
+   302→      toast({
+   303→        title: 'Gagal menggabungkan duplikat',
+   304→        description: e instanceof Error ? e.message : 'Coba lagi',
+   305→        variant: 'destructive',
+   306→      })
+   307→    } finally {
+   308→      setMergingKey(null)
+   309→    }
+   310→  }
+   311→
+   312→  const handleKeepSeparate = (c: DuplicateCandidate) => {
+   313→    setDismissed((prev) => new Set(prev).add(dupKey(c)))
+   314→    toast({ title: 'Kandidat diabaikan', description: `${c.contactA.fullName} & ${c.contactB.fullName} dibiarkan terpisah.` })
+   315→  }
+   316→
+   317→  /* ---------- Aksi: simulasi form website ---------- */
+   318→  const handleWebsiteForm = async () => {
+   319→    if (!wf.name.trim() || !wf.email.trim() || !wf.brandId || !wf.message.trim()) {
+   320→      toast({ title: 'Lengkapi nama, email, brand, dan pesan', variant: 'destructive' })
+   321→      return
+   322→    }
+   323→    if (!/.+@.+\..+/.test(wf.email.trim())) {
+   324→      toast({ title: 'Format email tidak valid', variant: 'destructive' })
+   325→      return
+   326→    }
+   327→    setSubmittingWf(true)
+   328→    try {
+   329→      await crmApi.websiteForm({
+   330→        websiteForm: {
+   331→          name: wf.name.trim(),
+   332→          email: wf.email.trim(),
+   333→          whatsapp: wf.whatsapp.trim() || undefined,
+   334→          message: wf.message.trim(),
+   335→          brandId: wf.brandId,
+   336→          serviceId: wf.serviceId === NONE ? undefined : wf.serviceId,
+   337→        },
+   338→      })
+   339→      toast({ title: 'Lead baru dari website masuk ke inbox', description: `${wf.name.trim()} — ${brands.find((b) => b.id === wf.brandId)?.name ?? ''}` })
+   340→      setWebFormOpen(false)
+   341→      setWf({ name: '', email: '', whatsapp: '', brandId: '', serviceId: NONE, message: '' })
+   342→      await loadInteractions()
+   343→    } catch (e) {
+   344→      toast({
+   345→        title: 'Gagal mensimulasikan lead website',
+   346→        description: e instanceof Error ? e.message : 'Coba lagi',
+   347→        variant: 'destructive',
+   348→      })
+   349→    } finally {
+   350→      setSubmittingWf(false)
+   351→    }
+   352→  }
+   353→
+   354→  const wfServices = brands.find((b) => b.id === wf.brandId)?.services ?? []
+   355→
+   356→  /* ---------- Render ---------- */
+   357→  return (
+   358→    <div className="space-y-4">
+   359→      {/* ===== Toolbar ===== */}
+   360→      <Card className="rounded-xl border-slate-200 shadow-sm">
+   361→        <CardContent className="flex flex-wrap items-center gap-2 p-3 sm:p-4">
+   362→          <div className="relative min-w-[200px] flex-1">
+   363→            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+   364→            <Input
+   365→              id="inbox-search"
+   366→              value={searchInput}
+   367→              onChange={(e) => setSearchInput(e.target.value)}
+   368→              onKeyDown={(e) => { if (e.key === 'Enter') setSearch(searchInput.trim()) }}
+   369→              placeholder="Cari nama, isi pesan…"
+   370→              className="h-9 pl-9"
+   371→              aria-label="Cari pesan"
+   372→            />
+   373→          </div>
+   374→
+   375→          <Select value={brandId || ALL} onValueChange={(v) => setBrandId(v === ALL ? '' : v)}>
+   376→            <SelectTrigger className="h-9 w-[150px] sm:w-[170px]" aria-label="Filter brand">
+   377→              <SelectValue placeholder="Semua Brand" />
+   378→            </SelectTrigger>
+   379→            <SelectContent>
+   380→              <SelectItem value={ALL}>Semua Brand</SelectItem>
+   381→              {brands.map((b) => (
+   382→                <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+   383→              ))}
+   384→            </SelectContent>
+   385→          </Select>
+   386→
+   387→          <Select value={channel || ALL} onValueChange={(v) => setChannel(v === ALL ? '' : v)}>
+   388→            <SelectTrigger className="h-9 w-[140px] sm:w-[150px]" aria-label="Filter kanal">
+   389→              <SelectValue placeholder="Semua Kanal" />
+   390→            </SelectTrigger>
+   391→            <SelectContent>
+   392→              <SelectItem value={ALL}>Semua Kanal</SelectItem>
+   393→              {CHANNELS.map((c) => (
+   394→                <SelectItem key={c.key} value={c.key}>{c.label}</SelectItem>
+   395→              ))}
+   396→            </SelectContent>
+   397→          </Select>
+   398→
+   399→          <label htmlFor="inbox-unread" className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50">
+   400→            <Switch id="inbox-unread" checked={unreadOnly} onCheckedChange={setUnreadOnly} />
+   401→            Belum dibalas saja
+   402→          </label>
+   403→
+   404→          <div className="ml-auto flex items-center gap-2">
+   405→            <RefreshButton onClick={() => void loadInteractions()} loading={loading} />
+   406→            <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => setWebFormOpen(true)}>
+   407→              <Globe className="h-3.5 w-3.5" />
+   408→              <span className="hidden sm:inline">Simulasi Form Website</span>
+   409→              <span className="sm:hidden">Form Website</span>
+   410→            </Button>
+   411→          </div>
+   412→        </CardContent>
+   413→      </Card>
+   414→
+   415→      {/* ===== Banner duplikat ===== */}
+   416→      {visibleDuplicates.length > 0 && (
+   417→        <Alert className="rounded-xl border-amber-300 bg-amber-50 text-amber-900">
+   418→          <AlertTriangle className="h-4 w-4 text-amber-600" />
+   419→          <AlertTitle className="text-sm font-semibold">⚠️ {visibleDuplicates.length} kandidat duplikat terdeteksi</AlertTitle>
+   420→          <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+   421→            <span className="text-amber-800">
+   422→              Kontak ganda memecah timeline percakapan dan merusak statistik pipeline. Review dan gabungkan sekarang.
+   423→            </span>
+   424→            <Button size="sm" className="h-8 gap-1.5 bg-amber-600 text-white hover:bg-amber-700" onClick={() => setDupOpen(true)}>
+   425→              <Merge className="h-3.5 w-3.5" /> Review Duplikat
+   426→            </Button>
+   427→          </AlertDescription>
+   428→        </Alert>
+   429→      )}
+   430→
+   431→      {/* ===== Daftar pesan ===== */}
+   432→      <Card className="rounded-xl border-slate-200 shadow-sm">
+   433→        <CardHeader className="pb-3">
+   434→          <CardTitle className="flex items-center gap-2 text-base">
+   435→            <Inbox className="h-4 w-4 text-teal-600" /> Pesan Masuk
+   436→          </CardTitle>
+   437→          <CardDescription>
+   438→            {loading ? 'Memuat…' : `${interactions.length} pesan · ${unreadCount} belum dibalas`}
+   439→          </CardDescription>
+   440→        </CardHeader>
+   441→        <CardContent className="p-3 sm:p-4 sm:pt-0">
+   442→          {error ? (
+   443→            <div className="flex flex-col items-center gap-3 rounded-xl border border-rose-200 bg-rose-50 p-6 text-center">
+   444→              <AlertTriangle className="h-7 w-7 text-rose-500" />
+   445→              <div>
+   446→                <p className="font-semibold text-rose-800">Gagal memuat pesan</p>
+   447→                <p className="mt-0.5 text-sm text-rose-600">{error}</p>
+   448→              </div>
+   449→              <Button variant="outline" className="border-rose-300 hover:bg-rose-100" onClick={() => void loadInteractions()}>
+   450→                Coba lagi
+   451→              </Button>
+   452→            </div>
+   453→          ) : loading && interactions.length === 0 ? (
+   454→            <LoadingRows rows={6} />
+   455→          ) : interactions.length === 0 ? (
+   456→            <EmptyState
+   457→              icon={<Inbox className="h-6 w-6" />}
+   458→              title="Tidak ada pesan masuk"
+   459→              description="Coba ubah filter, matikan “Belum dibalas saja”, atau simulasikan lead masuk dari form website."
+   460→              action={
+   461→                <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setWebFormOpen(true)}>
+   462→                  <Globe className="h-3.5 w-3.5" /> Simulasi Form Website
+   463→                </Button>
+   464→              }
+   465→            />
+   466→          ) : (
+   467→            <div className={cn('max-h-[65vh] space-y-2 overflow-y-auto pr-1', SCROLLBAR)}>
+   468→              {interactions.map((m) => {
+   469→                const meta = channelMeta(m.channel)
+   470→                const breach = m.opportunityId ? slaBreaches.get(m.opportunityId) : undefined
+   471→                return (
+   472→                  <div
+   473→                    key={m.id}
+   474→                    className={cn(
+   475→                      'group relative flex gap-3 rounded-xl p-3 transition-colors sm:p-4',
+   476→                      m.replied
+   477→                        ? 'border border-slate-200 bg-white hover:border-slate-300 hover:shadow-sm'
+   478→                        : 'border border-slate-900/20 bg-white shadow-sm hover:border-slate-900/35',
+   479→                    )}
+   480→                  >
+   481→                    {/* Channel icon */}
+   482→                    <div className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-full', meta.bg)}>
+   483→                      <ChannelIcon channel={m.channel} className="h-5 w-5" />
+   484→                    </div>
+   485→
+   486→                    {/* Main */}
+   487→                    <div className="min-w-0 flex-1">
+   488→                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+   489→                        <p className="truncate text-sm font-semibold text-slate-900">{m.contactName}</p>
+   490→                        {m.companyName && <span className="truncate text-xs text-slate-500">{m.companyName}</span>}
+   491→                        <BrandChip name={m.brandName} color={m.brandColor} size="xs" />
+   492→                        <span className="ml-auto shrink-0 text-[11px] text-slate-400 transition-opacity md:group-hover:opacity-0">
+   493→                          {timeAgo(m.sentAt)}
+   494→                        </span>
+   495→                      </div>
+   496→                      <p className="mt-1 line-clamp-2 text-sm leading-snug text-slate-600">{m.body}</p>
+   497→
+   498→                      {/* Badges baris 3 */}
+   499→                      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+   500→                        {breach && (
+   501→                          <span
+   502→                            title={`Melewati SLA respons ${breach.brandName} (${breach.sla} jam)`}
+   503→                            className="rounded-full bg-rose-50 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700"
+   504→                          >
+   505→                            SLA +{breach.over}j
+   506→                          </span>
+   507→                        )}
+   508→                        {!m.replied && (
+   509→                          <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-700">Belum dibalas</Badge>
+   510→                        )}
+   511→                        {m.status === 'READ' && (
+   512→                          <Badge variant="outline" className="border-slate-200 bg-slate-50 text-slate-500">Dibaca</Badge>
+   513→                        )}
+   514→                        {m.opportunityTitle && (
+   515→                          <button
+   516→                            type="button"
+   517→                            onClick={() => m.opportunityId && openOpportunity(m.opportunityId)}
+   518→                            className="inline-flex items-center gap-1 text-xs font-medium text-teal-700 hover:text-teal-800 hover:underline"
+   519→                            title="Buka opportunity terkait"
+   520→                          >
+   521→                            <Building2 className="h-3 w-3" /> {m.opportunityTitle}
+   522→                          </button>
+   523→                        )}
+   524→                      </div>
+   525→
+   526→                      {/* Aksi mobile — selalu terlihat */}
+   527→                      <div className="mt-2.5 flex items-center gap-2 border-t border-slate-100 pt-2.5 md:hidden">
+   528→                        {!m.opportunityId && (
+   529→                          <Button size="sm" variant="outline" className="h-8 gap-1 text-xs" onClick={() => setCreateTarget(m)}>
+   530→                            <Plus className="h-3 w-3" /> Buat Opportunity
+   531→                          </Button>
+   532→                        )}
+   533→                        <Button size="sm" variant="outline" className="h-8 gap-1 text-xs" onClick={() => openReply(m)}>
+   534→                          <Send className="h-3 w-3" /> Balas
+   535→                        </Button>
+   536→                      </div>
+   537→                    </div>
+   538→
+   539→                    {/* Aksi desktop — muncul saat hover */}
+   540→                    <div className="absolute right-4 top-3.5 hidden items-center gap-2 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 md:flex">
+   541→                      {!m.opportunityId && (
+   542→                        <Button size="sm" variant="outline" className="h-7 gap-1 bg-white text-xs shadow-sm" onClick={() => setCreateTarget(m)}>
+   543→                          <Plus className="h-3 w-3" /> Buat Opportunity
+   544→                        </Button>
+   545→                      )}
+   546→                      <Button size="sm" variant="outline" className="h-7 gap-1 bg-white text-xs shadow-sm" onClick={() => openReply(m)}>
+   547→                        <Send className="h-3 w-3" /> Balas
+   548→                      </Button>
+   549→                    </div>
+   550→                  </div>
+   551→                )
+   552→              })}
+   553→            </div>
+   554→          )}
+   555→        </CardContent>
+   556→      </Card>
+   557→
+   558→      {/* ===== Dialog Reply ===== */}
+   559→      <Dialog open={!!replyTarget} onOpenChange={(o) => { if (!o) setReplyTarget(null) }}>
+   560→        <DialogContent className="sm:max-w-lg">
+   561→          <DialogHeader>
+   562→            <DialogTitle>Balas Pesan</DialogTitle>
+   563→            <DialogDescription>
+   564→              Balasan terkirim sebagai pesan keluar (OUT) dan otomatis tercatat di timeline percakapan.
+   565→            </DialogDescription>
+   566→          </DialogHeader>
+   567→
+   568→          {replyTarget && (
+   569→            <div className="space-y-4">
+   570→              {/* Konteks kontak */}
+   571→              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+   572→                <div className="flex items-center gap-2.5">
+   573→                  <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-full', channelMeta(replyTarget.channel).bg)}>
+   574→                    <ChannelIcon channel={replyTarget.channel} className="h-4 w-4" />
+   575→                  </div>
+   576→                  <div className="min-w-0 flex-1">
+   577→                    <p className="truncate text-sm font-semibold text-slate-900">{replyTarget.contactName}</p>
+   578→                    <p className="truncate text-xs text-slate-500">{replyTarget.companyName ?? 'Tanpa perusahaan'}</p>
+   579→                  </div>
+   580→                  <BrandChip name={replyTarget.brandName} color={replyTarget.brandColor} size="xs" />
+   581→                </div>
+   582→                <div className="mt-2.5 max-h-28 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2.5 text-xs leading-relaxed text-slate-600">
+   583→                  {replyTarget.body}
+   584→                </div>
+   585→              </div>
+   586→
+   587→              <div className="space-y-1.5">
+   588→                <Label htmlFor="reply-channel">Kanal balasan</Label>
+   589→                <Select value={replyChannel} onValueChange={setReplyChannel}>
+   590→                  <SelectTrigger id="reply-channel"><SelectValue /></SelectTrigger>
+   591→                  <SelectContent>
+   592→                    <SelectItem value="WHATSAPP">WhatsApp</SelectItem>
+   593→                    <SelectItem value="EMAIL">Email</SelectItem>
+   594→                  </SelectContent>
+   595→                </Select>
+   596→              </div>
+   597→
+   598→              <div className="space-y-1.5">
+   599→                <Label htmlFor="reply-body">Isi balasan</Label>
+   600→                <Textarea
+   601→                  id="reply-body"
+   602→                  value={replyBody}
+   603→                  onChange={(e) => setReplyBody(e.target.value)}
+   604→                  placeholder="Tulis balasan…"
+   605→                  rows={4}
+   606→                />
+   607→              </div>
+   608→            </div>
+   609→          )}
+   610→
+   611→          <DialogFooter className="gap-2">
+   612→            <Button variant="outline" onClick={() => setReplyTarget(null)}>Batal</Button>
+   613→            <Button
+   614→              onClick={() => void handleSendReply()}
+   615→              disabled={sending || !replyBody.trim()}
+   616→              className="gap-1.5 bg-teal-600 text-white hover:bg-teal-700"
+   617→            >
+   618→              {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+   619→              Kirim Balasan
+   620→            </Button>
+   621→          </DialogFooter>
+   622→        </DialogContent>
+   623→      </Dialog>
+   624→
+   625→      {/* ===== Dialog Create Opportunity ===== */}
+   626→      <Dialog open={!!createTarget} onOpenChange={(o) => { if (!o) setCreateTarget(null) }}>
+   627→        <DialogContent className="sm:max-w-lg">
+   628→          <DialogHeader>
+   629→            <DialogTitle>Buat Opportunity dari Pesan</DialogTitle>
+   630→            <DialogDescription>
+   631→              Konversi pesan masuk menjadi opportunity pipeline. Perusahaan & kontak otomatis terhubung.
+   632→            </DialogDescription>
+   633→          </DialogHeader>
+   634→
+   635→          {createTarget && (
+   636→            <div className="space-y-3.5">
+   637→              <div className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
+   638→                <ChannelIcon channel={createTarget.channel} className="h-3.5 w-3.5" />
+   639→                <span className="font-semibold text-slate-700">{createTarget.contactName}</span>
+   640→                {createTarget.companyName && <span>· {createTarget.companyName}</span>}
+   641→              </div>
+   642→
+   643→              <div className="space-y-1.5">
+   644→                <Label htmlFor="opp-title">Judul</Label>
+   645→                <Input
+   646→                  id="opp-title"
+   647→                  value={oppForm.title}
+   648→                  onChange={(e) => setOppForm((f) => ({ ...f, title: e.target.value }))}
+   649→                  placeholder="Kebutuhan klien"
+   650→                />
+   651→              </div>
+   652→
+   653→              <div className="grid gap-3 sm:grid-cols-2">
+   654→                <div className="space-y-1.5">
+   655→                  <Label>Brand</Label>
+   656→                  <Select
+   657→                    value={oppForm.brandId || undefined}
+   658→                    onValueChange={(v) => setOppForm((f) => ({ ...f, brandId: v, serviceId: NONE }))}
+   659→                  >
+   660→                    <SelectTrigger><SelectValue placeholder="Pilih brand" /></SelectTrigger>
+   661→                    <SelectContent>
+   662→                      {brands.map((b) => (
+   663→                        <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+   664→                      ))}
+   665→                    </SelectContent>
+   666→                  </Select>
+   667→                </div>
+   668→                <div className="space-y-1.5">
+   669→                  <Label>Layanan</Label>
+   670→                  <Select value={oppForm.serviceId} onValueChange={(v) => setOppForm((f) => ({ ...f, serviceId: v }))}>
+   671→                    <SelectTrigger><SelectValue placeholder="Pilih layanan" /></SelectTrigger>
+   672→                    <SelectContent>
+   673→                      <SelectItem value={NONE}>— Tanpa layanan —</SelectItem>
+   674→                      {brandServices.map((s) => (
+   675→                        <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+   676→                      ))}
+   677→                    </SelectContent>
+   678→                  </Select>
+   679→                </div>
+   680→              </div>
+   681→
+   682→              <div className="grid gap-3 sm:grid-cols-2">
+   683→                <div className="space-y-1.5">
+   684→                  <Label htmlFor="opp-value">Estimasi Nilai (IDR, opsional)</Label>
+   685→                  <Input
+   686→                    id="opp-value"
+   687→                    type="number"
+   688→                    min={0}
+   689→                    value={oppForm.estimatedValue}
+   690→                    onChange={(e) => setOppForm((f) => ({ ...f, estimatedValue: e.target.value }))}
+   691→                    placeholder="mis. 25000000"
+   692→                  />
+   693→                </div>
+   694→                <div className="space-y-1.5">
+   695→                  <Label>Prioritas</Label>
+   696→                  <Select value={oppForm.priority} onValueChange={(v) => setOppForm((f) => ({ ...f, priority: v }))}>
+   697→                    <SelectTrigger><SelectValue /></SelectTrigger>
+   698→                    <SelectContent>
+   699→                      {PRIORITIES.map((p) => (
+   700→                        <SelectItem key={p.key} value={p.key}>{p.label}</SelectItem>
+   701→                      ))}
+   702→                    </SelectContent>
+   703→                  </Select>
+   704→                </div>
+   705→              </div>
+   706→
+   707→              <div className="space-y-1.5">
+   708→                <Label htmlFor="opp-brief">Brief (opsional)</Label>
+   709→                <Textarea
+   710→                  id="opp-brief"
+   711→                  value={oppForm.brief}
+   712→                  onChange={(e) => setOppForm((f) => ({ ...f, brief: e.target.value }))}
+   713→                  placeholder="Ringkasan kebutuhan…"
+   714→                  rows={3}
+   715→                />
+   716→              </div>
+   717→            </div>
+   718→          )}
+   719→
+   720→          <DialogFooter className="gap-2">
+   721→            <Button variant="outline" onClick={() => setCreateTarget(null)}>Batal</Button>
+   722→            <Button
+   723→              onClick={() => void handleCreateOpp()}
+   724→              disabled={creating}
+   725→              className="gap-1.5 bg-teal-600 text-white hover:bg-teal-700"
+   726→            >
+   727→              {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+   728→              Buat Opportunity
+   729→            </Button>
+   730→          </DialogFooter>
+   731→        </DialogContent>
+   732→      </Dialog>
+   733→
+   734→      {/* ===== Dialog Simulasi Form Website ===== */}
+   735→      <Dialog open={webFormOpen} onOpenChange={setWebFormOpen}>
+   736→        <DialogContent className="sm:max-w-lg">
+   737→          <DialogHeader>
+   738→            <DialogTitle className="flex items-center gap-2">
+   739→              <Globe className="h-4 w-4 text-teal-600" /> Simulasi Form Website
+   740→            </DialogTitle>
+   741→            <DialogDescription>
+   742→              Fitur ini mensimulasikan lead masuk dari form website publik. Lead langsung muncul di inbox sebagai pesan channel Website.
+   743→            </DialogDescription>
+   744→          </DialogHeader>
+   745→
+   746→          <div className="space-y-3.5">
+   747→            <div className="grid gap-3 sm:grid-cols-2">
+   748→              <div className="space-y-1.5">
+   749→                <Label htmlFor="wf-name">Nama *</Label>
+   750→                <Input id="wf-name" value={wf.name} onChange={(e) => setWf((f) => ({ ...f, name: e.target.value }))} placeholder="Nama lengkap" />
+   751→              </div>
+   752→              <div className="space-y-1.5">
+   753→                <Label htmlFor="wf-email">Email *</Label>
+   754→                <Input id="wf-email" type="email" value={wf.email} onChange={(e) => setWf((f) => ({ ...f, email: e.target.value }))} placeholder="nama@perusahaan.com" />
+   755→              </div>
+   756→            </div>
+   757→            <div className="grid gap-3 sm:grid-cols-2">
+   758→              <div className="space-y-1.5">
+   759→                <Label htmlFor="wf-wa">WhatsApp (opsional)</Label>
+   760→                <Input id="wf-wa" value={wf.whatsapp} onChange={(e) => setWf((f) => ({ ...f, whatsapp: e.target.value }))} placeholder="+62…" />
+   761→              </div>
+   762→              <div className="space-y-1.5">
+   763→                <Label>Brand *</Label>
+   764→                <Select
+   765→                  value={wf.brandId || undefined}
+   766→                  onValueChange={(v) => setWf((f) => ({ ...f, brandId: v, serviceId: NONE }))}
+   767→                >
+   768→                  <SelectTrigger><SelectValue placeholder="Pilih brand" /></SelectTrigger>
+   769→                  <SelectContent>
+   770→                    {brands.map((b) => (
+   771→                      <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+   772→                    ))}
+   773→                  </SelectContent>
+   774→                </Select>
+   775→              </div>
+   776→            </div>
+   777→            <div className="space-y-1.5">
+   778→              <Label>Layanan (opsional)</Label>
+   779→              <Select value={wf.serviceId} onValueChange={(v) => setWf((f) => ({ ...f, serviceId: v }))}>
+   780→                <SelectTrigger><SelectValue placeholder="Pilih layanan" /></SelectTrigger>
+   781→                <SelectContent>
+   782→                  <SelectItem value={NONE}>— Tanpa layanan —</SelectItem>
+   783→                  {wfServices.map((s) => (
+   784→                    <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+   785→                  ))}
+   786→                </SelectContent>
+   787→              </Select>
+   788→            </div>
+   789→            <div className="space-y-1.5">
+   790→              <Label htmlFor="wf-message">Pesan *</Label>
+   791→              <Textarea
+   792→                id="wf-message"
+   793→                value={wf.message}
+   794→                onChange={(e) => setWf((f) => ({ ...f, message: e.target.value }))}
+   795→                placeholder="Saya tertarik dengan layanan…"
+   796→                rows={3}
+   797→              />
+   798→            </div>
+   799→          </div>
+   800→
+   801→          <DialogFooter className="gap-2">
+   802→            <Button variant="outline" onClick={() => setWebFormOpen(false)}>Batal</Button>
+   803→            <Button
+   804→              onClick={() => void handleWebsiteForm()}
+   805→              disabled={submittingWf}
+   806→              className="gap-1.5 bg-teal-600 text-white hover:bg-teal-700"
+   807→            >
+   808→              {submittingWf ? <Loader2 className="h-4 w-4 animate-spin" /> : <Globe className="h-4 w-4" />}
+   809→              Kirim sebagai Lead
+   810→            </Button>
+   811→          </DialogFooter>
+   812→        </DialogContent>
+   813→      </Dialog>
+   814→
+   815→      {/* ===== Dialog Review Duplikat ===== */}
+   816→      <Dialog open={dupOpen} onOpenChange={setDupOpen}>
+   817→        <DialogContent className="sm:max-w-3xl">
+   818→          <DialogHeader>
+   819→            <DialogTitle className="flex items-center gap-2">
+   820→              <AlertTriangle className="h-4 w-4 text-amber-500" /> Review Kandidat Duplikat
+   821→            </DialogTitle>
+   822→            <DialogDescription>
+   823→              Sistem mendeteksi kontak dengan email / WhatsApp / telepon yang sama. Gabungkan untuk menyatukan timeline percakapan — kontak utama (kiri) dipertahankan, data kontak kanan dipindahkan lalu dinonaktifkan.
+   824→            </DialogDescription>
+   825→          </DialogHeader>
+   826→
+   827→          <div className={cn('max-h-[60vh] space-y-3 overflow-y-auto pr-1', SCROLLBAR)}>
+   828→            {visibleDuplicates.length === 0 ? (
+   829→              <EmptyState icon={<Merge className="h-5 w-5" />} title="Tidak ada kandidat duplikat" description="Semua kandidat sudah digabung atau diabaikan." />
+   830→            ) : (
+   831→              visibleDuplicates.map((c) => {
+   832→                const key = dupKey(c)
+   833→                const match = MATCH_META[c.matchType] ?? { label: c.matchType, cls: 'border-slate-200 bg-slate-50 text-slate-600' }
+   834→                return (
+   835→                  <div key={key} className="rounded-xl border border-slate-200 p-3.5">
+   836→                    <div className="mb-2.5 flex flex-wrap items-center gap-2">
+   837→                      <Badge variant="outline" className={match.cls}>{match.label}</Badge>
+   838→                      <span className="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">{c.matchValue}</span>
+   839→                      <span className="text-[11px] text-slate-400">cocok pada {match.label.toLowerCase()} ini</span>
+   840→                    </div>
+   841→                    <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
+   842→                      <DuplicateContactCard contact={c.contactA} tag="A" />
+   843→                      <div className="flex items-center justify-center">
+   844→                        <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-500">VS</span>
+   845→                      </div>
+   846→                      <DuplicateContactCard contact={c.contactB} tag="B" />
+   847→                    </div>
+   848→                    <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+   849→                      <Button
+   850→                        size="sm"
+   851→                        variant="outline"
+   852→                        className="gap-1.5"
+   853→                        disabled={mergingKey === key}
+   854→                        onClick={() => handleKeepSeparate(c)}
+   855→                      >
+   856→                        <X className="h-3.5 w-3.5" /> Keep Separate
+   857→                      </Button>
+   858→                      <Button
+   859→                        size="sm"
+   860→                        className="gap-1.5 bg-teal-600 text-white hover:bg-teal-700"
+   861→                        disabled={mergingKey === key}
+   862→                        onClick={() => void handleMerge(c)}
+   863→                      >
+   864→                        {mergingKey === key ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Merge className="h-3.5 w-3.5" />}
+   865→                        Gabung (Merge)
+   866→                      </Button>
+   867→                    </div>
+   868→                  </div>
+   869→                )
+   870→              })
+   871→            )}
+   872→          </div>
+   873→        </DialogContent>
+   874→      </Dialog>
+   875→    </div>
+   876→  )
+   877→}
+   878→
