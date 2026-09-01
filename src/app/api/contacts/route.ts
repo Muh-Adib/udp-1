@@ -67,6 +67,8 @@ export async function POST(req: NextRequest) {
       altEmail: str(body?.altEmail),
       whatsapp: str(body?.whatsapp),
       phone: str(body?.phone),
+      instagram: str(body?.instagram),
+      threads: str(body?.threads),
       companyId: body?.companyId ?? null,
       country: str(body?.country) ?? 'Indonesia',
       city: str(body?.city),

@@ -6,7 +6,7 @@ import { logAudit } from '@/lib/audit'
 
 export const dynamic = 'force-dynamic'
 
-const ROLES = ['SUPER_ADMIN', 'DIREKTUR', 'MARKETING', 'KEUANGAN', 'PRODUKSI']
+const ROLES = ['SUPER_ADMIN', 'DIREKTUR', 'MANAJER', 'MARKETING', 'KEUANGAN', 'PRODUKSI', 'HR']
 
 /** GET → UserDTO[] */
 export async function GET() {

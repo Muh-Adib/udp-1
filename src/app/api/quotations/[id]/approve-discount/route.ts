@@ -10,8 +10,8 @@ export const dynamic = 'force-dynamic'
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await getSessionUser()
   if (!session) return NextResponse.json({ error: 'Belum login' }, { status: 401 })
-  if (session.role !== 'DIREKTUR' && session.role !== 'SUPER_ADMIN') {
-    return NextResponse.json({ error: 'Hanya Direktur yang dapat menyetujui diskon' }, { status: 403 })
+  if (!['DIREKTUR', 'SUPER_ADMIN', 'MANAJER'].includes(session.role)) {
+    return NextResponse.json({ error: 'Hanya Direktur/Manajer yang dapat menyetujui diskon' }, { status: 403 })
   }
 
   const { id } = await ctx.params

@@ -8,6 +8,7 @@ import type {
   InteractionDTO, TaskDTO, NoteDTO, ProjectDTO, TemplateDTO, AuditLogDTO,
   Stage, Temperature, Priority, Role,
   QuotationDTO, QuotationDetailDTO, QuotationItemDTO, InvoiceDTO, PaymentDTO,
+  QuickTemplateDTO,
 } from './crm-types'
 
 /* ---------------- Session ---------------- */
@@ -236,6 +237,8 @@ export function mapContact(c: ContactWithRelations): ContactDTO {
     timezone: c.timezone,
     language: c.language,
     preferredChannel: c.preferredChannel,
+    instagram: c.instagram,
+    threads: c.threads,
     linkedin: c.linkedin,
     consentStatus: c.consentStatus,
     tags: splitTags(c.tags),
@@ -302,6 +305,7 @@ export function mapOpportunity(o: OpportunityWithRelations): OpportunityDTO {
     targetAudience: o.targetAudience,
     deliverables: o.deliverables,
     deadline: iso(o.deadline),
+    estimatedTimeline: o.estimatedTimeline,
     companyId: o.companyId,
     companyName: o.company.name,
     companyCountry: o.company.country,
@@ -408,6 +412,22 @@ export function mapProject(p: ProjectWithRelations): ProjectDTO {
       status: m.status,
       dueDate: iso(m.dueDate),
     })),
+  }
+}
+
+export function mapQuickTemplate(t: {
+  id: string; keyword: string; body: string; description?: string | null
+  creatorId?: string | null; creatorName?: string | null; isActive: boolean; createdAt: Date
+}): QuickTemplateDTO {
+  return {
+    id: t.id,
+    keyword: t.keyword,
+    body: t.body,
+    description: t.description ?? null,
+    creatorId: t.creatorId ?? null,
+    creatorName: t.creatorName ?? null,
+    isActive: t.isActive,
+    createdAt: t.createdAt.toISOString(),
   }
 }
 

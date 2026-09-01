@@ -49,6 +49,7 @@ export const CHANNELS: { key: string; label: string; icon: string; color: string
   { key: 'WHATSAPP', label: 'WhatsApp', icon: 'MessageCircle', color: 'text-emerald-700', bg: 'bg-emerald-50' },
   { key: 'EMAIL', label: 'Email', icon: 'Mail', color: 'text-amber-700', bg: 'bg-amber-50' },
   { key: 'INSTAGRAM', label: 'Instagram', icon: 'Instagram', color: 'text-rose-600', bg: 'bg-rose-50' },
+  { key: 'THREADS', label: 'Threads', icon: 'AtSign', color: 'text-slate-700', bg: 'bg-slate-100' },
   { key: 'WEBSITE', label: 'Website', icon: 'Globe', color: 'text-teal-700', bg: 'bg-teal-50' },
   { key: 'PHONE', label: 'Telepon', icon: 'Phone', color: 'text-orange-700', bg: 'bg-orange-50' },
   { key: 'MEETING', label: 'Meeting', icon: 'Users', color: 'text-violet-700', bg: 'bg-violet-50' },
@@ -84,9 +85,11 @@ export const temperatureMeta = (key: string) => TEMPERATURES.find(t => t.key ===
 export const ROLES: { key: Role; label: string; description: string; color: string; bg: string }[] = [
   { key: 'SUPER_ADMIN', label: 'Super Admin', description: 'Brand, user, role, permission, master data, audit log', color: 'text-teal-700', bg: 'bg-teal-50' },
   { key: 'DIREKTUR', label: 'Direktur', description: 'Semua dashboard, forecast, approval, komentar', color: 'text-amber-700', bg: 'bg-amber-50' },
+  { key: 'MANAJER', label: 'Manajer', description: 'Supervisi operasional, approval diskon, pantau tim & pipeline', color: 'text-emerald-700', bg: 'bg-emerald-50' },
   { key: 'MARKETING', label: 'Marketing', description: 'Lead inbox, contact, opportunity, follow-up', color: 'text-violet-700', bg: 'bg-violet-50' },
   { key: 'KEUANGAN', label: 'Keuangan', description: 'Estimasi, budget, quotation, invoice, pembayaran', color: 'text-rose-700', bg: 'bg-rose-50' },
   { key: 'PRODUKSI', label: 'Produksi', description: 'Brief, scope, timeline, milestone, deliverable', color: 'text-lime-700', bg: 'bg-lime-50' },
+  { key: 'HR', label: 'HR', description: 'Data tim, tugas internal, kehadiran & administrasi SDM', color: 'text-orange-700', bg: 'bg-orange-50' },
   { key: 'CLIENT', label: 'Client', description: 'Client Portal — proyek, penawaran, invoice perusahaan sendiri', color: 'text-teal-700', bg: 'bg-teal-50' },
 ]
 export const roleMeta = (key: string) => ROLES.find(r => r.key === key) ?? ROLES[2]

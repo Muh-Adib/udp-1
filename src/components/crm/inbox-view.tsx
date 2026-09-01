@@ -82,6 +82,7 @@ function DuplicateContactCard({ contact, tag }: { contact: ContactDTO; tag: stri
 
 export default function InboxView() {
   const brands = useCrmStore((s) => s.brands)
+  const user = useCrmStore((s) => s.user)
   const openOpportunity = useCrmStore((s) => s.openOpportunity)
   const { toast } = useToast()
 
@@ -260,6 +261,12 @@ export default function InboxView() {
         slaHours: null,
         escalated: false,
         ownerName: opp?.ownerName ?? null,
+        contactId: opp?.contactId ?? '',
+        contactEmail: null,
+        contactWhatsapp: null,
+        contactInstagram: null,
+        contactThreads: null,
+        contactPreferredChannel: null,
       }
     })
   }, [conversations, opportunities, slaBreaches])
@@ -545,6 +552,7 @@ export default function InboxView() {
           activeConvId={selectedConvId}
           onSelectConversation={setSelectedConvId}
           listToolbar={listToolbar}
+          currentUser={{ id: user?.id ?? '', name: user?.name ?? 'Tim UDP', role: user?.role ?? 'MARKETING' }}
           onClose={() => setSelectedConvId(null)}
           onMessageSent={(m) => {
             setSentExtras((prev) => [...prev, m])

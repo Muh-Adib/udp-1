@@ -8,7 +8,7 @@ import type { EstimationDTO, EstimationCategory } from '@/lib/crm-types'
 
 export const dynamic = 'force-dynamic'
 
-const INTERNAL_ROLES = ['SUPER_ADMIN', 'DIREKTUR', 'MARKETING', 'KEUANGAN', 'PRODUKSI']
+const INTERNAL_ROLES = ['SUPER_ADMIN', 'DIREKTUR', 'MANAJER', 'MARKETING', 'KEUANGAN', 'PRODUKSI', 'HR']
 const ESTIMATION_STATUSES = ['DRAFT', 'FINAL']
 const CATEGORIES = [
   'INTERNAL', 'FREELANCE', 'EQUIPMENT', 'TRANSPORT', 'ACCOMMODATION',

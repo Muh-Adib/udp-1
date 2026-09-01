@@ -79,11 +79,12 @@ const EMPTY_COMPANY_FORM: CompanyFormState = {
 
 interface ContactFormState {
   firstName: string; lastName: string; position: string; email: string; whatsapp: string
+  instagram: string; threads: string
   phone: string; companyId: string; country: string; city: string; language: string
   preferredChannel: string; tags: string
 }
 const EMPTY_CONTACT_FORM: ContactFormState = {
-  firstName: '', lastName: '', position: '', email: '', whatsapp: '', phone: '',
+  firstName: '', lastName: '', position: '', email: '', whatsapp: '', instagram: '', threads: '', phone: '',
   companyId: 'NONE', country: 'Indonesia', city: '', language: 'id',
   preferredChannel: 'WHATSAPP', tags: '',
 }
@@ -537,6 +538,8 @@ export default function ContactsView() {
         position: contactForm.position,
         email: contactForm.email,
         whatsapp: contactForm.whatsapp,
+        instagram: contactForm.instagram || null,
+        threads: contactForm.threads || null,
         phone: contactForm.phone,
         companyId: contactForm.companyId !== 'NONE' ? contactForm.companyId : undefined,
         country: contactForm.country,
@@ -1349,6 +1352,20 @@ export default function ContactsView() {
                 value={contactForm.whatsapp}
                 onChange={(e) => setContactForm((f) => ({ ...f, whatsapp: e.target.value }))}
                 placeholder="cth. +62 812 3456 7890"
+              />
+            </Field>
+            <Field label="Instagram">
+              <Input
+                value={contactForm.instagram}
+                onChange={(e) => setContactForm((f) => ({ ...f, instagram: e.target.value }))}
+                placeholder="cth. @handle"
+              />
+            </Field>
+            <Field label="Threads">
+              <Input
+                value={contactForm.threads}
+                onChange={(e) => setContactForm((f) => ({ ...f, threads: e.target.value }))}
+                placeholder="cth. @handle"
               />
             </Field>
             <Field label="Telepon">

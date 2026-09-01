@@ -10,7 +10,8 @@ import { crmApi, estimationApi, financeApi, type QuotationItemInput } from './ap
 import { ConversationList } from './conversation-list'
 import { BrandChip, ChannelIcon, EmptyState, StageBadge, TempBadge, UserAvatar } from './shared'
 import { PRIORITIES, TASK_TYPES, channelMeta, daysUntil, formatDate, formatMoney, initials, temperatureMeta } from '@/lib/crm-constants'
-import type { BriefDTO, ConversationListItemDTO, InteractionDTO, OpportunityDetailDTO, QuotationDTO, TaskDTO, UserDTO } from '@/lib/crm-types'
+import { TEMPLATE_VARS, extractSlashToken, interpolateTemplate } from '@/lib/template-vars'
+import type { BriefDTO, ConversationListItemDTO, InteractionDTO, OpportunityDetailDTO, QuickTemplateDTO, QuotationDTO, TaskDTO, UserDTO } from '@/lib/crm-types'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -26,12 +27,21 @@ import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
 import {
-  AlertCircle, ArrowLeft, CalendarClock, Check, CheckCheck, ChevronDown, ClipboardList, Clock,
-  FileBarChart2, Globe, Instagram, ListChecks, Loader2, Mail, MessagesSquare, Phone, Plus,
-  Receipt, Send, Target, Trash2, User, X,
+  AlertCircle, ArrowLeft, AtSign, BadgeCheck, CalendarClock, Check, CheckCheck, ChevronDown, ClipboardList, Clock,
+  FileBarChart2, Globe, Instagram, ListChecks, Loader2, Mail, MessageCircle, MessagesSquare, Pencil, PenLine, Phone, Plus,
+  Receipt, Send, Slash, Target, Trash2, User, X,
 } from 'lucide-react'
 
-const CHAT_CHANNELS = ['WHATSAPP', 'EMAIL', 'INSTAGRAM', 'PHONE'] as const
+const CHAT_CHANNELS = ['WHATSAPP', 'EMAIL', 'INSTAGRAM', 'THREADS'] as const
+/** Kanal balasan yang BENAR-BENAR dimiliki kontak — opsi balas difilter per kontak (permintaan user). */
+const contactChannels = (c: Pick<ConversationListItemDTO, 'contactEmail' | 'contactWhatsapp' | 'contactInstagram' | 'contactThreads'>): string[] => {
+  const out: string[] = []
+  if (c.contactWhatsapp) out.push('WHATSAPP')
+  if (c.contactEmail) out.push('EMAIL')
+  if (c.contactInstagram) out.push('INSTAGRAM')
+  if (c.contactThreads) out.push('THREADS')
+  return out
+}
 const NONE = '__none__'
 const SCROLLBAR = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar-track]:bg-transparent'
 
@@ -39,6 +49,7 @@ const SCROLLBAR = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rou
 const OUT_CHANNEL_ICON: Record<string, React.ReactNode> = {
   EMAIL: <Mail className="h-3 w-3" />,
   INSTAGRAM: <Instagram className="h-3 w-3" />,
+  THREADS: <AtSign className="h-3 w-3" />,
   PHONE: <Phone className="h-3 w-3" />,
   WEBSITE: <Globe className="h-3 w-3" />,
   MEETING: <User className="h-3 w-3" />,
@@ -521,9 +532,308 @@ function BriefDialog({ open, onOpenChange, opp, onSaved }: {
 }
 
 /* ================================================================== */
+/* Dialog: Perbarui Kontak — lengkapi/ubah kanal & data kontak          */
+/* ================================================================== */
+function EditContactDialog({ open, onOpenChange, conv, onSaved }: {
+  open: boolean
+  onOpenChange: (o: boolean) => void
+  conv: ConversationListItemDTO
+  onSaved: (patch: Partial<ConversationListItemDTO>) => void
+}) {
+  const { toast } = useToast()
+  const [form, setForm] = useState({
+    firstName: '', lastName: '', position: '', email: '', whatsapp: '', instagram: '', threads: '', preferredChannel: 'WHATSAPP',
+  })
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    // Prefill dari kolom kontak pada baris percakapan (nama dipecah dari fullName)
+    const name = conv.contactName ?? ''
+    const parts = name.trim().split(/\s+/)
+    const firstName = parts[0] ?? ''
+    const lastName = parts.slice(1).join(' ')
+    setForm({
+      firstName,
+      lastName,
+      position: '',
+      email: conv.contactEmail ?? '',
+      whatsapp: conv.contactWhatsapp ?? '',
+      instagram: conv.contactInstagram ?? '',
+      threads: conv.contactThreads ?? '',
+      preferredChannel: conv.contactPreferredChannel ?? 'WHATSAPP',
+    })
+  }, [open, conv.contactName, conv.contactEmail, conv.contactWhatsapp, conv.contactInstagram, conv.contactThreads, conv.contactPreferredChannel])
+
+  const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setForm((f) => ({ ...f, [k]: e.target.value }))
+
+  const submit = async () => {
+    if (!conv.contactId) {
+      toast({ title: 'Kontak tidak terhubung', description: 'Percakapan ini belum punya kontak yang bisa diperbarui.', variant: 'destructive' })
+      return
+    }
+    if (!form.firstName.trim()) {
+      toast({ title: 'Nama depan wajib diisi', variant: 'destructive' })
+      return
+    }
+    setSaving(true)
+    try {
+      await crmApi.updateContact(conv.contactId, {
+        firstName: form.firstName.trim(),
+        lastName: form.lastName.trim() || null,
+        position: form.position.trim() || null,
+        email: form.email.trim() || null,
+        whatsapp: form.whatsapp.trim() || null,
+        instagram: form.instagram.trim() || null,
+        threads: form.threads.trim() || null,
+        preferredChannel: form.preferredChannel,
+      })
+      toast({ title: 'Kontak diperbarui', description: 'Kanal balasan menyesuaikan kontak terbaru.' })
+      onSaved({
+        contactName: [form.firstName.trim(), form.lastName.trim()].filter(Boolean).join(' '),
+        contactEmail: form.email.trim() || null,
+        contactWhatsapp: form.whatsapp.trim() || null,
+        contactInstagram: form.instagram.trim() || null,
+        contactThreads: form.threads.trim() || null,
+        contactPreferredChannel: form.preferredChannel,
+      })
+      onOpenChange(false)
+    } catch (e) {
+      toast({ title: 'Gagal memperbarui kontak', description: e instanceof Error ? e.message : 'Coba lagi', variant: 'destructive' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Perbarui Kontak</DialogTitle>
+          <DialogDescription>
+            Kelola kanal yang dimiliki {conv.contactName}. Opsi kanal balasan di chat mengikuti data ini.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3.5">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="ct-first">Nama depan *</Label>
+              <Input id="ct-first" value={form.firstName} onChange={set('firstName')} placeholder="Nama depan" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="ct-last">Nama belakang</Label>
+              <Input id="ct-last" value={form.lastName} onChange={set('lastName')} placeholder="Nama belakang" />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="ct-pos">Jabatan</Label>
+            <Input id="ct-pos" value={form.position} onChange={set('position')} placeholder="Mis. Marketing Manager" />
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="ct-wa" className="gap-1.5"><MessageCircle className="h-3 w-3 text-slate-400" /> WhatsApp</Label>
+              <Input id="ct-wa" value={form.whatsapp} onChange={set('whatsapp')} placeholder="+62 8xx…" inputMode="tel" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="ct-email" className="gap-1.5"><Mail className="h-3 w-3 text-slate-400" /> Email</Label>
+              <Input id="ct-email" type="email" value={form.email} onChange={set('email')} placeholder="nama@perusahaan.com" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="ct-ig" className="gap-1.5"><Instagram className="h-3 w-3 text-slate-400" /> Instagram</Label>
+              <Input id="ct-ig" value={form.instagram} onChange={set('instagram')} placeholder="@handle" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="ct-thr" className="gap-1.5"><AtSign className="h-3 w-3 text-slate-400" /> Threads</Label>
+              <Input id="ct-thr" value={form.threads} onChange={set('threads')} placeholder="@handle" />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="ct-pref">Kanal preferensi</Label>
+            <Select value={form.preferredChannel || NONE} onValueChange={(v) => setForm((f) => ({ ...f, preferredChannel: v === NONE ? 'WHATSAPP' : v }))}>
+              <SelectTrigger id="ct-pref"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {CHAT_CHANNELS.map((c) => (
+                  <SelectItem key={c} value={c}>{channelMeta(c).label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>Batal</Button>
+          <Button onClick={() => void submit()} disabled={saving} className="gap-1.5 bg-slate-900 text-white hover:bg-slate-800">
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Simpan Kontak
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/* ================================================================== */
+/* Dialog: Kelola Template (/keyword) — buat, ubah, hapus              */
+/* ================================================================== */
+function ManageTemplatesDialog({ open, onOpenChange, templates, currentUser, onChanged }: {
+  open: boolean
+  onOpenChange: (o: boolean) => void
+  templates: QuickTemplateDTO[]
+  currentUser: { id: string; name: string; role: string }
+  onChanged: () => void
+}) {
+  const { toast } = useToast()
+  const [form, setForm] = useState({ keyword: '', body: '', description: '' })
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (!open) {
+      setForm({ keyword: '', body: '', description: '' })
+      setEditingId(null)
+    }
+  }, [open])
+
+  const startEdit = (t: QuickTemplateDTO) => {
+    setEditingId(t.id)
+    setForm({ keyword: t.keyword, body: t.body, description: t.description ?? '' })
+  }
+
+  const submit = async () => {
+    if (!form.keyword.trim() || !form.body.trim()) {
+      toast({ title: 'Kata kunci & isi template wajib diisi', variant: 'destructive' })
+      return
+    }
+    setSaving(true)
+    try {
+      if (editingId) {
+        await crmApi.updateQuickTemplate(editingId, {
+          keyword: form.keyword.trim().toLowerCase(),
+          body: form.body,
+          description: form.description.trim() || null,
+        })
+        toast({ title: 'Template diperbarui', description: `/${form.keyword.trim().toLowerCase()} siap dipakai.` })
+      } else {
+        await crmApi.createQuickTemplate({
+          keyword: form.keyword.trim().toLowerCase(),
+          body: form.body,
+          description: form.description.trim() || undefined,
+        })
+        toast({ title: 'Template dibuat', description: `Ketik "/${form.keyword.trim().toLowerCase()}" di kolom pesan untuk memakainya.` })
+      }
+      setForm({ keyword: '', body: '', description: '' })
+      setEditingId(null)
+      onChanged()
+    } catch (e) {
+      toast({ title: 'Gagal menyimpan template', description: e instanceof Error ? e.message : 'Coba lagi', variant: 'destructive' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const remove = async (t: QuickTemplateDTO) => {
+    try {
+      await crmApi.deleteQuickTemplate(t.id)
+      toast({ title: `Template /${t.keyword} dihapus` })
+      if (editingId === t.id) { setEditingId(null); setForm({ keyword: '', body: '', description: '' }) }
+      onChanged()
+    } catch (e) {
+      toast({ title: 'Gagal menghapus template', description: e instanceof Error ? e.message : 'Coba lagi', variant: 'destructive' })
+    }
+  }
+
+  const canManage = (t: QuickTemplateDTO) => t.creatorId === currentUser.id || currentUser.role === 'SUPER_ADMIN' || currentUser.role === 'MANAJER'
+
+  const insertVar = (key: string) => setForm((f) => ({ ...f, body: `${f.body}${f.body && !f.body.endsWith(' ') ? ' ' : ''}{{${key}}}` }))
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2"><Slash className="h-4 w-4 text-teal-600" /> Kelola Template Balasan</DialogTitle>
+          <DialogDescription>
+            Template tidak tampil di chat — panggil dengan mengetik <kbd className="rounded border border-slate-300 bg-slate-100 px-1 font-sans text-[10px]">/kata-kunci</kbd> di kolom pesan.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          {/* Form buat/ubah */}
+          <div className={cn('space-y-3 rounded-xl border p-3.5', editingId ? 'border-teal-300 bg-teal-50/40' : 'border-slate-200 bg-slate-50/50')}>
+            <p className="text-xs font-bold uppercase tracking-wider text-slate-500">{editingId ? 'Ubah Template' : 'Template Baru'}</p>
+            <div className="grid grid-cols-[1fr_auto] items-end gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="qt-keyword">Kata kunci (dipanggil /katakunci)</Label>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-sm font-semibold text-slate-400">/</span>
+                  <Input id="qt-keyword" value={form.keyword} onChange={(e) => setForm((f) => ({ ...f, keyword: e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, '') }))} placeholder="terimakasih" className="font-mono text-sm" />
+                </div>
+              </div>
+              <Button size="sm" variant="ghost" onClick={() => { setEditingId(null); setForm({ keyword: '', body: '', description: '' }) }} className={cn('h-9', !editingId && 'invisible')}>
+                Batal ubah
+              </Button>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="qt-body">Isi template</Label>
+              <Textarea id="qt-body" value={form.body} onChange={(e) => setForm((f) => ({ ...f, body: e.target.value }))} rows={4} placeholder={'Halo {{contact_name}}, terima kasih! …'} className="text-sm" />
+              {/* Helper variabel — setiap chip menampilkan sumber datanya (title) */}
+              <div className="flex flex-wrap gap-1 pt-0.5">
+                {TEMPLATE_VARS.map((v) => (
+                  <button
+                    key={v.key} type="button" onClick={() => insertVar(v.key)} title={v.source}
+                    className="rounded-full border border-slate-200 bg-white px-2 py-0.5 font-mono text-[10px] text-slate-500 transition-colors hover:border-teal-300 hover:bg-teal-50 hover:text-teal-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400/50"
+                  >
+                    {`{{${v.key}}}`}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="qt-desc">Keterangan (opsional)</Label>
+              <Input id="qt-desc" value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} placeholder="Kapan template ini dipakai?" />
+            </div>
+            <div className="flex justify-end">
+              <Button size="sm" onClick={() => void submit()} disabled={saving} className="gap-1.5 bg-slate-900 text-white hover:bg-slate-800">
+                {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} {editingId ? 'Simpan Perubahan' : 'Buat Template'}
+              </Button>
+            </div>
+          </div>
+
+          {/* Daftar template */}
+          <div className="space-y-1.5">
+            <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Terpasang ({templates.length})</p>
+            {templates.length === 0 ? (
+              <p className="rounded-xl border border-dashed border-slate-200 px-3 py-4 text-center text-xs text-slate-400">
+                Belum ada template. Buat di atas, lalu panggil dengan &quot;/kata-kunci&quot; di kolom pesan.
+              </p>
+            ) : (
+              <div className="max-h-52 space-y-1.5 overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300">
+                {templates.map((t) => (
+                  <div key={t.id} className="group rounded-xl border border-slate-200 bg-white px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <span className="shrink-0 rounded-md bg-slate-900 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-white">/{t.keyword}</span>
+                      <p className="min-w-0 flex-1 truncate text-xs text-slate-600">{t.body.split('\n')[0]}</p>
+                      <button type="button" onClick={() => startEdit(t)} disabled={!canManage(t)} title={canManage(t) ? 'Ubah template' : 'Hanya pembuat/Super Admin/Manajer'} className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-40" aria-label={`Ubah template ${t.keyword}`}>
+                        <Pencil className="h-3 w-3" />
+                      </button>
+                      <button type="button" onClick={() => void remove(t)} disabled={!canManage(t)} title={canManage(t) ? 'Hapus template' : 'Hanya pembuat/Super Admin/Manajer'} className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-rose-50 hover:text-rose-600 disabled:cursor-not-allowed disabled:opacity-40" aria-label={`Hapus template ${t.keyword}`}>
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    </div>
+                    {t.description && <p className="mt-1 truncate text-[10px] text-slate-400">{t.description}</p>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/* ================================================================== */
 /* Panel konteks lead — dipakai sidebar desktop & sheet mobile          */
 /* ================================================================== */
-function SidebarBody({ opp, briefStatus, tasks, quotations, loadingLists, onToggleTask, onOpenBrief, onNewTask, onNewQuotation, onOpenOpportunity }: {
+function SidebarBody({ opp, briefStatus, tasks, quotations, loadingLists, onToggleTask, onOpenBrief, onNewTask, onNewQuotation, onOpenOpportunity, onSaveTimeline, timelineSaving }: {
   opp: OpportunityDetailDTO | null
   briefStatus: 'LOADING' | 'NONE' | 'DRAFT' | 'FINAL'
   tasks: TaskDTO[]
@@ -534,8 +844,24 @@ function SidebarBody({ opp, briefStatus, tasks, quotations, loadingLists, onTogg
   onNewTask: () => void
   onNewQuotation: () => void
   onOpenOpportunity: () => void
+  /** Simpan "Estimasi timeline" — sumber variabel {{estimated_timeline}} template */
+  onSaveTimeline: (value: string) => Promise<void>
+  timelineSaving: boolean
 }) {
   const openTasks = tasks.filter((t) => t.status === 'OPEN' || t.status === 'IN_PROGRESS')
+  /* Edit inline estimasi timeline — sumber {{estimated_timeline}} */
+  const [timelineEditing, setTimelineEditing] = useState(false)
+  const [timelineValue, setTimelineValue] = useState('')
+  const startTimelineEdit = () => {
+    setTimelineValue(opp?.estimatedTimeline ?? '')
+    setTimelineEditing(true)
+  }
+  const submitTimeline = async () => {
+    try {
+      await onSaveTimeline(timelineValue)
+      setTimelineEditing(false)
+    } catch { /* toast di handleSaveTimeline — tetap mode edit */ }
+  }
   return (
     <div className="space-y-3 p-3">
       {/* Konteks lead */}
@@ -580,6 +906,46 @@ function SidebarBody({ opp, briefStatus, tasks, quotations, loadingLists, onTogg
                   <dd className="flex items-center gap-1 text-slate-700"><CalendarClock className="h-3 w-3" /> {formatDate(opp.deadline)}</dd>
                 </div>
               )}
+              {/* Estimasi timeline — sumber variabel {{estimated_timeline}}; edit inline */}
+              <div className="flex items-start gap-2">
+                <dt className="w-24 shrink-0 pt-0.5 text-slate-400">Estimasi timeline</dt>
+                <dd className="min-w-0 flex-1">
+                  {timelineEditing ? (
+                    <div className="flex items-center gap-1">
+                      <input
+                        value={timelineValue}
+                        onChange={(e) => setTimelineValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') { e.preventDefault(); void submitTimeline() }
+                          if (e.key === 'Escape') { e.preventDefault(); setTimelineEditing(false) }
+                        }}
+                        placeholder="Mis. 2–3 minggu produksi"
+                        autoFocus
+                        className="h-7 w-full min-w-0 rounded-md border border-teal-300 bg-white px-2 text-xs text-slate-800 outline-none focus:ring-2 focus:ring-teal-400/40"
+                        aria-label="Estimasi timeline produksi"
+                      />
+                      <button
+                        type="button" onClick={() => void submitTimeline()} disabled={timelineSaving}
+                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-teal-700 text-white transition-colors hover:bg-teal-800 disabled:opacity-50"
+                        aria-label="Simpan estimasi timeline"
+                      >
+                        {timelineSaving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button" onClick={startTimelineEdit}
+                      title="Klik utk mengubah — dipakai variabel {{estimated_timeline}} pada template"
+                      className="group flex w-full items-center gap-1 rounded-md px-1 py-0.5 text-left transition-colors hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400/40"
+                    >
+                      <span className={cn('min-w-0 flex-1 truncate text-xs', opp.estimatedTimeline ? 'text-slate-700' : 'italic text-slate-400')}>
+                        {opp.estimatedTimeline ?? 'Belum diisi — klik utk tambah'}
+                      </span>
+                      <Pencil className="h-3 w-3 shrink-0 text-slate-300 transition-colors group-hover:text-teal-600" />
+                    </button>
+                  )}
+                </dd>
+              </div>
             </dl>
           </>
         )}
@@ -714,7 +1080,7 @@ const isTaskOverdue = (iso?: string | null) => {
 /* ================================================================== */
 /* View utama: overlay full-screen                                     */
 /* ================================================================== */
-export function ChatFocusView({ conv, conversations, activeConvId, onSelectConversation, listToolbar, onClose, onMessageSent, onActivity, onOpenOpportunity }: {
+export function ChatFocusView({ conv, conversations, activeConvId, onSelectConversation, listToolbar, currentUser, onClose, onMessageSent, onActivity, onOpenOpportunity }: {
   conv: ConversationListItemDTO
   /** Daftar percakapan utk switcher (sidebar desktop ≥xl / drawer mobile <xl) — opsional */
   conversations?: ConversationListItemDTO[]
@@ -722,6 +1088,8 @@ export function ChatFocusView({ conv, conversations, activeConvId, onSelectConve
   onSelectConversation?: (id: string) => void
   /** Slot toolbar filter bersama dari inbox-view (search, chip brand, kanal, belum-dibalas) */
   listToolbar?: React.ReactNode
+  /** User login — pengirim pesan; sumber variabel {{marketing_name}} pada template */
+  currentUser: { id: string; name: string; role: string }
   onClose: () => void
   onMessageSent: (m: InteractionDTO) => void
   onActivity: () => void
@@ -740,11 +1108,21 @@ export function ChatFocusView({ conv, conversations, activeConvId, onSelectConve
   const [chatSending, setChatSending] = useState(false)
   // Draft per percakapan — berganti kontak via switcher tidak menghilangkan ketikan
   const draftsRef = useRef(new Map<string, string>())
-  const [templates, setTemplates] = useState<React.ComponentState>(null)
   const [isCoarse, setIsCoarse] = useState(false)
+
+  /* ---------- Template slash (/keyword) — tidak tampil sebagai chip ---------- */
+  const [quickTemplates, setQuickTemplates] = useState<QuickTemplateDTO[] | null>(null)
+  const [slashIndex, setSlashIndex] = useState(0)
+  const [tplOpen, setTplOpen] = useState(false)
+
+  /* ---------- Perbarui kontak ---------- */
+  const [contactOpen, setContactOpen] = useState(false)
+  // Patch kontak hasil edit — langsung dipakai utk filter kanal tanpa menunggu refetch
+  const [contactOverride, setContactOverride] = useState<Partial<ConversationListItemDTO> | null>(null)
 
   /* ---------- Data panel ---------- */
   const [oppDetail, setOppDetail] = useState<OpportunityDetailDTO | null>(null)
+  const [briefData, setBriefData] = useState<BriefDTO | null>(null)
   const [tasks, setTasks] = useState<TaskDTO[]>([])
   const [quotations, setQuotations] = useState<QuotationDTO[]>([])
   const [briefStatus, setBriefStatus] = useState<'LOADING' | 'NONE' | 'DRAFT' | 'FINAL'>('LOADING')
@@ -795,9 +1173,11 @@ export function ChatFocusView({ conv, conversations, activeConvId, onSelectConve
     }
   }, [taskOpen, quoOpen, briefOpen, infoOpen, switcherOpen])
 
-  /* Pindah percakapan (switcher) → pulihkan draft milik percakapan tsb */
+  /* Pindah percakapan (switcher) → pulihkan draft milik percakapan tsb + reset override kontak */
   useEffect(() => {
     setChatBody(draftsRef.current.get(oppId) ?? '')
+    setContactOverride(null)
+    setSlashIndex(0)
   }, [oppId])
 
   /* ---------- Keyboard semantik: coarse pointer = Enter newline ---------- */
@@ -845,9 +1225,18 @@ export function ChatFocusView({ conv, conversations, activeConvId, onSelectConve
   useEffect(() => {
     let cancelled = false
     setBriefStatus('LOADING')
+    setBriefData(null)
     estimationApi.brief(oppId)
-      .then((b) => { if (!cancelled) setBriefStatus(b ? b.status : 'NONE') })
-      .catch(() => { if (!cancelled) setBriefStatus('NONE') })
+      .then((b) => {
+        if (cancelled) return
+        setBriefData(b)
+        setBriefStatus(b ? b.status : 'NONE')
+      })
+      .catch(() => {
+        if (cancelled) return
+        setBriefStatus('NONE')
+        setBriefData(null)
+      })
     return () => { cancelled = true }
   }, [oppId, briefOpen])
 
@@ -894,15 +1283,18 @@ export function ChatFocusView({ conv, conversations, activeConvId, onSelectConve
     }
   }, [chatBody])
 
-  /* ---------- Balasan cepat ---------- */
+  /* ---------- Template slash (/keyword) — fetch sekali ---------- */
   useEffect(() => {
-    if (templates !== null) return
+    if (quickTemplates !== null) return
     let cancelled = false
-    crmApi.templates()
-      .then((t) => { if (!cancelled) setTemplates(t) })
-      .catch(() => { if (!cancelled) setTemplates([]) })
+    crmApi.quickTemplates()
+      .then((t) => { if (!cancelled) setQuickTemplates(t) })
+      .catch(() => { if (!cancelled) setQuickTemplates([]) })
     return () => { cancelled = true }
-  }, [templates])
+  }, [quickTemplates])
+  const refreshQuickTemplates = useCallback(() => {
+    crmApi.quickTemplates().then(setQuickTemplates).catch(() => { /* biarkan daftar lama */ })
+  }, [])
 
   /* ---------- Kirim pesan ---------- */
   const handleSend = async () => {
@@ -947,11 +1339,99 @@ export function ChatFocusView({ conv, conversations, activeConvId, onSelectConve
   }
   const handleBriefSaved = (b: BriefDTO) => {
     setBriefStatus(b.status)
+    setBriefData(b)
     onActivity()
   }
 
+  /* ---------- Estimasi timeline (sumber {{estimated_timeline}}) — simpan cepat dari panel konteks ---------- */
+  const [timelineSaving, setTimelineSaving] = useState(false)
+  const handleSaveTimeline = useCallback(async (value: string) => {
+    setTimelineSaving(true)
+    try {
+      const updated = await crmApi.updateOpportunity(oppId, { estimatedTimeline: value.trim() || null })
+      setOppDetail((prev) => (prev ? { ...prev, estimatedTimeline: updated.estimatedTimeline ?? null } : prev))
+      toast({ title: 'Estimasi timeline tersimpan', description: 'Variabel {{estimated_timeline}} pada template kini punya sumber.' })
+      onActivity()
+    } catch (e) {
+      toast({ title: 'Gagal menyimpan estimasi timeline', description: e instanceof Error ? e.message : 'Coba lagi', variant: 'destructive' })
+      throw e
+    } finally {
+      setTimelineSaving(false)
+    }
+  }, [oppId, onActivity, toast])
+
+  /* ---------- Kanal balasan ter-filter: hanya kanal yang dimiliki kontak ---------- */
+  const effectiveConv = useMemo<ConversationListItemDTO>(
+    () => (contactOverride ? { ...conv, ...contactOverride } : conv),
+    [conv, contactOverride],
+  )
+  const availableChannels = useMemo(
+    () => contactChannels(effectiveConv),
+    [effectiveConv],
+  )
+  // Tidak ada kanal terdaftar → tampilkan semua (fallback) + badge ajakan melengkapi kontak
+  const channelOptions = availableChannels.length > 0 ? availableChannels : [...CHAT_CHANNELS]
+  // Kanal terpilih tidak tersedia utk kontak ini → ganti ke preferensi/kanal pertama
+  useEffect(() => {
+    if (!channelOptions.includes(chatChannel)) {
+      const pref = effectiveConv.contactPreferredChannel
+      setChatChannel(pref && channelOptions.includes(pref) ? pref : channelOptions[0] ?? 'WHATSAPP')
+    }
+  }, [channelOptions, chatChannel, effectiveConv.contactPreferredChannel])
+
+  /* ---------- Autocomplete slash (/keyword) ---------- */
+  const slash = useMemo(() => extractSlashToken(chatBody), [chatBody])
+  const slashOpen = !!slash && slash.token.length <= 24 && (quickTemplates?.length ?? 0) > 0
+  const slashMatches = useMemo(() => {
+    if (!slashOpen || !quickTemplates) return []
+    const q = slash!.token.toLowerCase()
+    return quickTemplates
+      .filter((t) => !q || t.keyword.startsWith(q) || t.keyword.includes(q))
+      .slice(0, 6)
+  }, [slashOpen, slash, quickTemplates])
+  useEffect(() => {
+    // Jaga indeks navigasi dalam batas hasil
+    if (slashIndex >= slashMatches.length) setSlashIndex(0)
+  }, [slashMatches.length, slashIndex])
+
+  /** Terapkan template: interpolasi variabel dgn sumber nyata, ganti token slash di input */
+  const applyTemplate = useCallback((t: QuickTemplateDTO) => {
+    const ctx = {
+      contactName: effectiveConv.contactName,
+      companyName: effectiveConv.companyName,
+      brandName: effectiveConv.brandName,
+      senderName: currentUser.name,
+      serviceName: oppDetail?.serviceName ?? null,
+      opportunityTitle: effectiveConv.opportunityTitle,
+      estimatedTimeline: oppDetail?.estimatedTimeline ?? null,
+      briefTimeline: briefData?.timeline ?? null,
+      deadline: oppDetail?.deadline ?? null,
+      ownerName: oppDetail?.ownerName ?? null,
+      nextAction: oppDetail?.nextAction ?? null,
+    }
+    const { text, missing } = interpolateTemplate(t.body, ctx)
+    const next = slash
+      ? chatBody.slice(0, slash.startPos) + text + chatBody.slice(slash.startPos + 1 + slash.token.length)
+      : chatBody + text
+    setChatBody(next)
+    draftsRef.current.set(oppId, next)
+    requestAnimationFrame(() => chatTaRef.current?.focus())
+    if (missing.length > 0) {
+      toast({
+        title: 'Sebagian variabel belum punya sumber',
+        description: `${missing.map((k) => `{{${k}}}`).join(', ')} diisi manual — lengkapi di panel konteks lead.`,
+      })
+    }
+  }, [effectiveConv, currentUser.name, oppDetail, briefData, slash, chatBody, oppId, toast])
+
   const messages = thread ?? []
-  const channelOptions = CHAT_CHANNELS
+
+  /* Ringkasan sumber (kanal) thread — verifikasi lintas sumber di atas timeline */
+  const sourceSummary = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const m of messages) counts.set(m.channel, (counts.get(m.channel) ?? 0) + 1)
+    return [...counts.entries()]
+  }, [messages])
 
   return (
     <div
@@ -988,14 +1468,14 @@ export function ChatFocusView({ conv, conversations, activeConvId, onSelectConve
           {initials(conv.contactName)}
         </div>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold text-slate-900">{conv.contactName}</p>
+          <p className="truncate text-sm font-semibold text-slate-900">{effectiveConv.contactName}</p>
           <div className="flex min-w-0 items-center gap-1.5">
-            {conv.companyName && <span className="truncate text-xs text-slate-500">{conv.companyName} ·</span>}
-            <BrandChip name={conv.brandName} color={conv.brandColor} size="xs" />
-            {conv.unanswered && (
+            {effectiveConv.companyName && <span className="truncate text-xs text-slate-500">{effectiveConv.companyName} ·</span>}
+            <BrandChip name={effectiveConv.brandName} color={effectiveConv.brandColor} size="xs" />
+            {effectiveConv.unanswered && (
               <Badge variant="outline" className="hidden border-amber-200 bg-amber-50 px-1.5 py-px text-[9px] font-semibold text-amber-700 sm:inline-flex">Belum dibalas</Badge>
             )}
-            {conv.escalated && (
+            {effectiveConv.escalated && (
               <Badge variant="outline" className="hidden border-rose-200 bg-rose-50 px-1.5 py-px text-[9px] font-semibold text-rose-700 sm:inline-flex">SLA terlampaui</Badge>
             )}
           </div>
@@ -1007,14 +1487,38 @@ export function ChatFocusView({ conv, conversations, activeConvId, onSelectConve
             title="Buka opportunity terkait"
             className="font-mono text-[10px] text-slate-400 hover:text-teal-700 hover:underline"
           >
-            {conv.opportunityCode}
+            {effectiveConv.opportunityCode}
           </button>
-          <StageBadge stage={conv.stage} />
+          <StageBadge stage={effectiveConv.stage} />
         </div>
+        <Button
+          variant="ghost" size="icon"
+          onClick={() => setContactOpen(true)}
+          aria-label="Perbarui kontak" title="Perbarui kontak"
+          className="h-9 w-9 shrink-0"
+        >
+          <PenLine className="h-4 w-4" />
+        </Button>
         <Button variant="outline" size="sm" className="h-8 shrink-0 gap-1.5 lg:hidden" onClick={() => setInfoOpen(true)}>
           <FileBarChart2 className="h-3.5 w-3.5" /> Info
         </Button>
       </header>
+
+      {/* Strip sumber lintas kanal — verifikasi sumber pesan dalam thread */}
+      {sourceSummary.length > 1 && (
+        <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-slate-200 bg-slate-50/80 px-3 py-1.5 sm:px-4" aria-label="Sumber pesan dalam percakapan">
+          <span className="inline-flex shrink-0 items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+            <BadgeCheck className="h-3 w-3 text-teal-600" /> Lintas sumber
+          </span>
+          {sourceSummary.map(([ch, count]) => (
+            <span key={ch} className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-medium text-slate-600">
+              <ChannelIcon channel={ch} className="h-3 w-3" />
+              {channelMeta(ch).label}
+              <span className="tabular-nums text-slate-400">{count}</span>
+            </span>
+          ))}
+        </div>
+      )}
 
       {/* ===== Body: switcher percakapan + chat + sidebar ===== */}
       <div className="flex min-h-0 flex-1">
@@ -1103,12 +1607,28 @@ export function ChatFocusView({ conv, conversations, activeConvId, onSelectConve
                               <p className={cn('mb-0.5 break-words text-xs font-bold', isIn ? 'text-slate-900' : 'text-white')}>{m.subject}</p>
                             )}
                             <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{m.body}</p>
-                            <div className={cn('mt-1 flex items-center gap-1.5 text-[10px]', isIn ? 'text-slate-400' : 'text-emerald-100')}>
-                              {m.channel !== 'WHATSAPP' && (
-                                <span className={cn('inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-px font-medium', isIn ? 'bg-slate-100 text-slate-500' : 'bg-white/15 text-white')}>
-                                  {isIn ? <ChannelIcon channel={m.channel} className="h-3 w-3" /> : (OUT_CHANNEL_ICON[m.channel] ?? <Globe className="h-3 w-3" />)}
-                                  {channelMeta(m.channel).label}
-                                </span>
+                            <div className={cn('mt-1 flex flex-wrap items-center gap-1.5 text-[10px]', isIn ? 'text-slate-400' : 'text-emerald-100')}>
+                              <span className={cn('inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-px font-medium', isIn ? 'bg-slate-100 text-slate-500' : 'bg-white/15 text-white')}>
+                                {isIn ? <ChannelIcon channel={m.channel} className="h-3 w-3" /> : (OUT_CHANNEL_ICON[m.channel] ?? <Globe className="h-3 w-3" />)}
+                                {channelMeta(m.channel).label}
+                              </span>
+                              {/* Verifikasi sumber (pesan masuk): pesan asli via kanal tertaut vs dicatat manual */}
+                              {isIn && (
+                                (m.externalMessageId || m.originalLink) ? (
+                                  <span
+                                    className="inline-flex shrink-0 items-center gap-0.5 font-semibold text-teal-700"
+                                    title={`Pesan asli dari ${channelMeta(m.channel).label} — sumber terverifikasi${m.externalMessageId ? ` (ID: ${m.externalMessageId})` : ''}`}
+                                  >
+                                    <BadgeCheck className="h-3 w-3" /> Terverifikasi
+                                  </span>
+                                ) : (
+                                  <span
+                                    className="inline-flex shrink-0 items-center gap-0.5 text-slate-400"
+                                    title="Tidak ada ID sumber kanal — pesan dicatat manual oleh tim"
+                                  >
+                                    <PenLine className="h-2.5 w-2.5" /> Dicatat manual
+                                  </span>
+                                )
                               )}
                               <span className="ml-auto shrink-0 tabular-nums" title={new Date(m.sentAt).toLocaleString('id-ID', { dateStyle: 'full', timeStyle: 'short' })}>
                                 {formatDate(m.sentAt, true)}
@@ -1163,29 +1683,66 @@ export function ChatFocusView({ conv, conversations, activeConvId, onSelectConve
             </button>
           </div>
 
-          {/* Composer */}
-          <div className="shrink-0 border-t border-slate-200 bg-white px-3 pb-[max(0.625rem,env(safe-area-inset-bottom))] pt-2.5 sm:px-4 sm:pb-3">
+          {/* Composer — template dipanggil via /keyword (tidak tampil sebagai chip) */}
+          <div className="relative shrink-0 border-t border-slate-200 bg-white px-3 pb-[max(0.625rem,env(safe-area-inset-bottom))] pt-2.5 sm:px-4 sm:pb-3">
             <div className="mx-auto max-w-3xl">
-              {Array.isArray(templates) && templates.length > 0 && (
-                <div className="mb-2 flex items-center gap-1.5 overflow-x-auto pb-0.5 sm:flex-wrap sm:overflow-visible">
-                  <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Balasan cepat</span>
-                  {(templates as { id: string; name: string; body: string }[]).slice(0, 6).map((t) => (
-                    <button
-                      key={t.id}
-                      type="button"
-                      title={t.body}
-                      onClick={() => {
-                        setChatBody(t.body)
-                        draftsRef.current.set(oppId, t.body)
-                      }}
-                      className="max-w-[220px] shrink-0 truncate rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-600 transition-colors hover:border-slate-300 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400/60"
-                    >
-                      {t.name}
+              {/* Popup autocomplete /template — muncul hanya saat mengetik "/" */}
+              {slashOpen && slashMatches.length > 0 && (
+                <div
+                  role="listbox"
+                  aria-label="Template balasan cepat"
+                  className="absolute bottom-full left-3 right-3 z-10 mb-2 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg sm:left-4 sm:right-auto sm:w-[420px]"
+                >
+                  <div className="max-h-56 overflow-y-auto py-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300">
+                    {slashMatches.map((t, i) => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        role="option"
+                        aria-selected={i === slashIndex}
+                        onMouseDown={(e) => { e.preventDefault(); applyTemplate(t) }}
+                        onMouseEnter={() => setSlashIndex(i)}
+                        className={cn(
+                          'flex w-full items-start gap-2.5 px-3 py-2 text-left transition-colors',
+                          i === slashIndex ? 'bg-teal-50' : 'bg-white hover:bg-slate-50',
+                        )}
+                      >
+                        <span className="mt-0.5 shrink-0 rounded-md bg-slate-900 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-white">/{t.keyword}</span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-xs text-slate-700">{t.body.split('\n')[0]}</span>
+                          {t.description && <span className="block truncate text-[10px] text-slate-400">{t.description}</span>}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex items-center justify-between border-t border-slate-100 bg-slate-50/80 px-3 py-1.5 text-[10px] text-slate-400">
+                    <span>↑↓ pilih · Enter pakai · Esc tutup</span>
+                    <button type="button" onMouseDown={(e) => { e.preventDefault(); setTplOpen(true) }} className="inline-flex items-center gap-1 font-semibold text-teal-700 hover:underline">
+                      <Slash className="h-3 w-3" /> Kelola template
                     </button>
-                  ))}
+                  </div>
                 </div>
               )}
+              {availableChannels.length === 0 && (
+                <button
+                  type="button"
+                  onClick={() => setContactOpen(true)}
+                  className="mb-2 flex w-full items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-left text-[11px] text-amber-800 transition-colors hover:bg-amber-100"
+                >
+                  <BadgeCheck className="h-3.5 w-3.5 shrink-0" />
+                  Kontak belum punya kanal terdaftar (WhatsApp/Email/Instagram/Threads) — ketuk untuk memperbarui kontak.
+                </button>
+              )}
               <div className="flex items-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setTplOpen(true)}
+                  title="Kelola template balasan (/kata-kunci)"
+                  aria-label="Kelola template balasan"
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-500 transition-colors hover:border-teal-300 hover:bg-teal-50 hover:text-teal-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400/50"
+                >
+                  <Slash className="h-4 w-4" />
+                </button>
                 <Textarea
                   ref={chatTaRef}
                   value={chatBody}
@@ -1195,6 +1752,27 @@ export function ChatFocusView({ conv, conversations, activeConvId, onSelectConve
                     draftsRef.current.set(oppId, v)
                   }}
                   onKeyDown={(e) => {
+                    // Navigasi popup /template — prioritas di atas kirim/baris baru
+                    if (slashOpen && slashMatches.length > 0) {
+                      if (e.key === 'ArrowDown') { e.preventDefault(); setSlashIndex((i) => (i + 1) % slashMatches.length); return }
+                      if (e.key === 'ArrowUp') { e.preventDefault(); setSlashIndex((i) => (i - 1 + slashMatches.length) % slashMatches.length); return }
+                      if (e.key === 'Enter' || e.key === 'Tab') {
+                        e.preventDefault()
+                        applyTemplate(slashMatches[Math.min(slashIndex, slashMatches.length - 1)])
+                        return
+                      }
+                      if (e.key === 'Escape') {
+                        // Tutup popup saja — jangan sampai menutup view fokus (stopPropagation)
+                        e.preventDefault()
+                        e.stopPropagation()
+                        if (slash) {
+                          const next = chatBody.slice(0, slash.startPos) + chatBody.slice(slash.startPos + 1 + slash.token.length)
+                          setChatBody(next)
+                          draftsRef.current.set(oppId, next)
+                        }
+                        return
+                      }
+                    }
                     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
                       e.preventDefault()
                       void handleSend()
@@ -1205,7 +1783,7 @@ export function ChatFocusView({ conv, conversations, activeConvId, onSelectConve
                       void handleSend()
                     }
                   }}
-                  placeholder={`Tulis pesan untuk ${conv.contactName}…`}
+                  placeholder={`Tulis pesan untuk ${effectiveConv.contactName}… ( / utk template )`}
                   rows={1}
                   className="min-h-[40px] max-h-[140px] flex-1 resize-none py-2"
                   aria-label="Tulis pesan balasan"
@@ -1214,7 +1792,12 @@ export function ChatFocusView({ conv, conversations, activeConvId, onSelectConve
                   <SelectTrigger aria-label="Kanal pengiriman" className="h-9 w-[104px] shrink-0 text-xs sm:w-[124px] sm:text-sm"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {channelOptions.map((c) => (
-                      <SelectItem key={c} value={c}>{channelMeta(c).label}</SelectItem>
+                      <SelectItem key={c} value={c}>
+                        <span className="flex items-center gap-1.5">
+                          <ChannelIcon channel={c} className="h-3.5 w-3.5" />
+                          {channelMeta(c).label}
+                        </span>
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -1230,7 +1813,8 @@ export function ChatFocusView({ conv, conversations, activeConvId, onSelectConve
               </div>
               {!isCoarse && (
                 <p className="mt-1 text-right text-[10px] text-slate-400">
-                  <kbd className="rounded border border-slate-200 bg-slate-50 px-1 font-sans">Enter</kbd> kirim ·
+                  <kbd className="rounded border border-slate-200 bg-slate-50 px-1 font-sans">/</kbd> template ·
+                  <kbd className="ml-0.5 rounded border border-slate-200 bg-slate-50 px-1 font-sans">Enter</kbd> kirim ·
                   <kbd className="ml-0.5 rounded border border-slate-200 bg-slate-50 px-1 font-sans">Shift+Enter</kbd> baris baru ·
                   <kbd className="ml-0.5 rounded border border-slate-200 bg-slate-50 px-1 font-sans">Esc</kbd> kembali
                 </p>
@@ -1252,6 +1836,8 @@ export function ChatFocusView({ conv, conversations, activeConvId, onSelectConve
             onNewTask={() => setTaskOpen(true)}
             onNewQuotation={() => setQuoOpen(true)}
             onOpenOpportunity={() => onOpenOpportunity(oppId)}
+            onSaveTimeline={handleSaveTimeline}
+            timelineSaving={timelineSaving}
           />
         </aside>
       </div>
@@ -1298,6 +1884,8 @@ export function ChatFocusView({ conv, conversations, activeConvId, onSelectConve
               onNewTask={() => { setInfoOpen(false); setTaskOpen(true) }}
               onNewQuotation={() => { setInfoOpen(false); setQuoOpen(true) }}
               onOpenOpportunity={() => { setInfoOpen(false); onOpenOpportunity(oppId) }}
+              onSaveTimeline={handleSaveTimeline}
+              timelineSaving={timelineSaving}
             />
           </div>
         </div>
@@ -1307,6 +1895,22 @@ export function ChatFocusView({ conv, conversations, activeConvId, onSelectConve
       <AssignTaskDialog open={taskOpen} onOpenChange={setTaskOpen} opp={conv} users={users} onCreated={handleTaskCreated} />
       <QuotationDialog open={quoOpen} onOpenChange={setQuoOpen} opp={conv} onCreated={handleQuotationCreated} />
       <BriefDialog open={briefOpen} onOpenChange={setBriefOpen} opp={conv} onSaved={handleBriefSaved} />
+      <EditContactDialog
+        open={contactOpen}
+        onOpenChange={setContactOpen}
+        conv={effectiveConv}
+        onSaved={(patch) => {
+          setContactOverride((prev) => ({ ...(prev ?? {}), ...patch }))
+          onActivity()
+        }}
+      />
+      <ManageTemplatesDialog
+        open={tplOpen}
+        onOpenChange={setTplOpen}
+        templates={quickTemplates ?? []}
+        currentUser={currentUser}
+        onChanged={refreshQuickTemplates}
+      />
     </div>
   )
 }

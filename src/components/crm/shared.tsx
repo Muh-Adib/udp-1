@@ -7,7 +7,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
-  Mail, MessageCircle, Instagram, Globe, Phone, Users, Flame, CloudSun, Snowflake,
+  Mail, MessageCircle, Instagram, Globe, Phone, Users, Flame, CloudSun, Snowflake, AtSign,
 } from 'lucide-react'
 import { stageMeta, channelMeta, priorityMeta, temperatureMeta, initials } from '@/lib/crm-constants'
 
@@ -70,6 +70,7 @@ export function ChannelIcon({ channel, className }: { channel: string; className
     case 'WHATSAPP': return <MessageCircle className={cn(cls, meta.color)} />
     case 'EMAIL': return <Mail className={cn(cls, meta.color)} />
     case 'INSTAGRAM': return <Instagram className={cn(cls, meta.color)} />
+    case 'THREADS': return <AtSign className={cn(cls, meta.color)} />
     case 'WEBSITE': return <Globe className={cn(cls, meta.color)} />
     case 'PHONE': return <Phone className={cn(cls, meta.color)} />
     case 'MEETING': return <Users className={cn(cls, meta.color)} />

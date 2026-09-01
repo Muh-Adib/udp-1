@@ -30,7 +30,7 @@ const COLOR_RE = /^#[0-9a-fA-F]{6}$/
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await getSessionUser()
   if (!session) return NextResponse.json({ error: 'Belum login' }, { status: 401 })
-  if (!['SUPER_ADMIN', 'DIREKTUR'].includes(session.role)) {
+  if (!['SUPER_ADMIN', 'DIREKTUR', 'MANAJER'].includes(session.role)) {
     return NextResponse.json(
       { error: 'Hanya Super Admin / Direktur yang dapat mengubah pengaturan brand' },
       { status: 403 },

@@ -9,7 +9,7 @@ import { getSessionUser, mapInteraction, interactionInclude } from '@/lib/crm-se
 
 export const dynamic = 'force-dynamic'
 
-const INTERNAL_ROLES = ['SUPER_ADMIN', 'DIREKTUR', 'MARKETING', 'KEUANGAN', 'PRODUKSI']
+const INTERNAL_ROLES = ['SUPER_ADMIN', 'DIREKTUR', 'MANAJER', 'MARKETING', 'KEUANGAN', 'PRODUKSI', 'HR']
 
 /** GET → InteractionDTO[] (semua direction, ascending by sentAt) */
 export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {

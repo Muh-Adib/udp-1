@@ -5,6 +5,7 @@ import type {
   SessionUser, UserDTO, BrandDTO, CompanyDTO, ContactDTO, OpportunityDTO, OpportunityDetailDTO,
   InteractionDTO, TaskDTO, DashboardDTO, AuditLogDTO, TemplateDTO, DuplicateCandidate, ProjectDTO, NoteDTO, Stage,
   QuotationStatus, QuotationDTO, QuotationDetailDTO, InvoiceStatus, InvoiceDTO, FinanceSummaryDTO,
+  QuickTemplateDTO,
   BriefDTO, EstimationDTO, EstimationSaveInput, PortalDTO, NotificationsResponseDTO,
   PortalCommentEntity, PortalCommentDTO, PortalDecisionResultDTO, ConversationAnalyticsDTO,
   ConversationListItemDTO, OpportunityAiSummaryDTO, BriefingDTO, ForecastDTO,
@@ -52,6 +53,15 @@ export const crmApi = {
 
   contacts: (params = '') => api.get<ContactDTO[]>(`/api/contacts${params ? `?${params}` : ''}`),
   createContact: (body: unknown) => api.post<ContactDTO>('/api/contacts', body),
+  updateContact: (id: string, body: unknown) => api.patch<ContactDTO>(`/api/contacts/${id}`, body),
+
+  /* Template balasan cepat inbox — dipanggil via "/keyword" di composer (tidak tampil sbg chip) */
+  quickTemplates: () => api.get<QuickTemplateDTO[]>('/api/quick-templates'),
+  createQuickTemplate: (body: { keyword: string; body: string; description?: string }) =>
+    api.post<QuickTemplateDTO>('/api/quick-templates', body),
+  updateQuickTemplate: (id: string, body: { keyword?: string; body?: string; description?: string | null }) =>
+    api.patch<QuickTemplateDTO>(`/api/quick-templates/${id}`, body),
+  deleteQuickTemplate: (id: string) => api.del<{ ok: boolean }>(`/api/quick-templates/${id}`),
 
   opportunities: (params = '') => api.get<OpportunityDTO[]>(`/api/opportunities${params ? `?${params}` : ''}`),
   opportunity: (id: string) => api.get<OpportunityDetailDTO>(`/api/opportunities/${id}`),

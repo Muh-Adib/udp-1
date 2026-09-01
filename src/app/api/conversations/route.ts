@@ -11,7 +11,7 @@ import type { ConversationListItemDTO } from '@/lib/crm-types'
 
 export const dynamic = 'force-dynamic'
 
-const INTERNAL_ROLES = ['SUPER_ADMIN', 'DIREKTUR', 'MARKETING', 'KEUANGAN', 'PRODUKSI']
+const INTERNAL_ROLES = ['SUPER_ADMIN', 'DIREKTUR', 'MANAJER', 'MARKETING', 'KEUANGAN', 'PRODUKSI', 'HR']
 const DAY = 86400000
 const round1 = (n: number) => Math.round(n * 10) / 10
 const CLOSED_STAGES = new Set(['WON', 'LOST'])
@@ -49,6 +49,7 @@ export async function GET() {
       select: {
         id: true, code: true, title: true, stage: true, createdAt: true,
         company: { select: { name: true } },
+        contact: { select: { id: true, email: true, whatsapp: true, instagram: true, threads: true, preferredChannel: true } },
         sourceBrand: { select: { id: true, name: true, color: true, slaHours: true } },
         executingBrand: { select: { id: true, name: true, color: true, slaHours: true } },
         owner: { select: { name: true } },
@@ -101,6 +102,12 @@ export async function GET() {
         slaHours,
         escalated: slaOverHours !== null && slaOverHours > slaHours,
         ownerName: o.owner?.name ?? null,
+        contactId: o.contact?.id ?? '',
+        contactEmail: o.contact?.email ?? null,
+        contactWhatsapp: o.contact?.whatsapp ?? null,
+        contactInstagram: o.contact?.instagram ?? null,
+        contactThreads: o.contact?.threads ?? null,
+        contactPreferredChannel: o.contact?.preferredChannel ?? null,
       })
     }
 

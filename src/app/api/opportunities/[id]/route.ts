@@ -14,7 +14,7 @@ const DATE_FIELDS = ['expectedCloseDate', 'nextActionDate', 'deadline', 'followU
 const NUMBER_FIELDS = ['probability', 'estimatedValue'] as const
 const STRING_FIELDS = [
   'title', 'priority', 'temperature', 'currency', 'nextAction', 'brief', 'needs',
-  'targetAudience', 'deliverables', 'competitorName', 'lostNotes', 'reactivation',
+  'targetAudience', 'deliverables', 'competitorName', 'lostNotes', 'reactivation', 'estimatedTimeline',
   'nurtureTrack', 'campaign',
 ] as const
 const FK_FIELDS = ['ownerId', 'serviceId'] as const

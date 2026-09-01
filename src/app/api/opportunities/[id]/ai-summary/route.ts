@@ -13,7 +13,7 @@ import ZAI from 'z-ai-web-dev-sdk'
 
 export const dynamic = 'force-dynamic'
 
-const INTERNAL_ROLES = ['SUPER_ADMIN', 'DIREKTUR', 'MARKETING', 'KEUANGAN', 'PRODUKSI']
+const INTERNAL_ROLES = ['SUPER_ADMIN', 'DIREKTUR', 'MANAJER', 'MARKETING', 'KEUANGAN', 'PRODUKSI', 'HR']
 
 const MAX_INTERACTIONS = 30
 const BODY_SLICE = 300

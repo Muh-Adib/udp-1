@@ -15,7 +15,7 @@ model User {
   id          String   @id @default(cuid())
   email       String   @unique
   name        String
-  role        String   @default("MARKETING") // SUPER_ADMIN | DIREKTUR | MARKETING | KEUANGAN | PRODUKSI | CLIENT
+  role        String   @default("MARKETING") // SUPER_ADMIN | DIREKTUR | MANAJER | MARKETING | KEUANGAN | PRODUKSI | HR | CLIENT
   title       String?
   avatarColor String   @default("#10b981")
   isActive    Boolean  @default(true)
@@ -142,7 +142,11 @@ model Contact {
   city             String?
   timezone         String  @default("Asia/Jakarta")
   language         String  @default("id") // id | en
-  preferredChannel String  @default("WHATSAPP") // WHATSAPP|EMAIL|PHONE|INSTAGRAM|WEBSITE
+  preferredChannel String  @default("WHATSAPP") // WHATSAPP|EMAIL|PHONE|INSTAGRAM|THREADS|WEBSITE
+  /* Kanal sosial kontak — dipakai utk memfilter opsi kanal balasan di inbox:
+     opsi balas hanya tampil utk kanal yang benar-benar dimiliki kontak. */
+  instagram        String?
+  threads          String?
   linkedin         String?
   consentStatus    String  @default("GRANTED") // GRANTED|PENDING|REVOKED
   tags             String  @default("")
@@ -188,6 +192,9 @@ model Opportunity {
   lostNotes         String?
   lastOfferValue    Float?
   reactivation      String? // REOFFER_30|REOFFER_90|BUDGET_PERIOD|CROSS_SELL|SMALLER_PACKAGE|ALTERNATIVE_SERVICE
+  /* Estimasi timeline produksi (teks bebas, mis. "2–3 minggu produksi") — sumber variabel
+     {{estimated_timeline}} pada template balasan cepat di inbox. Fallback: Brief.timeline → deadline. */
+  estimatedTimeline String?
   followUpDate      DateTime?
   nurtureTrack      String?
   wonAt             DateTime?
@@ -319,6 +326,22 @@ model FollowUpTemplate {
   isActive  Boolean @default(true)
 
   brand Brand @relation(fields: [brandId], references: [id])
+}
+
+/* Template balasan cepat inbox — TIDAK ditampilkan sbg chip di UI.
+   Dipanggil dari composer dengan perintah slash: "/keyword" → isi diinterpolasi
+   dengan variabel {{contact_name}}, {{service_name}}, {{company_name}},
+   {{marketing_name}}, {{brand_name}}, {{estimated_timeline}}, dll. */
+model QuickTemplate {
+  id          String   @id @default(cuid())
+  keyword     String   @unique // tanpa "@"/spasi — dipanggil "/keyword"
+  body        String
+  description String?  // opsional: kapan dipakai
+  creatorId   String?
+  creatorName String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 model AuditLog {

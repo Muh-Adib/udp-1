@@ -1,13 +1,13 @@
 /* ============ Multi-Brand CRM — Shared Types (API contract) ============ */
 
-export type Role = 'SUPER_ADMIN' | 'DIREKTUR' | 'MARKETING' | 'KEUANGAN' | 'PRODUKSI' | 'CLIENT'
+export type Role = 'SUPER_ADMIN' | 'DIREKTUR' | 'MANAJER' | 'MARKETING' | 'KEUANGAN' | 'PRODUKSI' | 'HR' | 'CLIENT'
 
 export type Stage =
   | 'NEW' | 'CONTACT_ATTEMPTED' | 'CONNECTED' | 'QUALIFIED' | 'DISCOVERY'
   | 'ESTIMATION' | 'PROPOSAL_SENT' | 'NEGOTIATION' | 'VERBAL_AGREEMENT'
   | 'WON' | 'LOST' | 'NURTURE'
 
-export type Channel = 'WHATSAPP' | 'EMAIL' | 'INSTAGRAM' | 'WEBSITE' | 'PHONE' | 'MEETING'
+export type Channel = 'WHATSAPP' | 'EMAIL' | 'INSTAGRAM' | 'THREADS' | 'WEBSITE' | 'PHONE' | 'MEETING'
 
 export type Temperature = 'HOT' | 'WARM' | 'COLD'
 export type Priority = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT'
@@ -82,6 +82,8 @@ export interface ContactDTO {
   timezone: string
   language: string
   preferredChannel: string
+  instagram?: string | null
+  threads?: string | null
   linkedin?: string | null
   consentStatus: string
   tags: string[]
@@ -142,6 +144,8 @@ export interface OpportunityDTO {
   targetAudience?: string | null
   deliverables?: string | null
   deadline?: string | null
+  /** Estimasi timeline produksi (teks bebas) — sumber variabel {{estimated_timeline}} */
+  estimatedTimeline?: string | null
   companyId: string
   companyName: string
   companyCountry: string
@@ -308,6 +312,18 @@ export interface AuditLogDTO {
   newValue?: string | null
   ip?: string | null
   userAgent?: string | null
+  createdAt: string
+}
+
+/* Template balasan cepat inbox (dipanggil via /keyword di composer) */
+export interface QuickTemplateDTO {
+  id: string
+  keyword: string
+  body: string
+  description?: string | null
+  creatorId?: string | null
+  creatorName?: string | null
+  isActive: boolean
   createdAt: string
 }
 
@@ -713,6 +729,14 @@ export interface ConversationListItemDTO {
   /** slaOverHours > slaHours → eskalasi 2× SLA */
   escalated: boolean
   ownerName?: string | null
+  /* Kanal kontak — dipakai utk memfilter opsi kanal balasan di composer inbox:
+     hanya kanal yang benar-benar dimiliki kontak yang bisa dipilih. */
+  contactId: string
+  contactEmail?: string | null
+  contactWhatsapp?: string | null
+  contactInstagram?: string | null
+  contactThreads?: string | null
+  contactPreferredChannel?: string | null
 }
 
 export type AiSentiment = 'POSITIVE' | 'NEUTRAL' | 'NEGATIVE' | 'MIXED'

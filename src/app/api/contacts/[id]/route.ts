@@ -6,7 +6,7 @@ import { logAudit } from '@/lib/audit'
 
 export const dynamic = 'force-dynamic'
 
-const STRING_FIELDS = ['lastName', 'position', 'email', 'altEmail', 'whatsapp', 'phone', 'country', 'city', 'timezone', 'language', 'preferredChannel', 'linkedin', 'consentStatus'] as const
+const STRING_FIELDS = ['lastName', 'position', 'email', 'altEmail', 'whatsapp', 'phone', 'instagram', 'threads', 'country', 'city', 'timezone', 'language', 'preferredChannel', 'linkedin', 'consentStatus'] as const
 
 /** PATCH — partial update, audit only changed keys */
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
