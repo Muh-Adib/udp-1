@@ -7,6 +7,8 @@
  *  - service_name        → Service.name dari opportunity; fallback: judul opportunity
  *  - estimated_timeline  → Opportunity.estimatedTimeline (diisi marketing di panel konteks
  *                          chat / form opportunity); fallback: Brief.timeline → deadline
+ *  - quotation_total     → Penawaran TERAKHIR pada opportunity (total terformat)
+ *  - next_followup_date  → Opportunity.followUpDate; fallback: Opportunity.nextActionDate
  *  - owner_name          → owner opportunity (bila beda dari pengirim)
  *  - next_action         → Opportunity.nextAction
  */
@@ -23,6 +25,9 @@ export interface TemplateVarContext {
   deadline?: string | null
   ownerName?: string | null
   nextAction?: string | null
+  quotationTotal?: string | null
+  followUpDate?: string | null
+  nextActionDate?: string | null
 }
 
 export interface TemplateVarMeta {
@@ -42,6 +47,8 @@ export const TEMPLATE_VARS: TemplateVarMeta[] = [
   { key: 'estimated_timeline', label: 'Estimasi timeline', source: 'Field "Estimasi timeline" di panel konteks lead; fallback: timeline Brief → deadline' },
   { key: 'owner_name', label: 'Owner opportunity', source: 'PIC deal pada opportunity' },
   { key: 'next_action', label: 'Aksi berikutnya', source: 'Field "Aksi berikutnya" pada opportunity' },
+  { key: 'quotation_total', label: 'Total penawaran', source: 'Penawaran terakhir pada lead (total terformat; kosong bila belum ada penawaran)' },
+  { key: 'next_followup_date', label: 'Tanggal follow-up berikutnya', source: 'Field "Tanggal follow-up" pada lead; fallback: tanggal aksi berikutnya' },
 ]
 
 const dash = (v: string | null | undefined) => {
@@ -70,6 +77,11 @@ export function resolveTemplateValue(key: string, ctx: TemplateVarContext): stri
       return dash(ctx.estimatedTimeline) ?? dash(ctx.briefTimeline) ?? formatDeadline(ctx.deadline)
     case 'owner_name': return dash(ctx.ownerName)
     case 'next_action': return dash(ctx.nextAction)
+    // Penawaran terakhir pada lead — total terformat (kosong bila belum ada penawaran)
+    case 'quotation_total': return dash(ctx.quotationTotal)
+    // Rantai follow-up: opportunity.followUpDate → opportunity.nextActionDate
+    case 'next_followup_date':
+      return formatDeadline(ctx.followUpDate) ?? formatDeadline(ctx.nextActionDate)
     default: return null
   }
 }

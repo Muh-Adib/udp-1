@@ -34,13 +34,13 @@ import { motion, AnimatePresence } from 'framer-motion'
 
 const NAV: { key: ViewKey; label: string; icon: React.ElementType; roles: string[]; hint?: string }[] = [
   { key: 'portal', label: 'Client Portal', icon: LayoutDashboard, roles: ['CLIENT'] },
-  { key: 'dashboard', label: 'Command Center', icon: LayoutDashboard, roles: ['SUPER_ADMIN', 'DIREKTUR', 'MARKETING', 'KEUANGAN', 'PRODUKSI'] },
-  { key: 'inbox', label: 'Lead Inbox', icon: Inbox, roles: ['SUPER_ADMIN', 'DIREKTUR', 'MARKETING'], hint: 'Omnichannel' },
-  { key: 'contacts', label: 'Contacts & Companies', icon: Contact2, roles: ['SUPER_ADMIN', 'DIREKTUR', 'MARKETING', 'KEUANGAN', 'PRODUKSI'] },
-  { key: 'pipeline', label: 'Sales Pipeline', icon: KanbanSquare, roles: ['SUPER_ADMIN', 'DIREKTUR', 'MARKETING', 'KEUANGAN', 'PRODUKSI'] },
-  { key: 'followup', label: 'Follow-up', icon: Repeat, roles: ['SUPER_ADMIN', 'DIREKTUR', 'MARKETING'] },
-  { key: 'projects', label: 'Projects', icon: FolderKanban, roles: ['SUPER_ADMIN', 'DIREKTUR', 'MARKETING', 'KEUANGAN', 'PRODUKSI'] },
-  { key: 'quotations', label: 'Quotations', icon: FileText, roles: ['SUPER_ADMIN', 'DIREKTUR', 'MARKETING', 'KEUANGAN'] },
+  { key: 'dashboard', label: 'Command Center', icon: LayoutDashboard, roles: ['SUPER_ADMIN', 'DIREKTUR', 'MANAJER', 'MARKETING', 'KEUANGAN', 'PRODUKSI', 'HR'] },
+  { key: 'inbox', label: 'Lead Inbox', icon: Inbox, roles: ['SUPER_ADMIN', 'DIREKTUR', 'MANAJER', 'MARKETING'], hint: 'Omnichannel' },
+  { key: 'contacts', label: 'Contacts & Companies', icon: Contact2, roles: ['SUPER_ADMIN', 'DIREKTUR', 'MANAJER', 'MARKETING', 'KEUANGAN', 'PRODUKSI', 'HR'] },
+  { key: 'pipeline', label: 'Sales Pipeline', icon: KanbanSquare, roles: ['SUPER_ADMIN', 'DIREKTUR', 'MANAJER', 'MARKETING', 'KEUANGAN', 'PRODUKSI'] },
+  { key: 'followup', label: 'Follow-up', icon: Repeat, roles: ['SUPER_ADMIN', 'DIREKTUR', 'MANAJER', 'MARKETING'] },
+  { key: 'projects', label: 'Projects', icon: FolderKanban, roles: ['SUPER_ADMIN', 'DIREKTUR', 'MANAJER', 'MARKETING', 'KEUANGAN', 'PRODUKSI', 'HR'] },
+  { key: 'quotations', label: 'Quotations', icon: FileText, roles: ['SUPER_ADMIN', 'DIREKTUR', 'MANAJER', 'MARKETING', 'KEUANGAN'] },
   { key: 'finance', label: 'Finance', icon: Wallet, roles: ['SUPER_ADMIN', 'DIREKTUR', 'KEUANGAN'] },
   { key: 'brands', label: 'Brand Configuration', icon: Building2, roles: ['SUPER_ADMIN', 'DIREKTUR'] },
   { key: 'users', label: 'User & Access', icon: UsersRound, roles: ['SUPER_ADMIN'] },
@@ -87,6 +87,26 @@ export default function Page() {
     if (user?.role === 'CLIENT' && view !== 'portal') setView('portal')
   }, [user, view, setView])
 
+  /* ---------- Badge "belum dibalas" utk nav Lead Inbox ----------
+     Polling 60 dtk (visibility-aware) + window focus; silent — bukan data kritikal. */
+  const canInbox = !!user && ['SUPER_ADMIN', 'DIREKTUR', 'MANAJER', 'MARKETING'].includes(user.role)
+  const [inboxUnread, setInboxUnread] = useState(0)
+  useEffect(() => {
+    if (!canInbox) { setInboxUnread(0); return }
+    let alive = true
+    const tick = async () => {
+      if (document.visibilityState !== 'visible') return
+      try {
+        const list = await crmApi.conversations()
+        if (alive) setInboxUnread(list.filter((c) => c.unanswered).length)
+      } catch { /* diam — badge bukan data kritikal */ }
+    }
+    void tick()
+    const iv = window.setInterval(tick, 60_000)
+    window.addEventListener('focus', tick)
+    return () => { alive = false; window.clearInterval(iv); window.removeEventListener('focus', tick) }
+  }, [canInbox])
+
   const handleLogin = async (u: UserDTO) => {
     setSession(
       { id: u.id, name: u.name, email: u.email, role: u.role, title: u.title, avatarColor: u.avatarColor, brandIds: u.brandIds, companyId: u.companyId ?? null },
@@ -126,8 +146,9 @@ export default function Page() {
 
   const role = roleMeta(user.role)
   const nav = NAV.filter(n => n.roles.includes(user.role))
-  const activeNav = nav.find(n => n.key === view) ?? nav[0]
-  const meta = VIEW_TITLES[activeNav.key]
+  // Safety net: role tanpa modul (mis. role baru lupa didaftarkan) tidak boleh crash
+  const activeNav = nav.find(n => n.key === view) ?? nav[0] ?? { key: 'dashboard' as ViewKey, label: 'Command Center', icon: LayoutDashboard, roles: [] }
+  const meta = VIEW_TITLES[activeNav.key] ?? { title: activeNav.label, subtitle: '' }
 
   const SidebarContent = (
     <div className="flex h-full flex-col">
@@ -159,7 +180,17 @@ export default function Page() {
               )}
               <Icon className={cn('h-4 w-4 shrink-0', active ? 'text-teal-300' : 'text-slate-500 group-hover:text-slate-300')} />
               <span className="flex-1 truncate">{item.label}</span>
-              {item.hint && <span className="rounded bg-white/5 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-slate-500">{item.hint}</span>}
+              {item.key === 'inbox' && inboxUnread > 0 ? (
+                <span
+                  aria-label={`${inboxUnread} percakapan belum dibalas`}
+                  title={`${inboxUnread} percakapan belum dibalas`}
+                  className="min-w-[18px] rounded-full bg-gradient-to-r from-teal-500 to-emerald-500 px-1.5 py-0.5 text-center text-[9px] font-bold leading-none text-white shadow-sm"
+                >
+                  {inboxUnread}
+                </span>
+              ) : item.hint ? (
+                <span className="rounded bg-white/5 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-slate-500">{item.hint}</span>
+              ) : null}
             </button>
           )
         })}

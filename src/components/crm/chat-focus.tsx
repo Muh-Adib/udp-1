@@ -45,6 +45,25 @@ const contactChannels = (c: Pick<ConversationListItemDTO, 'contactEmail' | 'cont
 const NONE = '__none__'
 const SCROLLBAR = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar-track]:bg-transparent'
 
+/* ============ Persistensi draft percakapan (localStorage, per user) ============
+ * Key dipisah per user agar demo multi-login di satu browser tidak saling menimpa.
+ * Nilai: Map<opportunityId, body>. Kosong → dibuang saat flush. */
+const DRAFTS_KEY_PREFIX = 'udp.inbox.drafts.v1:'
+const draftsStorageKey = (userId: string) => `${DRAFTS_KEY_PREFIX}${userId}`
+function loadDraftsFromStorage(userId: string): Map<string, string> {
+  const m = new Map<string, string>()
+  try {
+    if (typeof window === 'undefined') return m
+    const raw = window.localStorage.getItem(draftsStorageKey(userId))
+    if (!raw) return m
+    const obj = JSON.parse(raw) as Record<string, unknown>
+    for (const [k, v] of Object.entries(obj)) {
+      if (typeof v === 'string' && v.trim().length > 0) m.set(k, v)
+    }
+  } catch { /* JSON rusak / storage di-blok — mulai tanpa draft */ }
+  return m
+}
+
 /** Ikon putih utk bubble OUT (kontras di atas emerald). */
 const OUT_CHANNEL_ICON: Record<string, React.ReactNode> = {
   EMAIL: <Mail className="h-3 w-3" />,
@@ -833,7 +852,7 @@ function ManageTemplatesDialog({ open, onOpenChange, templates, currentUser, onC
 /* ================================================================== */
 /* Panel konteks lead — dipakai sidebar desktop & sheet mobile          */
 /* ================================================================== */
-function SidebarBody({ opp, briefStatus, tasks, quotations, loadingLists, onToggleTask, onOpenBrief, onNewTask, onNewQuotation, onOpenOpportunity, onSaveTimeline, timelineSaving }: {
+function SidebarBody({ opp, briefStatus, tasks, quotations, loadingLists, onToggleTask, onOpenBrief, onNewTask, onNewQuotation, onOpenOpportunity, onSaveTimeline, timelineSaving, onSaveFollowUp, followUpSaving }: {
   opp: OpportunityDetailDTO | null
   briefStatus: 'LOADING' | 'NONE' | 'DRAFT' | 'FINAL'
   tasks: TaskDTO[]
@@ -847,6 +866,9 @@ function SidebarBody({ opp, briefStatus, tasks, quotations, loadingLists, onTogg
   /** Simpan "Estimasi timeline" — sumber variabel {{estimated_timeline}} template */
   onSaveTimeline: (value: string) => Promise<void>
   timelineSaving: boolean
+  /** Simpan "Tanggal follow-up" — sumber variabel {{next_followup_date}} template */
+  onSaveFollowUp: (value: string) => Promise<void>
+  followUpSaving: boolean
 }) {
   const openTasks = tasks.filter((t) => t.status === 'OPEN' || t.status === 'IN_PROGRESS')
   /* Edit inline estimasi timeline — sumber {{estimated_timeline}} */
@@ -861,6 +883,20 @@ function SidebarBody({ opp, briefStatus, tasks, quotations, loadingLists, onTogg
       await onSaveTimeline(timelineValue)
       setTimelineEditing(false)
     } catch { /* toast di handleSaveTimeline — tetap mode edit */ }
+  }
+  /* Edit inline tanggal follow-up — sumber {{next_followup_date}} */
+  const [followUpEditing, setFollowUpEditing] = useState(false)
+  const [followUpValue, setFollowUpValue] = useState('')
+  const startFollowUpEdit = () => {
+    // Input type=date butuh 'YYYY-MM-DD' — DTO berbentuk ISO; ambil 10 char pertama
+    setFollowUpValue((opp?.followUpDate ?? '').slice(0, 10))
+    setFollowUpEditing(true)
+  }
+  const submitFollowUp = async () => {
+    try {
+      await onSaveFollowUp(followUpValue)
+      setFollowUpEditing(false)
+    } catch { /* toast di handleSaveFollowUp — tetap mode edit */ }
   }
   return (
     <div className="space-y-3 p-3">
@@ -940,6 +976,46 @@ function SidebarBody({ opp, briefStatus, tasks, quotations, loadingLists, onTogg
                     >
                       <span className={cn('min-w-0 flex-1 truncate text-xs', opp.estimatedTimeline ? 'text-slate-700' : 'italic text-slate-400')}>
                         {opp.estimatedTimeline ?? 'Belum diisi — klik utk tambah'}
+                      </span>
+                      <Pencil className="h-3 w-3 shrink-0 text-slate-300 transition-colors group-hover:text-teal-600" />
+                    </button>
+                  )}
+                </dd>
+              </div>
+              {/* Tanggal follow-up — sumber variabel {{next_followup_date}}; edit inline (input date) */}
+              <div className="flex items-start gap-2">
+                <dt className="w-24 shrink-0 pt-0.5 text-slate-400">Follow-up</dt>
+                <dd className="min-w-0 flex-1">
+                  {followUpEditing ? (
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="date"
+                        value={followUpValue}
+                        onChange={(e) => setFollowUpValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') { e.preventDefault(); void submitFollowUp() }
+                          if (e.key === 'Escape') { e.preventDefault(); setFollowUpEditing(false) }
+                        }}
+                        autoFocus
+                        className="h-7 w-full min-w-0 rounded-md border border-teal-300 bg-white px-2 text-xs text-slate-800 outline-none focus:ring-2 focus:ring-teal-400/40"
+                        aria-label="Tanggal follow-up berikutnya"
+                      />
+                      <button
+                        type="button" onClick={() => void submitFollowUp()} disabled={followUpSaving}
+                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-teal-700 text-white transition-colors hover:bg-teal-800 disabled:opacity-50"
+                        aria-label="Simpan tanggal follow-up"
+                      >
+                        {followUpSaving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button" onClick={startFollowUpEdit}
+                      title="Klik utk mengubah — dipakai variabel {{next_followup_date}} pada template"
+                      className="group flex w-full items-center gap-1 rounded-md px-1 py-0.5 text-left transition-colors hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400/40"
+                    >
+                      <span className={cn('flex min-w-0 flex-1 items-center gap-1 truncate text-xs', opp.followUpDate ? 'text-slate-700' : 'italic text-slate-400')}>
+                        {opp.followUpDate ? <><CalendarClock className="h-3 w-3 shrink-0" /> {formatDate(opp.followUpDate)}</> : 'Belum diatur — klik utk atur'}
                       </span>
                       <Pencil className="h-3 w-3 shrink-0 text-slate-300 transition-colors group-hover:text-teal-600" />
                     </button>
@@ -1106,7 +1182,8 @@ export function ChatFocusView({ conv, conversations, activeConvId, onSelectConve
   const [chatBody, setChatBody] = useState('')
   const [chatChannel, setChatChannel] = useState('WHATSAPP')
   const [chatSending, setChatSending] = useState(false)
-  // Draft per percakapan — berganti kontak via switcher tidak menghilangkan ketikan
+  // Draft per percakapan — berganti kontak via switcher tidak menghilangkan ketikan.
+  // Draft juga DIPERSIST ke localStorage (per user) agar bertahan antar refresh halaman.
   const draftsRef = useRef(new Map<string, string>())
   const [isCoarse, setIsCoarse] = useState(false)
 
@@ -1172,6 +1249,31 @@ export function ChatFocusView({ conv, conversations, activeConvId, onSelectConve
       containerRef.current?.focus({ preventScroll: true })
     }
   }, [taskOpen, quoOpen, briefOpen, infoOpen, switcherOpen])
+
+  /* Muat draft tersimpan (localStorage, per user) — HARUS sebelum efek pemulihan draft di bawah
+     agar draft ter-pulih saat view fokus pertama dibuka. */
+  const draftsLoadedRef = useRef(false)
+  useEffect(() => {
+    if (draftsLoadedRef.current) return
+    draftsLoadedRef.current = true
+    draftsRef.current = loadDraftsFromStorage(currentUser.id)
+  }, [currentUser.id])
+
+  /* Persist draft ke localStorage — interval pendek menangkap SEMUA mutasi map
+     (ketikan composer, terapkan template, kirim = hapus) tanpa menyentuh tiap call-site. */
+  useEffect(() => {
+    const key = draftsStorageKey(currentUser.id)
+    const flush = () => {
+      try {
+        const m = draftsRef.current
+        for (const [k, v] of [...m]) if (!v.trim()) m.delete(k)
+        window.localStorage.setItem(key, JSON.stringify(Object.fromEntries(m)))
+      } catch { /* storage penuh/di-blok — draft tetap hidup di memori */ }
+    }
+    const iv = window.setInterval(flush, 1500)
+    window.addEventListener('beforeunload', flush)
+    return () => { flush(); window.clearInterval(iv); window.removeEventListener('beforeunload', flush) }
+  }, [currentUser.id])
 
   /* Pindah percakapan (switcher) → pulihkan draft milik percakapan tsb + reset override kontak */
   useEffect(() => {
@@ -1360,6 +1462,24 @@ export function ChatFocusView({ conv, conversations, activeConvId, onSelectConve
     }
   }, [oppId, onActivity, toast])
 
+  /* ---------- Tanggal follow-up (sumber {{next_followup_date}}) — simpan cepat dari panel konteks ---------- */
+  const [followUpSaving, setFollowUpSaving] = useState(false)
+  const handleSaveFollowUp = useCallback(async (value: string) => {
+    setFollowUpSaving(true)
+    try {
+      // value kosong = hapus tanggal (null). Input date memberi 'YYYY-MM-DD'.
+      const updated = await crmApi.updateOpportunity(oppId, { followUpDate: value ? value : null })
+      setOppDetail((prev) => (prev ? { ...prev, followUpDate: updated.followUpDate ?? null } : prev))
+      toast({ title: 'Tanggal follow-up tersimpan', description: 'Variabel {{next_followup_date}} pada template kini punya sumber.' })
+      onActivity()
+    } catch (e) {
+      toast({ title: 'Gagal menyimpan tanggal follow-up', description: e instanceof Error ? e.message : 'Coba lagi', variant: 'destructive' })
+      throw e
+    } finally {
+      setFollowUpSaving(false)
+    }
+  }, [oppId, onActivity, toast])
+
   /* ---------- Kanal balasan ter-filter: hanya kanal yang dimiliki kontak ---------- */
   const effectiveConv = useMemo<ConversationListItemDTO>(
     () => (contactOverride ? { ...conv, ...contactOverride } : conv),
@@ -1408,6 +1528,11 @@ export function ChatFocusView({ conv, conversations, activeConvId, onSelectConve
       deadline: oppDetail?.deadline ?? null,
       ownerName: oppDetail?.ownerName ?? null,
       nextAction: oppDetail?.nextAction ?? null,
+      // Penawaran terakhir pada lead (total terformat) — sumber {{quotation_total}}
+      quotationTotal: quotations.length > 0 ? formatMoney(quotations[0].total, quotations[0].currency) : null,
+      // Rantai follow-up — sumber {{next_followup_date}}
+      followUpDate: oppDetail?.followUpDate ?? null,
+      nextActionDate: oppDetail?.nextActionDate ?? null,
     }
     const { text, missing } = interpolateTemplate(t.body, ctx)
     const next = slash
@@ -1422,7 +1547,7 @@ export function ChatFocusView({ conv, conversations, activeConvId, onSelectConve
         description: `${missing.map((k) => `{{${k}}}`).join(', ')} diisi manual — lengkapi di panel konteks lead.`,
       })
     }
-  }, [effectiveConv, currentUser.name, oppDetail, briefData, slash, chatBody, oppId, toast])
+  }, [effectiveConv, currentUser.name, oppDetail, briefData, slash, chatBody, oppId, quotations, toast])
 
   const messages = thread ?? []
 
@@ -1838,6 +1963,8 @@ export function ChatFocusView({ conv, conversations, activeConvId, onSelectConve
             onOpenOpportunity={() => onOpenOpportunity(oppId)}
             onSaveTimeline={handleSaveTimeline}
             timelineSaving={timelineSaving}
+            onSaveFollowUp={handleSaveFollowUp}
+            followUpSaving={followUpSaving}
           />
         </aside>
       </div>
@@ -1886,6 +2013,8 @@ export function ChatFocusView({ conv, conversations, activeConvId, onSelectConve
               onOpenOpportunity={() => { setInfoOpen(false); onOpenOpportunity(oppId) }}
               onSaveTimeline={handleSaveTimeline}
               timelineSaving={timelineSaving}
+              onSaveFollowUp={handleSaveFollowUp}
+              followUpSaving={followUpSaving}
             />
           </div>
         </div>

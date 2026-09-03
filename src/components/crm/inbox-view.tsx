@@ -178,6 +178,20 @@ export default function InboxView() {
   useEffect(() => { void loadDuplicates() }, [loadDuplicates])
   useEffect(() => { void loadConversations() }, [loadConversations])
 
+  /* ---------- Polling ringan (near-realtime tanpa socket) ----------
+     Daftar percakapan disegarkan tiap 30 dtk SELAMA tab terlihat, plus saat
+     window kembali fokus (mis. marketing pindah dari WA Web ke CRM). Silent —
+     tanpa spinner penuh & tanpa toast bila gagal, agar tidak mengganggu. */
+  useEffect(() => {
+    const tick = () => {
+      if (document.visibilityState !== 'visible') return
+      void loadConversations({ silent: true })
+    }
+    const iv = window.setInterval(tick, 30_000)
+    window.addEventListener('focus', tick)
+    return () => { window.clearInterval(iv); window.removeEventListener('focus', tick) }
+  }, [loadConversations])
+
   const visibleDuplicates = useMemo(
     () => duplicates.filter((d) => !dismissed.has(dupKey(d))),
     [duplicates, dismissed],
