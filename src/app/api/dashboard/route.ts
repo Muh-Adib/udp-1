@@ -16,6 +16,9 @@ const round1 = (n: number) => Math.round(n * 10) / 10
 export async function GET() {
   const session = await getSessionUser()
   if (!session) return NextResponse.json({ error: 'Belum login' }, { status: 401 })
+  if (session.role === 'CLIENT') {
+    return NextResponse.json({ error: 'Akses khusus tim internal UDP' }, { status: 403 })
+  }
 
   const now = new Date()
   const since90 = new Date(now.getTime() - 90 * DAY)

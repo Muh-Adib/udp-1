@@ -9,6 +9,12 @@ export const dynamic = 'force-dynamic'
 export async function GET(req: NextRequest) {
   const session = await getSessionUser()
   if (!session) return NextResponse.json({ error: 'Belum login' }, { status: 401 })
+  if (!['SUPER_ADMIN', 'DIREKTUR'].includes(session.role)) {
+    return NextResponse.json({ error: 'Hanya Direktur/Super Admin yang dapat melihat audit log' }, { status: 403 })
+  }
+  if (session.role === 'CLIENT') {
+    return NextResponse.json({ error: 'Akses khusus tim internal UDP' }, { status: 403 })
+  }
 
   const { searchParams } = new URL(req.url)
   const action = searchParams.get('action') ?? ''

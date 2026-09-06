@@ -19,6 +19,9 @@ const normPhone = (p?: string | null): string | null => {
 export async function GET() {
   const session = await getSessionUser()
   if (!session) return NextResponse.json({ error: 'Belum login' }, { status: 401 })
+  if (session.role === 'CLIENT') {
+    return NextResponse.json({ error: 'Akses khusus tim internal UDP' }, { status: 403 })
+  }
 
   const contacts = await db.contact.findMany({
     where: { isDeleted: false },

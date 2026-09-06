@@ -34,10 +34,12 @@ export function toSessionUser(u: {
  *  Returns null when missing/inactive → routes respond 401. */
 export async function getSessionUser(): Promise<SessionUser | null> {
   const store = await cookies()
-  const userId = store.get('crm_session')?.value
-  if (!userId) return null
+  const token = store.get('crm_session')?.value
+  if (!token) return null
+  /* Cookie berisi TOKEN SESI acak (bukan user.id) — mencegah pemalsuan cookie
+     memakai id user yang bocor di respons API. */
   const user = await db.user.findUnique({
-    where: { id: userId },
+    where: { sessionToken: token },
     include: { brandAccess: { select: { brandId: true } } },
   })
   if (!user || !user.isActive) return null

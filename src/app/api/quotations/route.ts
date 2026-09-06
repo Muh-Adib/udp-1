@@ -43,6 +43,9 @@ function computeTotals(items: ItemInput[], discountPct: number, taxPct: number) 
 export async function GET(req: NextRequest) {
   const session = await getSessionUser()
   if (!session) return NextResponse.json({ error: 'Belum login' }, { status: 401 })
+  if (session.role === 'CLIENT') {
+    return NextResponse.json({ error: 'Akses khusus tim internal UDP' }, { status: 403 })
+  }
 
   const { searchParams } = new URL(req.url)
   const status = searchParams.get('status') ?? ''

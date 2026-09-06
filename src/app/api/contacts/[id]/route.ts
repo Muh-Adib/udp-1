@@ -12,6 +12,9 @@ const STRING_FIELDS = ['lastName', 'position', 'email', 'altEmail', 'whatsapp', 
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await getSessionUser()
   if (!session) return NextResponse.json({ error: 'Belum login' }, { status: 401 })
+  if (session.role === 'CLIENT') {
+    return NextResponse.json({ error: 'Akses khusus tim internal UDP' }, { status: 403 })
+  }
 
   const { id } = await ctx.params
   const contact = await db.contact.findFirst({ where: { id, isDeleted: false } })

@@ -1,5 +1,6 @@
 /* ============ /api/session — login (POST), current user (GET), logout (DELETE) ============ */
 import { NextRequest, NextResponse } from 'next/server'
+import { randomBytes } from 'crypto'
 import { db } from '@/lib/db'
 import { getSessionUser, toSessionUser } from '@/lib/crm-server'
 import { logAudit } from '@/lib/audit'
@@ -49,8 +50,12 @@ export async function POST(req: NextRequest) {
     req,
   })
 
+  /* Token sesi acak per login — login baru mengganti token lama (sesi lama hangus). */
+  const token = randomBytes(24).toString('hex')
+  await db.user.update({ where: { id: user.id }, data: { sessionToken: token } })
+
   const res = NextResponse.json({ user: toSessionUser(user) })
-  res.cookies.set(COOKIE, user.id, COOKIE_OPTS)
+  res.cookies.set(COOKIE, token, COOKIE_OPTS)
   return res
 }
 
@@ -67,6 +72,8 @@ export async function DELETE(req: NextRequest) {
       entityLabel: session.name,
       req,
     })
+    /* Invalidasi token di server — cookie kosong saja tidak cukup. */
+    await db.user.update({ where: { id: session.id }, data: { sessionToken: null } }).catch(() => null)
   }
   const res = NextResponse.json({ ok: true })
   res.cookies.set(COOKIE, '', { ...COOKIE_OPTS, maxAge: 0 })

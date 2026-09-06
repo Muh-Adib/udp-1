@@ -57,6 +57,9 @@ function normalizeText(v: unknown): string | null {
 export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await getSessionUser()
   if (!session) return NextResponse.json({ error: 'Belum login' }, { status: 401 })
+  if (session.role === 'CLIENT') {
+    return NextResponse.json({ error: 'Akses khusus tim internal UDP' }, { status: 403 })
+  }
   if (!INTERNAL_ROLES.includes(session.role)) {
     return NextResponse.json({ error: 'Hanya tim internal yang dapat mengakses brief' }, { status: 403 })
   }

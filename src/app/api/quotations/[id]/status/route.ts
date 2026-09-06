@@ -14,6 +14,9 @@ export const dynamic = 'force-dynamic'
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await getSessionUser()
   if (!session) return NextResponse.json({ error: 'Belum login' }, { status: 401 })
+  if (session.role === 'CLIENT') {
+    return NextResponse.json({ error: 'Akses khusus tim internal UDP' }, { status: 403 })
+  }
 
   const { id } = await ctx.params
   const quotation = await db.quotation.findFirst({ where: { id }, include: quotationInclude })

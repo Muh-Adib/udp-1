@@ -10,6 +10,14 @@ export const dynamic = 'force-dynamic'
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await getSessionUser()
   if (!session) return NextResponse.json({ error: 'Belum login' }, { status: 401 })
+  if (session.role === 'CLIENT') {
+    return NextResponse.json({ error: 'Akses khusus tim internal UDP' }, { status: 403 })
+  }
+
+  /* Hanya peran produksi/manajemen yang mengubah project — sesuai UI (canManage). */
+  if (!['SUPER_ADMIN', 'DIREKTUR', 'PRODUKSI'].includes(session.role)) {
+    return NextResponse.json({ error: 'Anda tidak memiliki izin mengubah project' }, { status: 403 })
+  }
 
   const { id } = await ctx.params
   const project = await db.project.findUnique({

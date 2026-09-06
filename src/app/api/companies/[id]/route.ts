@@ -15,6 +15,9 @@ const EDITABLE = ['name', 'industry', 'website', 'country', 'city', 'address', '
 export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await getSessionUser()
   if (!session) return NextResponse.json({ error: 'Belum login' }, { status: 401 })
+  if (session.role === 'CLIENT') {
+    return NextResponse.json({ error: 'Akses khusus tim internal UDP' }, { status: 403 })
+  }
 
   const { id } = await ctx.params
   const company = await db.company.findFirst({

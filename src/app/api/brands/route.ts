@@ -13,6 +13,9 @@ export const dynamic = 'force-dynamic'
 export async function GET() {
   const session = await getSessionUser()
   if (!session) return NextResponse.json({ error: 'Belum login' }, { status: 401 })
+  if (session.role === 'CLIENT') {
+    return NextResponse.json({ error: 'Akses khusus tim internal UDP' }, { status: 403 })
+  }
 
   const brands = await db.brand.findMany({
     include: { services: { orderBy: [{ category: 'asc' }, { name: 'asc' }] } },

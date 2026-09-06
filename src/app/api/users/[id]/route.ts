@@ -12,6 +12,9 @@ const ROLES = ['SUPER_ADMIN', 'DIREKTUR', 'MANAJER', 'MARKETING', 'KEUANGAN', 'P
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await getSessionUser()
   if (!session) return NextResponse.json({ error: 'Belum login' }, { status: 401 })
+  if (session.role === 'CLIENT') {
+    return NextResponse.json({ error: 'Akses khusus tim internal UDP' }, { status: 403 })
+  }
   if (session.role !== 'SUPER_ADMIN') {
     return NextResponse.json({ error: 'Hanya Super Admin yang dapat mengubah user' }, { status: 403 })
   }

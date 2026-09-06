@@ -39,6 +39,7 @@ import {
   AlertTriangle, Building, Building2, Briefcase, Calendar, Clock, Copy, ExternalLink,
   Globe, Hash, Languages, Linkedin, Loader2, Mail, MapPin, MessageCircle, Phone, Plus,
   Search, Star, Target, User, UserPlus, Users, Wallet, Trophy, X,
+  Pencil,
 } from 'lucide-react'
 
 /* ---------- Local constants ---------- */
@@ -317,6 +318,78 @@ export default function ContactsView() {
 
   /* ----- contact detail dialog ----- */
   const [selectedContact, setSelectedContact] = useState<ContactDTO | null>(null)
+  /* ---------- Edit kontak (audit): perbaiki lead yang masuk tanpa nama/tidak lengkap ---------- */
+  const [editContact, setEditContact] = useState<ContactDTO | null>(null)
+  const [editForm, setEditForm] = useState<ContactFormState>(EMPTY_CONTACT_FORM)
+  const [editSubmitting, setEditSubmitting] = useState(false)
+
+  const openEditContact = useCallback((c: ContactDTO) => {
+    setEditContact(c)
+    setEditForm({
+      firstName: c.firstName,
+      lastName: c.lastName ?? '',
+      position: c.position ?? '',
+      email: c.email ?? '',
+      whatsapp: c.whatsapp ?? '',
+      instagram: c.instagram ?? '',
+      threads: c.threads ?? '',
+      phone: c.phone ?? '',
+      companyId: c.companyId ?? 'NONE',
+      country: c.country ?? 'Indonesia',
+      city: c.city ?? '',
+      language: c.language ?? 'id',
+      preferredChannel: c.preferredChannel ?? 'WHATSAPP',
+      tags: c.tags.join(', '),
+    })
+  }, [])
+
+  const submitEditContact = async () => {
+    if (!editContact) return
+    if (!editForm.firstName.trim()) {
+      toast({ title: 'Nama depan wajib diisi', variant: 'destructive' })
+      return
+    }
+    const email = editForm.email.trim()
+    if (email && !email.includes('@')) {
+      toast({ title: 'Format email tidak valid', variant: 'destructive' })
+      return
+    }
+    setEditSubmitting(true)
+    try {
+      const updated = await crmApi.updateContact(editContact.id, {
+        firstName: editForm.firstName.trim(),
+        lastName: editForm.lastName.trim() || null,
+        position: editForm.position.trim() || null,
+        email: email || null,
+        whatsapp: editForm.whatsapp.trim() || null,
+        instagram: editForm.instagram.trim() || null,
+        threads: editForm.threads.trim() || null,
+        phone: editForm.phone.trim() || null,
+        companyId: editForm.companyId !== 'NONE' ? editForm.companyId : null,
+        country: editForm.country.trim() || 'Indonesia',
+        city: editForm.city.trim() || null,
+        language: editForm.language,
+        preferredChannel: editForm.preferredChannel,
+        tags: editForm.tags,
+      })
+      toast({ title: 'Kontak diperbarui', description: `${updated.fullName} berhasil disimpan.` })
+      setEditContact(null)
+      setSelectedContact((prev) => (prev && prev.id === updated.id ? updated : prev))
+      void loadContacts(true)
+      void loadCompanies(true)
+      if (updated.companyId && sheetOpen && sheetCompanyId === updated.companyId) {
+        void fetchDetail(updated.companyId, true)
+      }
+    } catch (e) {
+      toast({
+        title: 'Gagal memperbarui kontak',
+        description: e instanceof Error ? e.message : 'Terjadi kesalahan',
+        variant: 'destructive',
+      })
+    } finally {
+      setEditSubmitting(false)
+    }
+  }
 
   /* ----- create opportunity dialog ----- */
   const [oppDialogContact, setOppDialogContact] = useState<ContactDTO | null>(null)
@@ -1458,6 +1531,88 @@ export default function ContactsView() {
         </DialogContent>
       </Dialog>
 
+      {/* ---------- Dialog Ubah Kontak ---------- */}
+      <Dialog open={!!editContact} onOpenChange={(o) => { if (!o) setEditContact(null) }}>
+        <DialogContent className={cn('max-h-[90vh] overflow-y-auto rounded-xl sm:max-w-lg', SCROLLBAR)}>
+          <DialogHeader>
+            <DialogTitle>Ubah Kontak</DialogTitle>
+            <DialogDescription>
+              Perbaiki data kontak lead yang masuk — mis. nama kosong, email salah, atau perusahaan belum terhubung.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Field label="Nama Depan" required>
+              <Input value={editForm.firstName} onChange={(e) => setEditForm((f) => ({ ...f, firstName: e.target.value }))} placeholder="cth. Siti" />
+            </Field>
+            <Field label="Nama Belakang">
+              <Input value={editForm.lastName} onChange={(e) => setEditForm((f) => ({ ...f, lastName: e.target.value }))} placeholder="cth. Rahayu" />
+            </Field>
+            <Field label="Posisi">
+              <Input value={editForm.position} onChange={(e) => setEditForm((f) => ({ ...f, position: e.target.value }))} placeholder="cth. Brand Manager" />
+            </Field>
+            <Field label="Email">
+              <Input type="email" value={editForm.email} onChange={(e) => setEditForm((f) => ({ ...f, email: e.target.value }))} placeholder="nama@perusahaan.com" />
+            </Field>
+            <Field label="WhatsApp">
+              <Input value={editForm.whatsapp} onChange={(e) => setEditForm((f) => ({ ...f, whatsapp: e.target.value }))} placeholder="cth. +62 812 3456 7890" />
+            </Field>
+            <Field label="Telepon">
+              <Input value={editForm.phone} onChange={(e) => setEditForm((f) => ({ ...f, phone: e.target.value }))} placeholder="cth. +62 21 555 0123" />
+            </Field>
+            <Field label="Instagram">
+              <Input value={editForm.instagram} onChange={(e) => setEditForm((f) => ({ ...f, instagram: e.target.value }))} placeholder="@akun" />
+            </Field>
+            <Field label="Threads">
+              <Input value={editForm.threads} onChange={(e) => setEditForm((f) => ({ ...f, threads: e.target.value }))} placeholder="@akun" />
+            </Field>
+            <Field label="Perusahaan" className="sm:col-span-2">
+              <Select value={editForm.companyId} onValueChange={(v) => setEditForm((f) => ({ ...f, companyId: v }))}>
+                <SelectTrigger><SelectValue placeholder="— Tanpa perusahaan —" /></SelectTrigger>
+                <SelectContent className={cn('max-h-64 overflow-y-auto', SCROLLBAR)}>
+                  <SelectItem value="NONE">— Tanpa perusahaan —</SelectItem>
+                  {companyOptions.map((co) => (
+                    <SelectItem key={co.id} value={co.id}>
+                      {co.name}{co.country ? ` · ${co.country}` : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-slate-400">Hubungkan kontak ke perusahaan yang tepat agar riwayat deal & portal client tersambung.</p>
+            </Field>
+            <Field label="Negara">
+              <Input value={editForm.country} onChange={(e) => setEditForm((f) => ({ ...f, country: e.target.value }))} placeholder="cth. Indonesia" />
+            </Field>
+            <Field label="Kota">
+              <Input value={editForm.city} onChange={(e) => setEditForm((f) => ({ ...f, city: e.target.value }))} placeholder="cth. Bandung" />
+            </Field>
+            <Field label="Kanal Preferensi">
+              <Select value={editForm.preferredChannel} onValueChange={(v) => setEditForm((f) => ({ ...f, preferredChannel: v }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {CHANNELS.map((c) => (
+                    <SelectItem key={c.key} value={c.key}>{c.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Tags">
+              <Input value={editForm.tags} onChange={(e) => setEditForm((f) => ({ ...f, tags: e.target.value }))} placeholder="pisahkan dengan koma" />
+            </Field>
+          </div>
+          <DialogFooter className="gap-2 sm:gap-2">
+            <Button variant="outline" onClick={() => setEditContact(null)} disabled={editSubmitting}>Batal</Button>
+            <Button
+              onClick={() => void submitEditContact()}
+              disabled={editSubmitting}
+              className="bg-teal-600 text-white hover:bg-teal-700"
+            >
+              {editSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
+              Simpan Perubahan
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* ---------- Dialog Detail Kontak ---------- */}
       <Dialog open={!!selectedContact} onOpenChange={(o) => { if (!o) setSelectedContact(null) }}>
         <DialogContent className={cn('max-h-[90vh] overflow-y-auto rounded-xl sm:max-w-lg', SCROLLBAR)}>
@@ -1522,7 +1677,16 @@ export default function ContactsView() {
                 )}
               </div>
 
-              <DialogFooter className="flex-row items-center justify-start gap-2 sm:justify-start">
+              <DialogFooter className="flex-row flex-wrap items-center justify-start gap-2 sm:justify-start">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => openEditContact(selectedContact)}
+                  className="gap-1.5"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                  Ubah Kontak
+                </Button>
                 <Button
                   variant="outline"
                   size="sm"

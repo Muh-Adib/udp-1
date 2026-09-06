@@ -851,3 +851,23 @@ Stage Summary:
 - ChunkLoadError tuntas (stale cache+reaper); git sinkron dgn PAT baru; semua fitur R22 terverifikasi hidup. Tambahan R23: role Manajer/HR kini BENAR-benar bisa login (bug nav crash diperbaiki), badge belum-dibalas di nav inbox, inbox polling near-realtime, draft chat persist antar sesi, 2 variabel template baru dgn sumber nyata + field follow-up editable dari panel konteks.
 - Risiko: (1) transport IM memangkas output — QA berbasis teks raw bisa menyesatkan; selalu pakai grep -F/hex utk verifikasi string; (2) prisma client bisa stale lagi bila schema berubah tanpa generate — selalu bunx prisma generate + rm tsconfig.tsbuildinfo; (3) sandbox reaper masih mematikan dev server antar call; (4) polling bukan realtime sejati.
 - Rekomendasi berikutnya: (a) kirim balasan nyata per kanal (WA/IG API — simulasi status SENT saat ini); (b) tombol "Buat Invoice" dari penawaran ACCEPTED di sidebar chat; (c) socket.io utk realtime inbox + badge; (d) Reports per-brand (rekomendasi lama); (e) attachment/multi-file upload di composer chat; (f) kelola template utk MANAJER di modul terpisah.
+---
+Task ID: R24-audit
+Agent: Z.ai Code (Safety Auditor + Bug Hunter)
+Task: Audit keamanan/stabilitas menyeluruh + perbaikan aman + fitur Ubah Kontak (lead tanpa nama). Pulihkan R22/R23 dari GitHub setelah insiden rollback sandbox.
+
+Work Log:
+- INSIDEN ROLLBACK (penting utk user): sandbox lokal kehilangan SEMUA perubahan tak-komit (kode+DB+worklog kembali ke R21). Untung R22 (1ab3c13) & R23 (a15929f) TELAH TERPUSH ke GitHub sebelumnya → dipulihkan via `git reset --hard origin/main` + re-run scripts/team-migration.ts (9 akun tim + 4 template /keyword upsert idempotent) + prisma db push (schema R23 + sessionToken). Tidak ada data user hilang; data deal/penawaran utuh.
+- FIX CRITICAL 1 — Sesi token: cookie crm_session tadinya = user.id MENTAH (id bocor di banyak respons API → cookie bisa dipalsukan jadi SUPER_ADMIN apa pun). Kini User.sessionToken acak 48-char dibuat saat login, cookie = token, getSessionUser lookup by token, logout menghapus token. Verifikasi: cookie=user.id → 401; token asli → 200; re-login menghanguskan token lama → 401. UX login tidak berubah (tetap email demo).
+- FIX CRITICAL 2 — Kebocoran data ke CLIENT: 36 route internal tanpa cek role CLIENT (portal user bisa GET users/audit-logs/opportunities semua perusahaan/quotations/finance, POST merge destruktif, dll). Kini semua → 403 utk CLIENT; /api/portal* tetap 200. Verifikasi curl 12 endpoint.
+- FIX HIGH 3 — PATCH /api/projects/[id] tadinya tanpa role check → kini hanya SUPER_ADMIN/DIREKTUR/PRODUKSI (sesuai canManage UI).
+- FIX HIGH 4 — /api/audit-logs kini hanya SUPER_ADMIN/DIREKTUR (sebelumnya semua internal; sesuai nav UI).
+- FIX (permintaan user) — Ubah Kontak di Contacts view: dialog detail kontak kini punya tombol "Ubah Kontak" → form lengkap (nama, posisi, email+validasi, WA, telp, IG, Threads, PERUSAHAAN bisa dihubungkan, kota/negara, kanal, tags) via PATCH /api/contacts/[id] + api-client.updateContact. Detail langsung memperlihatkan data baru; daftar & sheet perusahaan ikut segar; audit UPDATE tercatat. E2E: Ratih Puspita — posisi & Instagram tersimpan di DB.
+- REGRESI DIPERBAIKI: page.tsx korup (mobileNavOpen/hydrate deps) ditemukan saat audit & diperbaiki — tsconfig.tsbuildinfo basi menyamarkannya; kini rm tsbuildinfo rutin sebelum tsc.
+- E2E browser: login Fadel → badge nav "8 percakapan belum dibalas" (R23) ✓; contacts edit ✓; inbox chat LINTAS SUMBER + verifikasi "Dicatat manual" + kanal pengiriman milik kontak ✓; /terimakasih → interpolasi penuh (contact/company/service/brand/marketing) ✓; CLIENT portal 200 ✓; mobile 390px overflow=false ✓.
+- VERIFIKASI: tsc 0 error (src), eslint exit 0, dev.log 0 error, GET / 200.
+- TIDAK DIUBAH (keputusan user diperlukan): (1) login masih email-only demo — utk pemakaian nyata perlu password/SSO (perubahan UX besar); (2) /api/bootstrap tetap terbuka (dibutuhkan login picker demo) — mengekspos daftar user demo; (3) cookie `secure` flag menyusul saat deploy https penuh.
+
+Stage Summary:
+- Project kini: R23 penuh (role Manajer/HR + 9 akun, template /keyword, verifikasi lintas sumber, badge/polling/draft) + 4 perbaikan keamanan + fitur Ubah Kontak. SEMUA sudah di-commit & di-push (anti-rollback).
+- Next round (keputusan user): (a) rebuild backend+UI R24: daftar brief (DRAFT/FINAL terlihat tim), milestone dgn lampiran + estimasi waktu + generate AI (koneksi URL+apikey diatur Direktur), pengaturan jenis pajak (PPh 21 dsb) oleh Direktur, alur project per role; (b) password login; (c) simulasi lead tanpa nama → alur perbaikan kontak sudah siap.
