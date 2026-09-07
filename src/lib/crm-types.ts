@@ -209,6 +209,7 @@ export interface TaskDTO {
   companyName?: string | null
   completedAt?: string | null
   createdAt: string
+  attachments?: TaskAttachmentDTO[]
 }
 
 export interface NoteDTO {
@@ -226,7 +227,40 @@ export interface MilestoneDTO {
   name: string
   stepOrder: number
   status: string
+  description?: string | null
+  estimatedDays?: number | null
+  startDate?: string | null
   dueDate?: string | null
+  completedAt?: string | null
+  attachmentCount?: number
+  attachments?: MilestoneAttachmentDTO[]
+}
+
+export interface MilestoneAttachmentDTO {
+  id: string
+  name: string
+  mimeType: string
+  size: number
+  dataUrl?: string
+  uploadedByName?: string | null
+  createdAt: string
+}
+
+export interface TaskAttachmentDTO {
+  id: string
+  name: string
+  mimeType: string
+  size: number
+  dataUrl?: string
+  uploadedByName?: string | null
+  createdAt: string
+}
+
+export interface ProjectCreateMilestoneInput {
+  name: string
+  description?: string
+  estimatedDays?: number
+  dueDate?: string
 }
 
 export interface ProjectDTO {
@@ -243,6 +277,7 @@ export interface ProjectDTO {
   companyId: string
   companyName: string
   managerName?: string | null
+  opportunityId: string
   opportunityCode: string
   startDate?: string | null
   endDate?: string | null

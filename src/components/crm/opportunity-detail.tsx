@@ -25,6 +25,7 @@ import {
 } from './shared'
 import { crmApi } from './api-client'
 import { BriefEstimationTab } from './brief-estimation-tab'
+import { ProjectBuilder } from './project-builder'
 import { useCrmStore } from './crm-store'
 import type { OpportunityDetailDTO, OpportunityAiSummaryDTO, Stage, Temperature, Priority, ContactDTO } from '@/lib/crm-types'
 import {
@@ -34,7 +35,7 @@ import {
 } from '@/lib/crm-constants'
 import {
   Building2, User, Mail, MessageCircle, MoreVertical, AlertTriangle, CheckCircle2, Circle,
-  Clock, Copy, Loader2, Plus, Send, Sparkles, Trash2, Settings2, CalendarClock, Paperclip, Link2, CornerDownRight, X, Calculator,
+  Clock, Copy, Loader2, Plus, Send, Sparkles, Trash2, Settings2, CalendarClock, Paperclip, Link2, CornerDownRight, X, Calculator, ClipboardList,
 } from 'lucide-react'
 
 const SCROLLBAR = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300'
@@ -113,6 +114,7 @@ export function OpportunityDetailDrawer({ opportunityId, open, onClose, onChange
   const [lostForm, setLostForm] = useState<LostForm>(EMPTY_LOST)
   const [wonOpen, setWonOpen] = useState(false)
   const [wonOffer, setWonOffer] = useState('')
+  const [builderOpen, setBuilderOpen] = useState(false)
   const [priorityOpen, setPriorityOpen] = useState(false)
   const [priPriority, setPriPriority] = useState<Priority>('MEDIUM')
   const [priTemperature, setPriTemperature] = useState<Temperature>('WARM')
@@ -124,6 +126,11 @@ export function OpportunityDetailDrawer({ opportunityId, open, onClose, onChange
 
   const users = useCrmStore((s) => s.users)
   const activeUsers = useMemo(() => users.filter((u) => u.isActive), [users])
+  /* Project milik opportunity INI (detail.projects memuat semua project satu perusahaan) */
+  const ownProjects = useMemo(
+    () => (detail?.projects ?? []).filter((p) => p.opportunityId === detail?.id),
+    [detail]
+  )
 
   /* ---------- data ---------- */
   const load = useCallback(async () => {
@@ -199,7 +206,7 @@ export function OpportunityDetailDrawer({ opportunityId, open, onClose, onChange
 
   const confirmWon = () => {
     const offer = Number(wonOffer)
-    void doChangeStage('WON', offer > 0 ? { lastOfferValue: offer } : {}, '🎉 Deal Won! Project produksi dibuat otomatis')
+    void doChangeStage('WON', offer > 0 ? { lastOfferValue: offer } : {}, '🎉 Deal Won! Kini siap dibuat project-nya dari brief')
   }
 
   /* ---------- priority / next action / delete ---------- */
@@ -742,15 +749,30 @@ export function OpportunityDetailDrawer({ opportunityId, open, onClose, onChange
                   )}
                 </div>
 
-                {/* Projects */}
+                {/* Projects — hanya milik opportunity ini (bukan semua project perusahaan) */}
                 <div>
                   <Separator className="mb-4" />
                   <h3 className="text-sm font-semibold text-slate-800">Projects Terkait</h3>
-                  {detail.projects.length === 0 ? (
-                    <p className="mt-2 text-xs text-slate-400">Belum ada project — project dibuat otomatis saat deal Won.</p>
+                  {ownProjects.length === 0 ? (
+                    <div className="mt-2 rounded-xl border border-dashed border-slate-300 bg-slate-50/60 p-4">
+                      {detail.stage === 'WON' ? (
+                        <>
+                          <p className="text-xs text-slate-500">Deal ini sudah <span className="font-semibold text-emerald-700">Won</span> tapi belum punya project produksi.</p>
+                          <Button
+                            size="sm"
+                            className="mt-2 gap-1.5 bg-teal-700 hover:bg-teal-800"
+                            onClick={() => setBuilderOpen(true)}
+                          >
+                            <ClipboardList className="h-4 w-4" /> Buat Project dari Brief
+                          </Button>
+                        </>
+                      ) : (
+                        <p className="text-xs text-slate-400">Belum ada project — project dibuat dari tombol “Buat Project” setelah deal Won.</p>
+                      )}
+                    </div>
                   ) : (
                     <div className="mt-2 space-y-3">
-                      {detail.projects.map((p) => {
+                      {ownProjects.map((p) => {
                         const st = projectStatusMeta(p.status)
                         return (
                           <div key={p.id} className="rounded-xl border border-slate-200 bg-white p-4">
@@ -1063,7 +1085,7 @@ export function OpportunityDetailDrawer({ opportunityId, open, onClose, onChange
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
               <DialogTitle>Tandai WON?</DialogTitle>
-              <DialogDescription>Project akan dibuat otomatis dengan milestone sesuai workflow brand ({detail?.brandName}).</DialogDescription>
+              <DialogDescription>Selamat! Setelah Won, buka kembali deal ini dan klik “Buat Project dari Brief” untuk memulai produksi.</DialogDescription>
             </DialogHeader>
             <div>
               <p className="mb-1 text-xs text-slate-500">Nilai final / last offer (opsional — finalize nilai deal)</p>
@@ -1084,6 +1106,15 @@ export function OpportunityDetailDrawer({ opportunityId, open, onClose, onChange
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* ---------- Dialog: Project Builder (Won → Buat Project dari Brief) ---------- */}
+        <ProjectBuilder
+          open={builderOpen}
+          onOpenChange={setBuilderOpen}
+          opportunity={detail}
+          users={activeUsers}
+          onCreated={() => { void load(); onChanged?.() }}
+        />
 
         {/* ---------- Dialog: Prioritas ---------- */}
         <Dialog open={priorityOpen} onOpenChange={setPriorityOpen}>

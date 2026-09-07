@@ -8,7 +8,7 @@ import type {
   InteractionDTO, TaskDTO, NoteDTO, ProjectDTO, TemplateDTO, AuditLogDTO,
   Stage, Temperature, Priority, Role,
   QuotationDTO, QuotationDetailDTO, QuotationItemDTO, InvoiceDTO, PaymentDTO,
-  QuickTemplateDTO,
+  QuickTemplateDTO, MilestoneDTO, MilestoneAttachmentDTO,
 } from './crm-types'
 
 /* ---------------- Session ---------------- */
@@ -136,17 +136,104 @@ export const taskInclude = {
   opportunity: { select: { id: true, title: true, company: { select: { name: true } } } },
 } satisfies Prisma.TaskInclude
 
+/** Task detail — termasuk lampiran (dengan dataUrl utk download). */
+export const taskDetailInclude = {
+  ...taskInclude,
+  attachments: { orderBy: { createdAt: 'asc' as const } },
+} satisfies Prisma.TaskInclude
+
 export type TaskWithRelations = Prisma.TaskGetPayload<{ include: typeof taskInclude }>
+
+export type TaskDetailWithRelations = Prisma.TaskGetPayload<{ include: typeof taskDetailInclude }>
 
 export const projectInclude = {
   brand: { select: { id: true, name: true, color: true } },
   company: { select: { id: true, name: true } },
   manager: { select: { id: true, name: true } },
   opportunity: { select: { id: true, code: true } },
-  milestones: { orderBy: { stepOrder: 'asc' as const } },
+  milestones: {
+    orderBy: { stepOrder: 'asc' as const },
+    include: { _count: { select: { attachments: true } } },
+  },
+} satisfies Prisma.ProjectInclude
+
+/** Project detail — milestone memuat lampiran penuh (dataUrl) utk dialog detail. */
+export const projectDetailInclude = {
+  ...projectInclude,
+  milestones: {
+    orderBy: { stepOrder: 'asc' as const },
+    include: { attachments: { orderBy: { createdAt: 'asc' as const } } },
+  },
 } satisfies Prisma.ProjectInclude
 
 export type ProjectWithRelations = Prisma.ProjectGetPayload<{ include: typeof projectInclude }>
+
+export type ProjectDetailWithRelations = Prisma.ProjectGetPayload<{ include: typeof projectDetailInclude }>
+
+/* ----- Matriks role untuk alur project ----- */
+/** Kelola struktur project/milestone: PM, budget, tanggal, tambah/hapus milestone. */
+export const PROJECT_MANAGERS = ['SUPER_ADMIN', 'DIREKTUR', 'MANAJER'] as const
+/** Pekerja milestone: manajer + tim produksi (ubah status milestone & lampiran). */
+export const MILESTONE_WORKERS = ['SUPER_ADMIN', 'DIREKTUR', 'MANAJER', 'PRODUKSI'] as const
+
+/* ----- Lampiran (data-URL base64 ≤2MB, MIME whitelist) ----- */
+const MIME_RE = /^(image\/(png|jpe?g|gif|webp|svg\+xml)|application\/pdf|application\/(msword|vnd\.openxmlformats-officedocument\.wordprocessingml\.document|vnd\.ms-excel|vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet|vnd\.ms-powerpoint|vnd\.openxmlformats-officedocument\.presentationml\.presentation|zip|x-7z-compressed|rar|rtf)|text\/(plain|csv))$/
+export const MAX_ATTACHMENT_CHARS = 2_800_000 // ~2MB binary saat base64
+
+/** Validasi body lampiran data-URL. Return string pesan error, atau null jika valid. */
+export function validateAttachmentBody(body: {
+  name?: unknown; mimeType?: unknown; size?: unknown; dataUrl?: unknown
+}): { name: string; mimeType: string; size: number; dataUrl: string } | string {
+  const { name, mimeType, size, dataUrl } = body ?? {}
+  if (typeof name !== 'string' || !name.trim() || name.length > 200) return 'Nama file wajib (≤200 karakter)'
+  if (typeof mimeType !== 'string' || !MIME_RE.test(mimeType)) return 'Tipe file tidak diizinkan'
+  if (typeof dataUrl !== 'string' || !new RegExp(`^data:${mimeType.replace(/[+/]/g, '\\$&')};base64,[A-Za-z0-9+/=]+$`).test(dataUrl))
+    return 'Format data URL tidak valid'
+  if (typeof size !== 'number' || size <= 0) return 'Ukuran file tidak valid'
+  if (dataUrl.length > MAX_ATTACHMENT_CHARS) return 'File terlalu besar (maksimal 2MB)'
+  return { name: name.trim(), mimeType, size: Math.round(size), dataUrl }
+}
+
+/** Progress project = milestone DONE / total × 100 (dibulatkan). */
+export function calcProgress(done: number, total: number): number {
+  if (total <= 0) return 0
+  return Math.round((done / total) * 100)
+}
+
+export function mapAttachment(a: {
+  id: string; name: string; mimeType: string; size: number
+  dataUrl: string; uploadedByName?: string | null; createdAt: Date
+}): MilestoneAttachmentDTO {
+  return {
+    id: a.id, name: a.name, mimeType: a.mimeType, size: a.size,
+    dataUrl: a.dataUrl, uploadedByName: a.uploadedByName ?? null,
+    createdAt: a.createdAt.toISOString(),
+  }
+}
+
+export function mapMilestone(m: {
+  id: string; name: string; stepOrder: number; status: string
+  description?: string | null; estimatedDays?: number | null
+  startDate?: Date | null; dueDate?: Date | null; completedAt?: Date | null
+  attachments?: unknown[]; _count?: { attachments: number }
+}): MilestoneDTO {
+  const out: MilestoneDTO = {
+    id: m.id,
+    name: m.name,
+    stepOrder: m.stepOrder,
+    status: m.status,
+    description: m.description ?? null,
+    estimatedDays: m.estimatedDays ?? null,
+    startDate: iso(m.startDate),
+    dueDate: iso(m.dueDate),
+    completedAt: iso(m.completedAt),
+  }
+  if (m._count) out.attachmentCount = m._count.attachments
+  if (Array.isArray(m.attachments)) {
+    out.attachments = (m.attachments as Parameters<typeof mapAttachment>[0][]).map(mapAttachment)
+  }
+  return out
+}
 
 export const noteInclude = {
   author: { select: { id: true, name: true, avatarColor: true } },
@@ -374,6 +461,9 @@ export function mapTask(t: TaskWithRelations): TaskDTO {
     companyName: t.opportunity?.company?.name ?? null,
     completedAt: iso(t.completedAt),
     createdAt: t.createdAt.toISOString(),
+    ...(Array.isArray((t as unknown as { attachments?: unknown[] }).attachments)
+      ? { attachments: (((t as unknown as { attachments: Parameters<typeof mapAttachment>[0][] })).attachments).map(mapAttachment) }
+      : {}),
   }
 }
 
@@ -389,7 +479,7 @@ export function mapNote(n: NoteWithRelations): NoteDTO {
   }
 }
 
-export function mapProject(p: ProjectWithRelations): ProjectDTO {
+export function mapProject(p: ProjectWithRelations | ProjectDetailWithRelations): ProjectDTO {
   return {
     id: p.id,
     name: p.name,
@@ -404,16 +494,11 @@ export function mapProject(p: ProjectWithRelations): ProjectDTO {
     companyId: p.companyId,
     companyName: p.company.name,
     managerName: p.manager?.name ?? null,
+    opportunityId: p.opportunityId,
     opportunityCode: p.opportunity.code,
     startDate: iso(p.startDate),
     endDate: iso(p.endDate),
-    milestones: p.milestones.map((m) => ({
-      id: m.id,
-      name: m.name,
-      stepOrder: m.stepOrder,
-      status: m.status,
-      dueDate: iso(m.dueDate),
-    })),
+    milestones: p.milestones.map((m) => mapMilestone(m)),
   }
 }
 

@@ -16,10 +16,10 @@ import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { channelMeta, formatDate, formatMoney as fm, TASK_TYPES, daysUntil, isOverdueNow } from '@/lib/crm-constants'
-import type { TaskDTO, TemplateDTO, OpportunityDTO, UserDTO } from '@/lib/crm-types'
+import { channelMeta, formatDate, formatMoney as fm, TASK_TYPES, daysUntil, isOverdueNow, PRIORITIES } from '@/lib/crm-constants'
+import type { TaskAttachmentDTO, TaskDTO, TemplateDTO, OpportunityDTO, UserDTO } from '@/lib/crm-types'
 import { cn } from '@/lib/utils'
-import { CalendarClock, CheckCheck, ChevronDown, Clock, ListTodo, Loader2, Plus, Repeat, Sparkles } from 'lucide-react'
+import { CalendarClock, CheckCheck, ChevronDown, Clock, Download, ListTodo, Loader2, Paperclip, Plus, Repeat, Sparkles, Trash2, Upload } from 'lucide-react'
 
 const TEMPLATE_VARS = ['{{contact_name}}', '{{company_name}}', '{{brand_name}}', '{{service_name}}', '{{marketing_name}}', '{{estimated_timeline}}', '{{proposal_link}}', '{{meeting_link}}']
 
@@ -39,6 +39,7 @@ export default function FollowUpView() {
 
   const [newTaskOpen, setNewTaskOpen] = useState(false)
   const [newTplOpen, setNewTplOpen] = useState(false)
+  const [detailTaskId, setDetailTaskId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -101,7 +102,13 @@ export default function FollowUpView() {
         </button>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
-            <p className={cn('text-[13px] font-medium text-slate-800', task.status === 'DONE' && 'line-through opacity-50')}>{task.title}</p>
+            <button
+              className="min-w-0 max-w-full truncate rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
+              onClick={() => setDetailTaskId(task.id)}
+              title="Buka detail tugas"
+            >
+              <span className={cn('text-[13px] font-medium text-slate-800 hover:text-teal-700 hover:underline', task.status === 'DONE' && 'line-through opacity-50')}>{task.title}</span>
+            </button>
             <PriorityBadge priority={task.priority} />
             <Badge variant="outline" className="px-1.5 py-0 text-[10px] text-slate-500">{TASK_TYPES.find(t => t.key === task.type)?.label ?? task.type}</Badge>
           </div>
@@ -278,7 +285,208 @@ export default function FollowUpView() {
 
       <NewTaskDialog open={newTaskOpen} onOpenChange={setNewTaskOpen} onCreated={load} />
       <NewTemplateDialog open={newTplOpen} onOpenChange={setNewTplOpen} onCreated={load} />
+      <TaskDetailDialog taskId={detailTaskId} onClose={() => setDetailTaskId(null)} onChanged={load} />
     </div>
+  )
+}
+
+/* ---------------- Task Detail Dialog — deskripsi + lampiran + status ---------------- */
+const MAX_TASK_FILE_BYTES = 2 * 1024 * 1024
+
+function fmtBytes(n: number): string {
+  if (n >= 1_048_576) return `${(n / 1_048_576).toFixed(1)} MB`
+  if (n >= 1024) return `${Math.round(n / 1024)} KB`
+  return `${n} B`
+}
+
+function TaskDetailDialog({ taskId, onClose, onChanged }: {
+  taskId: string | null
+  onClose: () => void
+  onChanged: () => void
+}) {
+  const { toast } = useToast()
+  const [task, setTask] = useState<TaskDTO | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [desc, setDesc] = useState('')
+  const [savingDesc, setSavingDesc] = useState(false)
+  const [dueDate, setDueDate] = useState('')
+  const [uploading, setUploading] = useState(false)
+  const fileRef = React.useRef<HTMLInputElement>(null)
+
+  React.useEffect(() => {
+    if (!taskId) { setTask(null); return }
+    setLoading(true)
+    crmApi.taskDetail(taskId)
+      .then((t) => { setTask(t); setDesc(t.description ?? ''); setDueDate(t.dueDate ? t.dueDate.slice(0, 10) : '') })
+      .catch((e) => toast({ title: 'Gagal memuat detail tugas', description: e instanceof Error ? e.message : undefined, variant: 'destructive' }))
+      .finally(() => setLoading(false))
+  }, [taskId])
+
+  const patch = async (body: Record<string, unknown>, okTitle: string) => {
+    if (!task) return
+    try {
+      const updated = await crmApi.updateTask(task.id, body)
+      setTask((prev) => prev ? { ...prev, ...updated, attachments: prev.attachments } : updated)
+      toast({ title: okTitle })
+      onChanged()
+    } catch (e) {
+      toast({ title: 'Gagal menyimpan', description: e instanceof Error ? e.message : undefined, variant: 'destructive' })
+    }
+  }
+
+  const saveDescription = async () => {
+    if (!task) return
+    setSavingDesc(true)
+    await patch({ description: desc.trim() || null }, 'Deskripsi tersimpan ✓')
+    setSavingDesc(false)
+  }
+
+  const upload = async (file: File) => {
+    if (!task) return
+    if (file.size > MAX_TASK_FILE_BYTES) {
+      toast({ title: 'File terlalu besar', description: 'Maksimal 2MB per lampiran.', variant: 'destructive' })
+      return
+    }
+    setUploading(true)
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(String(reader.result))
+        reader.onerror = () => reject(new Error('Gagal membaca file'))
+        reader.readAsDataURL(file)
+      })
+      const att = await crmApi.addTaskAttachment(task.id, { name: file.name, mimeType: file.type || 'application/octet-stream', size: file.size, dataUrl })
+      setTask((prev) => prev ? { ...prev, attachments: [...(prev.attachments ?? []), att] } : prev)
+      toast({ title: 'Lampiran terunggah ✓', description: file.name })
+      onChanged()
+    } catch (e) {
+      toast({ title: 'Gagal unggah lampiran', description: e instanceof Error ? e.message : undefined, variant: 'destructive' })
+    } finally { setUploading(false) }
+  }
+
+  const removeAttachment = async (att: TaskAttachmentDTO) => {
+    if (!task) return
+    try {
+      await crmApi.deleteTaskAttachment(task.id, att.id)
+      setTask((prev) => prev ? { ...prev, attachments: (prev.attachments ?? []).filter((a) => a.id !== att.id) } : prev)
+      toast({ title: 'Lampiran dihapus' })
+      onChanged()
+    } catch (e) {
+      toast({ title: 'Gagal hapus lampiran', description: e instanceof Error ? e.message : undefined, variant: 'destructive' })
+    }
+  }
+
+  return (
+    <Dialog open={!!taskId} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-h-[88dvh] overflow-y-auto sm:max-w-lg">
+        {loading || !task ? (
+          <div className="flex items-center justify-center gap-2 py-10 text-sm text-slate-400">
+            <Loader2 className="h-4 w-4 animate-spin" /> Memuat…
+          </div>
+        ) : (
+          <>
+            <DialogHeader>
+              <DialogTitle className="text-left">{task.title}</DialogTitle>
+              <DialogDescription className="text-left">
+                {task.opportunityTitle ? `${task.opportunityTitle}${task.companyName ? ` · ${task.companyName}` : ''}` : 'Tugas internal'}
+                 · Ditugaskan ke {task.assigneeName ?? '—'}
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4">
+              {/* Status cepat */}
+              <div className="flex flex-wrap items-center gap-2">
+                {(['OPEN', 'IN_PROGRESS', 'DONE'] as const).map((s) => (
+                  <Button
+                    key={s}
+                    size="sm"
+                    variant={task.status === s ? 'default' : 'outline'}
+                    className={cn('h-8 text-[11px]', task.status === s && s === 'DONE' && 'bg-emerald-600 hover:bg-emerald-700', task.status === s && s !== 'DONE' && 'bg-slate-900 hover:bg-slate-800')}
+                    disabled={task.status === s}
+                    onClick={() => void patch({ status: s }, s === 'DONE' ? 'Tugas selesai ✓' : s === 'IN_PROGRESS' ? 'Tugas dikerjakan' : 'Tugas dibuka')}
+                  >
+                    {s === 'OPEN' ? 'Belum' : s === 'IN_PROGRESS' ? 'Dikerjakan' : 'Selesai'}
+                  </Button>
+                ))}
+                <div className="ml-auto flex items-center gap-2">
+                  <Select value={task.priority} onValueChange={(v) => void patch({ priority: v }, 'Prioritas diperbarui')}>
+                    <SelectTrigger className="h-8 w-[130px] text-[11px]"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {PRIORITIES.map((p) => <SelectItem key={p.key} value={p.key}>{p.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <Input
+                    type="date"
+                    className="h-8 w-[140px] text-[11px]"
+                    value={dueDate}
+                    onChange={(e) => setDueDate(e.target.value)}
+                    onBlur={() => { if (task && dueDate !== (task.dueDate?.slice(0, 10) ?? '')) void patch({ dueDate: dueDate || null }, 'Deadline diperbarui') }}
+                  />
+                </div>
+              </div>
+
+              {/* Deskripsi */}
+              <div className="space-y-1.5">
+                <Label>Deskripsi tugas</Label>
+                <Textarea
+                  rows={4}
+                  value={desc}
+                  onChange={(e) => setDesc(e.target.value)}
+                  maxLength={2000}
+                  placeholder="Jelaskan detail tugas: konteks, hasil yang diharapkan, referensi…"
+                />
+                <div className="flex justify-end">
+                  <Button size="sm" className="h-8 bg-teal-700 hover:bg-teal-800" disabled={savingDesc || desc === (task.description ?? '')} onClick={saveDescription}>
+                    {savingDesc && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />} Simpan deskripsi
+                  </Button>
+                </div>
+              </div>
+
+              {/* Lampiran */}
+              <div className="space-y-1.5">
+                <Label>Lampiran ({(task.attachments ?? []).length})</Label>
+                {(task.attachments ?? []).length > 0 && (
+                  <div className="space-y-1">
+                    {(task.attachments ?? []).map((a) => (
+                      <div key={a.id} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5">
+                        <Paperclip className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                        <span className="min-w-0 flex-1 truncate text-[12px] text-slate-700">{a.name}</span>
+                        <span className="shrink-0 text-[10px] text-slate-400">{fmtBytes(a.size)}</span>
+                        <a
+                          aria-label={`Unduh ${a.name}`}
+                          href={a.dataUrl}
+                          download={a.name}
+                          className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-teal-700"
+                        >
+                          <Download className="h-3.5 w-3.5" />
+                        </a>
+                        <button aria-label={`Hapus ${a.name}`} className="rounded p-1 text-slate-300 hover:bg-rose-50 hover:text-rose-600" onClick={() => void removeAttachment(a)}>
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <input
+                  ref={fileRef}
+                  type="file"
+                  className="hidden"
+                  accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar,.7z,.csv,.txt,.rtf"
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) void upload(f); e.target.value = '' }}
+                />
+                <Button size="sm" variant="outline" className="h-8 gap-1 text-[11px]" disabled={uploading} onClick={() => fileRef.current?.click()}>
+                  {uploading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />} Unggah lampiran (maks 2MB)
+                </Button>
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={onClose}>Tutup</Button>
+            </DialogFooter>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
   )
 }
 

@@ -1,14 +1,29 @@
-/* ============ /api/tasks/[id] — update status/dueDate/title/priority ============ */
+/* ============ /api/tasks/[id] — GET detail + update status/dueDate/title/priority/description ============ */
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { getSessionUser, mapTask, taskInclude, parseDate } from '@/lib/crm-server'
+import { getSessionUser, mapTask, taskInclude, taskDetailInclude, parseDate } from '@/lib/crm-server'
 import { logAudit } from '@/lib/audit'
 
 export const dynamic = 'force-dynamic'
 
 const VALID_STATUSES = ['OPEN', 'IN_PROGRESS', 'DONE', 'CANCELLED']
 
-/** PATCH { status?, dueDate?, title?, priority? } — DONE sets completedAt */
+/** GET — detail tugas termasuk lampiran (dataUrl utk unduh). */
+export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  const session = await getSessionUser()
+  if (!session) return NextResponse.json({ error: 'Belum login' }, { status: 401 })
+  if (session.role === 'CLIENT') {
+    return NextResponse.json({ error: 'Akses khusus tim internal UDP' }, { status: 403 })
+  }
+
+  const { id } = await ctx.params
+  const task = await db.task.findUnique({ where: { id }, include: taskDetailInclude })
+  if (!task) return NextResponse.json({ error: 'Task tidak ditemukan' }, { status: 404 })
+
+  return NextResponse.json(mapTask(task))
+}
+
+/** PATCH { status?, dueDate?, title?, priority?, description? } — DONE sets completedAt */
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await getSessionUser()
   if (!session) return NextResponse.json({ error: 'Belum login' }, { status: 401 })
@@ -44,6 +59,16 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       oldValue.dueDate = task.dueDate?.toISOString() ?? null
       newValue.dueDate = next?.toISOString() ?? null
     }
+  }
+
+  if (body?.description !== undefined && body.description !== task.description) {
+    if (body.description !== null && typeof body.description !== 'string') {
+      return NextResponse.json({ error: 'Deskripsi tidak valid' }, { status: 400 })
+    }
+    const desc = typeof body.description === 'string' ? body.description.trim().slice(0, 2000) : null
+    data.description = desc || null
+    oldValue.description = task.description
+    newValue.description = data.description
   }
 
   if (typeof body?.status === 'string' && body.status && body.status !== task.status) {

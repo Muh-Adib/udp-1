@@ -1,8 +1,7 @@
 /* ============ /api/opportunities/[id]/stage — stage transitions ============ */
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { getSessionUser, parseDate, generateProjectCode, STAGE_DEFAULT_PROBABILITY } from '@/lib/crm-server'
-import { WORKFLOW_MILESTONES } from '@/lib/crm-constants'
+import { getSessionUser, parseDate, STAGE_DEFAULT_PROBABILITY } from '@/lib/crm-server'
 import { logAudit } from '@/lib/audit'
 
 export const dynamic = 'force-dynamic'
@@ -61,8 +60,6 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     }
   }
 
-  let createdProjectId: string | null = null
-
   if (stage === 'WON') {
     data.wonAt = now
     data.probability = 100
@@ -100,49 +97,17 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     req,
   })
 
-  /* ----- WON → auto-create project (once) ----- */
+  /* ----- WON → project dibuat MANUAL via tombol "Buat Project" (builder dari brief).
+     Alur: Won → user membuka opportunity → klik "Buat Project" → dialog builder
+     (prefill brief + milestone workflow) → POST /api/projects.
+     Di sini cukup tandai kesiapan: kirim projectId (bila sudah ada) + hasProject. */
+  let hasProject = false
+  let existingProjectId: string | null = null
   if (stage === 'WON') {
-    const existing = await db.project.findUnique({ where: { opportunityId: id } })
-    if (!existing) {
-      const workflowType = opp.executingBrand.workflowType
-      const finalValue = typeof data.estimatedValue === 'number' ? data.estimatedValue : opp.estimatedValue
-      const manager = await db.user.findFirst({ where: { role: 'PRODUKSI', isActive: true } })
-      const code = await generateProjectCode()
-      const milestoneNames = WORKFLOW_MILESTONES[workflowType] ?? WORKFLOW_MILESTONES.generic
-      const project = await db.project.create({
-        data: {
-          name: opp.title,
-          code,
-          opportunityId: id,
-          companyId: opp.companyId,
-          brandId: opp.executingBrandId,
-          managerId: manager?.id ?? null,
-          status: 'PLANNING',
-          progress: 0,
-          workflowType,
-          budget: finalValue,
-          startDate: now,
-          milestones: {
-            create: milestoneNames.map((name, idx) => ({
-              name,
-              stepOrder: idx + 1,
-              status: 'PENDING',
-              dueDate: new Date(now.getTime() + (idx + 1) * 10 * 86400000), // spaced 10 days
-            })),
-          },
-        },
-      })
-      createdProjectId = project.id
-      await logAudit({
-        userId: session.id,
-        userName: session.name,
-        action: 'PROJECT_CREATE',
-        entityType: 'Project',
-        entityId: project.id,
-        entityLabel: `${code} — ${project.name}`,
-        newValue: { code, workflowType, budget: finalValue, milestones: milestoneNames.length },
-        req,
-      })
+    const existing = await db.project.findUnique({ where: { opportunityId: id }, select: { id: true } })
+    if (existing) {
+      hasProject = true
+      existingProjectId = existing.id
     }
   }
 
@@ -151,6 +116,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     opportunityId: updated.id,
     stage: updated.stage,
     probability: updated.probability,
-    projectId: createdProjectId,
+    projectId: existingProjectId,
+    hasProject,
   })
 }

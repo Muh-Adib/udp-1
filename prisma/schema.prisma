@@ -264,6 +264,7 @@ model Task {
 
   opportunity Opportunity? @relation(fields: [opportunityId], references: [id])
   assignee    User         @relation(fields: [assigneeId], references: [id])
+  attachments TaskAttachment[]
 }
 
 model Note {
@@ -304,15 +305,48 @@ model Project {
 }
 
 model Milestone {
-  id          String    @id @default(cuid())
-  projectId   String
-  name        String
-  stepOrder   Int       @default(0)
-  status      String    @default("PENDING") // PENDING|IN_PROGRESS|DONE
-  dueDate     DateTime?
-  completedAt DateTime?
+  id            String    @id @default(cuid())
+  projectId     String
+  name          String
+  description   String?   // detail pekerjaan milestone (diedit PM/tim)
+  estimatedDays Int?      // estimasi durasi hari kerja
+  startDate     DateTime?
+  stepOrder     Int       @default(0)
+  status        String    @default("PENDING") // PENDING|IN_PROGRESS|DONE
+  dueDate       DateTime?
+  completedAt   DateTime?
+  createdAt     DateTime  @default(now())
 
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project     Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  attachments MilestoneAttachment[]
+}
+
+/* Lampiran milestone — file disimpan sbg data-URL base64 di SQLite (≤2MB, MIME whitelist). */
+model MilestoneAttachment {
+  id             String   @id @default(cuid())
+  milestoneId    String
+  name           String
+  mimeType       String
+  size           Int
+  dataUrl        String
+  uploadedByName String?
+  createdAt      DateTime @default(now())
+
+  milestone Milestone @relation(fields: [milestoneId], references: [id], onDelete: Cascade)
+}
+
+/* Lampiran tugas — pola sama dgn MilestoneAttachment. */
+model TaskAttachment {
+  id             String   @id @default(cuid())
+  taskId         String
+  name           String
+  mimeType       String
+  size           Int
+  dataUrl        String
+  uploadedByName String?
+  createdAt      DateTime @default(now())
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
 }
 
 model FollowUpTemplate {

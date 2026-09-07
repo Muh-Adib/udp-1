@@ -1,12 +1,33 @@
-/* ============ /api/projects/[id] — update progress/status/milestones ============ */
+/* ============ /api/projects/[id] — GET detail + PATCH status/progress/legacy milestone ============ */
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { getSessionUser, mapProject, projectInclude } from '@/lib/crm-server'
+import {
+  getSessionUser, mapProject, projectInclude, projectDetailInclude,
+  MILESTONE_WORKERS,
+} from '@/lib/crm-server'
 import { logAudit } from '@/lib/audit'
 
 export const dynamic = 'force-dynamic'
 
-/** PATCH { progress?, status?, milestoneId?, milestoneStatus? } */
+/** GET — detail project dgn milestone + lampiran penuh (utk dialog detail). */
+export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  const session = await getSessionUser()
+  if (!session) return NextResponse.json({ error: 'Belum login' }, { status: 401 })
+  if (session.role === 'CLIENT') {
+    return NextResponse.json({ error: 'Akses khusus tim internal UDP' }, { status: 403 })
+  }
+
+  const { id } = await ctx.params
+  const project = await db.project.findUnique({
+    where: { id },
+    include: projectDetailInclude,
+  })
+  if (!project) return NextResponse.json({ error: 'Project tidak ditemukan' }, { status: 404 })
+
+  return NextResponse.json(mapProject(project))
+}
+
+/** PATCH { status?, progress?, milestoneId?, milestoneStatus? } — legacy kompatibel. */
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await getSessionUser()
   if (!session) return NextResponse.json({ error: 'Belum login' }, { status: 401 })
@@ -14,8 +35,8 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     return NextResponse.json({ error: 'Akses khusus tim internal UDP' }, { status: 403 })
   }
 
-  /* Hanya peran produksi/manajemen yang mengubah project — sesuai UI (canManage). */
-  if (!['SUPER_ADMIN', 'DIREKTUR', 'PRODUKSI'].includes(session.role)) {
+  /* Pekerja project: manajemen + produksi — sesuai matriks peran alur project. */
+  if (!(MILESTONE_WORKERS as readonly string[]).includes(session.role)) {
     return NextResponse.json({ error: 'Anda tidak memiliki izin mengubah project' }, { status: 403 })
   }
 

@@ -5,7 +5,7 @@ import type {
   SessionUser, UserDTO, BrandDTO, CompanyDTO, ContactDTO, OpportunityDTO, OpportunityDetailDTO,
   InteractionDTO, TaskDTO, DashboardDTO, AuditLogDTO, TemplateDTO, DuplicateCandidate, ProjectDTO, NoteDTO, Stage,
   QuotationStatus, QuotationDTO, QuotationDetailDTO, InvoiceStatus, InvoiceDTO, FinanceSummaryDTO,
-  QuickTemplateDTO,
+  QuickTemplateDTO, MilestoneDTO, MilestoneAttachmentDTO, TaskAttachmentDTO,
   BriefDTO, EstimationDTO, EstimationSaveInput, PortalDTO, NotificationsResponseDTO,
   PortalCommentEntity, PortalCommentDTO, PortalDecisionResultDTO, ConversationAnalyticsDTO,
   ConversationListItemDTO, OpportunityAiSummaryDTO, BriefingDTO, ForecastDTO,
@@ -91,7 +91,38 @@ export const crmApi = {
   merge: (body: { keepId: string; mergeId: string }) => api.post<{ ok: boolean }>('/api/merge', body),
 
   projects: (params = '') => api.get<ProjectDTO[]>(`/api/projects${params ? `?${params}` : ''}`),
+  projectDetail: (id: string) => api.get<ProjectDTO>(`/api/projects/${id}`),
+  createProject: (body: {
+    opportunityId: string
+    name?: string
+    managerId?: string
+    budget?: number
+    startDate?: string
+    endDate?: string
+    workflowType?: string
+    milestones: { name: string; description?: string; estimatedDays?: number; dueDate?: string }[]
+  }) => api.post<ProjectDTO>(`/api/projects`, body),
   updateProject: (id: string, body: unknown) => api.patch<ProjectDTO>(`/api/projects/${id}`, body),
+
+  /* Milestone — alur project termanage: status (tim produksi), struktur (manajer), lampiran */
+  createMilestone: (projectId: string, body: { name: string; description?: string; estimatedDays?: number; dueDate?: string }) =>
+    api.post<MilestoneDTO>(`/api/projects/${projectId}/milestones`, body),
+  updateMilestone: (projectId: string, milestoneId: string, body: {
+    status?: string; name?: string; description?: string | null; estimatedDays?: number | null; startDate?: string | null; dueDate?: string | null
+  }) => api.patch<MilestoneDTO & { projectProgress?: number }>(`/api/projects/${projectId}/milestones/${milestoneId}`, body),
+  deleteMilestone: (projectId: string, milestoneId: string) =>
+    api.del<ProjectDTO>(`/api/projects/${projectId}/milestones/${milestoneId}`),
+  addMilestoneAttachment: (projectId: string, milestoneId: string, body: { name: string; mimeType: string; size: number; dataUrl: string }) =>
+    api.post<MilestoneAttachmentDTO>(`/api/projects/${projectId}/milestones/${milestoneId}/attachments`, body),
+  deleteMilestoneAttachment: (projectId: string, milestoneId: string, attachmentId: string) =>
+    api.del<{ ok: boolean }>(`/api/projects/${projectId}/milestones/${milestoneId}/attachments/${attachmentId}`),
+
+  /* Tugas — detail + lampiran */
+  taskDetail: (id: string) => api.get<TaskDTO>(`/api/tasks/${id}`),
+  addTaskAttachment: (taskId: string, body: { name: string; mimeType: string; size: number; dataUrl: string }) =>
+    api.post<TaskAttachmentDTO>(`/api/tasks/${taskId}/attachments`, body),
+  deleteTaskAttachment: (taskId: string, attachmentId: string) =>
+    api.del<{ ok: boolean }>(`/api/tasks/${taskId}/attachments/${attachmentId}`),
 
   templates: (params = '') => api.get<TemplateDTO[]>(`/api/templates${params ? `?${params}` : ''}`),
   /** Thread lengkap IN+OUT satu opportunity (chat view inbox) — asc by sentAt. */
