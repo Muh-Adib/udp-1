@@ -871,3 +871,21 @@ Work Log:
 Stage Summary:
 - Project kini: R23 penuh (role Manajer/HR + 9 akun, template /keyword, verifikasi lintas sumber, badge/polling/draft) + 4 perbaikan keamanan + fitur Ubah Kontak. SEMUA sudah di-commit & di-push (anti-rollback).
 - Next round (keputusan user): (a) rebuild backend+UI R24: daftar brief (DRAFT/FINAL terlihat tim), milestone dgn lampiran + estimasi waktu + generate AI (koneksi URL+apikey diatur Direktur), pengaturan jenis pajak (PPh 21 dsb) oleh Direktur, alur project per role; (b) password login; (c) simulasi lead tanpa nama → alur perbaikan kontak sudah siap.
+
+---
+Task ID: R25-pull
+Agent: Z.ai Code (orchestrator, eksekusi langsung)
+Task: Pull repo untuk mendapatkan versi terbaru (permintaan user) + verifikasi aplikasi hidup
+
+Work Log:
+- GIT: `git fetch origin` → remote 4 commit di depan, lokal 1 commit duplikat (61887f6 lokal ≡ a8374bc remote, konten identik hanya dev.pid/tool-results). Aman: `git reset --hard origin/main` → HEAD c5b0df3 (R24-audit). Kini lokal = remote terbaru.
+- ISI VERSI TERBARU: R22 (role Manajer/HR + 9 akun tim, inbox lintas sumber + verifikasi per pesan, balas hanya kanal milik kontak, template /keyword) + R23 (fix crash nav Manajer/HR, badge belum-dibalas nav, polling inbox, draft persist localStorage, variabel {{quotation_total}}/{{next_followup_date}}) + R24-audit (CRITICAL: sessionToken acak 48-char pengganti cookie=user.id mentah; HIGH: CLIENT guard 36 route, guard PATCH projects, guard audit-logs; fitur Ubah Kontak dari Contacts — solusi keluhan "lead masuk tanpa nama").
+- HOUSEKEEPING: package.json tak berubah (tanpa install); schema Prisma terbaru TIDAK memuat model R24 (MilestoneAttachment/TaxType/AiSettings) → db push "already in sync"; data utuh (11 User/14 Contact/16 Opportunity/7 QuickTemplate, sessionToken terisi). rm tsconfig.tsbuildinfo + tsc 0 error.
+- REAPER ESCALATION: sandbox reaper kini mematikan dev server (bahkan supervisor loop bash) dalam hitungan detik/antar-call — lebih agresif dari R22–R23. Pola baru yang TERBUKTI: semua operasi server dalam SATU call bash (start→wait 200→operasi), dan login via curl POST /api/session + injeksi cookie crm_session ke agent-browser (`agent-browser cookies set`). Disarankan pola ini utk QA berikutnya.
+- VERIFIKASI BROWSER (Budi/Manajer): login picker 11 akun tampil; curl login HTTP 200 + cookie 48-char (fix anti-forgery R24-audit hidup); dashboard Manajer render penuh — nav lengkap TANPA crash (fix R23 ✓), badge "8 percakapan belum dibalas" ✓, notifikasi 11 ✓; Lead Inbox: daftar percakapan + search + filter + chip SLA/ESKALASI + StageBadge semua render ✓; console 0 error, dev.log 0 error, tsc 0 error.
+- TEMUAN PENTING utk round berikutnya: fitur R24 (daftar brief DRAFT/FINAL, milestone + lampiran + estimasi waktu + generate AI dgn koneksi URL/apikey Direktur, pengaturan jenis pajak/PPh 21 oleh Direktur, alur project per role) TIDAK ADA di origin/main — hilang saat rollback sandbox sebelum sempat push. Perlu REBUILD (backend+UI) sesuai catatan R24-audit "Next round".
+
+Stage Summary:
+- Pull sukses: lokal = origin/main c5b0df3 (R22+R23+R24-audit penuh), data & akun tim utuh, aplikasi terverifikasi hidup di browser (login Manajer, dashboard, inbox).
+- Yang hilang & belum dibangun: seluruh fitur R24 (briefs/milestone+AI/pajak) — prioritas #1 round berikutnya.
+- Risiko: reaper sandbox makin agresif — gunakan pola satu-call + curl-login utk QA; jangan andalkan server hidup antar-call.
