@@ -125,6 +125,7 @@ export async function POST(req: NextRequest) {
       name: mName,
       description: typeof m?.description === 'string' && m.description.trim() ? m.description.trim().slice(0, 2000) : undefined,
       estimatedDays,
+      price: typeof m?.price === 'number' && Number.isFinite(m.price) && m.price >= 0 ? m.price : undefined,
       dueDate: mDue ? mDue.toISOString() : undefined,
     })
   }
@@ -137,6 +138,7 @@ export async function POST(req: NextRequest) {
       name: m.name,
       description: m.description ?? null,
       estimatedDays: m.estimatedDays ?? null,
+      price: m.price ?? null,
       stepOrder: idx + 1,
       status: 'PENDING',
       dueDate: due,

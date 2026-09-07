@@ -8,7 +8,7 @@ import type {
   QuickTemplateDTO, MilestoneDTO, MilestoneAttachmentDTO, TaskAttachmentDTO,
   BriefDTO, EstimationDTO, EstimationSaveInput, PortalDTO, NotificationsResponseDTO,
   PortalCommentEntity, PortalCommentDTO, PortalDecisionResultDTO, ConversationAnalyticsDTO,
-  ConversationListItemDTO, OpportunityAiSummaryDTO, BriefingDTO, ForecastDTO,
+  ConversationListItemDTO, OpportunityAiSummaryDTO, BriefingDTO, ForecastDTO, ServiceDTO, ServiceStepDTO,
 } from '@/lib/crm-types'
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
@@ -50,6 +50,8 @@ export const crmApi = {
 
   /* R15 — pengaturan brand (SUPER_ADMIN & DIREKTUR): identitas kontak, warna, SLA, prefix dokumen */
   updateBrand: (id: string, body: unknown) => api.patch<BrandDTO>(`/api/brands/${id}`, body),
+  /** R28 — daftar brand + layanan (dgn workflow steps) utk refresh setelah ubah layanan. */
+  brands: () => api.get<BrandDTO[]>('/api/brands'),
 
   contacts: (params = '') => api.get<ContactDTO[]>(`/api/contacts${params ? `?${params}` : ''}`),
   createContact: (body: unknown) => api.post<ContactDTO>('/api/contacts', body),
@@ -100,15 +102,15 @@ export const crmApi = {
     startDate?: string
     endDate?: string
     workflowType?: string
-    milestones: { name: string; description?: string; estimatedDays?: number; dueDate?: string }[]
+    milestones: { name: string; description?: string; estimatedDays?: number; price?: number; dueDate?: string }[]
   }) => api.post<ProjectDTO>(`/api/projects`, body),
   updateProject: (id: string, body: unknown) => api.patch<ProjectDTO>(`/api/projects/${id}`, body),
 
   /* Milestone — alur project termanage: status (tim produksi), struktur (manajer), lampiran */
-  createMilestone: (projectId: string, body: { name: string; description?: string; estimatedDays?: number; dueDate?: string }) =>
+  createMilestone: (projectId: string, body: { name: string; description?: string; estimatedDays?: number; price?: number; dueDate?: string }) =>
     api.post<MilestoneDTO>(`/api/projects/${projectId}/milestones`, body),
   updateMilestone: (projectId: string, milestoneId: string, body: {
-    status?: string; name?: string; description?: string | null; estimatedDays?: number | null; startDate?: string | null; dueDate?: string | null
+    status?: string; name?: string; description?: string | null; estimatedDays?: number | null; price?: number | null; startDate?: string | null; dueDate?: string | null
   }) => api.patch<MilestoneDTO & { projectProgress?: number }>(`/api/projects/${projectId}/milestones/${milestoneId}`, body),
   deleteMilestone: (projectId: string, milestoneId: string) =>
     api.del<ProjectDTO>(`/api/projects/${projectId}/milestones/${milestoneId}`),
@@ -179,6 +181,19 @@ export const estimationApi = {
     api.get<EstimationDTO | null>(`/api/opportunities/${opportunityId}/estimation`),
   saveEstimation: (opportunityId: string, body: EstimationSaveInput) =>
     api.put<EstimationDTO>(`/api/opportunities/${opportunityId}/estimation`, body),
+}
+
+/* R28 — katalog layanan + workflow template (milestone + estimasi + pricing per tahap).
+   Baca: semua tim internal (dipakai project builder); tulis: SUPER_ADMIN/DIREKTUR. */
+export const serviceApi = {
+  list: (params = '') => api.get<ServiceDTO[]>(`/api/services${params ? `?${params}` : ''}`),
+  create: (body: { brandId: string; name: string; category?: string; description?: string; basePrice?: number | null; estimatedDays?: number | null }) =>
+    api.post<ServiceDTO>('/api/services', body),
+  update: (id: string, body: { name?: string; category?: string; description?: string | null; basePrice?: number | null; estimatedDays?: number | null; isActive?: boolean }) =>
+    api.patch<ServiceDTO>(`/api/services/${id}`, body),
+  remove: (id: string) => api.del<{ ok: boolean }>(`/api/services/${id}`),
+  saveSteps: (id: string, steps: { name: string; description?: string | null; estimatedDays: number; price: number }[]) =>
+    api.put<{ ok: boolean; steps: ServiceStepDTO[] }>(`/api/services/${id}/steps`, { steps }),
 }
 
 export const portalApi = {

@@ -24,7 +24,7 @@ import type {
 } from '@/lib/crm-types'
 import { cn } from '@/lib/utils'
 import {
-  BadgeCheck, Calculator, ClipboardList, FileText, Loader2, Plus, Save, Trash2, TrendingUp, Undo2,
+  BadgeCheck, Calculator, ClipboardList, FileText, Info, Loader2, Plus, Save, Trash2, TrendingUp, Undo2,
 } from 'lucide-react'
 
 /* ================= Constants & pure helpers ================= */
@@ -99,6 +99,31 @@ const fromBrief = (b: BriefDTO | null): BriefFormState => ({
   budgetRange: b?.budgetRange ?? '',
   constraints: b?.constraints ?? '',
 })
+
+/* R28 fix — brief yang diisi di tab Ringkasan (field brief/needs/deliverables opportunity)
+   kini otomatis diarahkan ke form brief terstruktur saat brief belum pernah disimpan.
+   Sebelumnya dua sumber ini terpisah sehingga "brief ada di ringkasan tapi tidak muncul di Brief". */
+const prefillBriefFromOpportunity = (o: OpportunityDetailDTO): BriefFormState => {
+  const timelineFallback = o.deadline
+    ? `Deadline ${formatDate(o.deadline)}`
+    : ''
+  const budgetFallback = o.estimatedValue > 0
+    ? `${o.currency} ${new Intl.NumberFormat('id-ID').format(Math.round(o.estimatedValue))}`
+    : ''
+  return {
+    serviceScope: o.serviceName ?? '',
+    objectives: o.needs ?? '',
+    targetAudience: o.targetAudience ?? '',
+    keyMessages: '',
+    deliverables: o.deliverables ?? '',
+    timeline: o.estimatedTimeline ?? timelineFallback,
+    references: '',
+    budgetRange: o.lastOfferValue && o.lastOfferValue > 0
+      ? `${o.currency} ${new Intl.NumberFormat('id-ID').format(Math.round(o.lastOfferValue))}`
+      : budgetFallback,
+    constraints: o.brief ?? '',
+  }
+}
 
 /* ---------- Estimation editor ---------- */
 
@@ -329,6 +354,9 @@ export function BriefEstimationTab({ opportunity, onChanged }: { opportunity: Op
         if (b) {
           setBriefForm(fromBrief(b))
           setBriefStatus(b.status)
+        } else {
+          /* Belum ada brief tersimpan → prefill dari data opportunity (tab Ringkasan) */
+          setBriefForm(prefillBriefFromOpportunity(opportunity))
         }
         setEstimation(e)
         if (e) {
@@ -509,7 +537,26 @@ export function BriefEstimationTab({ opportunity, onChanged }: { opportunity: Op
           {loading ? (
             <BriefSkeleton />
           ) : (
-            <Card className="gap-0 rounded-xl border-slate-200 p-4 sm:p-5">
+            <>
+              {/* R28 — brief mentah dari tab Ringkasan kini tampil juga di sini */}
+              {(opportunity.brief || opportunity.needs || opportunity.deliverables) && (
+                <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3.5">
+                  <p className="flex items-center gap-1.5 text-[12px] font-semibold text-slate-700">
+                    <Info className="h-3.5 w-3.5 text-slate-400" /> Brief dari Ringkasan Opportunity
+                  </p>
+                  <div className="mt-1.5 space-y-1 text-[12px] leading-relaxed text-slate-500">
+                    {opportunity.brief && <p><span className="font-semibold text-slate-600">Catatan brief:</span> {opportunity.brief}</p>}
+                    {opportunity.needs && !opportunity.brief && <p><span className="font-semibold text-slate-600">Kebutuhan:</span> {opportunity.needs}</p>}
+                    {opportunity.deliverables && <p><span className="font-semibold text-slate-600">Deliverables:</span> {opportunity.deliverables}</p>}
+                    {!brief && (
+                      <p className="pt-1 text-[11px] text-slate-400">
+                        Form di bawah sudah terisi otomatis dari data opportunity — klik <b>Simpan Brief</b> untuk menyimpannya sebagai brief terstruktur tim.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+              <Card className="gap-0 rounded-xl border-slate-200 p-4 sm:p-5">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex min-w-0 flex-wrap items-center gap-2">
                   <BriefStatusBadge status={briefStatus} />
@@ -597,7 +644,8 @@ export function BriefEstimationTab({ opportunity, onChanged }: { opportunity: Op
                   placeholder="Kendala teknis, kebijakan klien, atau catatan lain"
                 />
               </div>
-            </Card>
+              </Card>
+            </>
           )}
         </TabsContent>
 

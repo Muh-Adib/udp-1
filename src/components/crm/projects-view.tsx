@@ -338,6 +338,11 @@ function ProjectDetailBody({
                       {(m.attachmentCount ?? 0) > 0 && ` · ${m.attachmentCount} lampiran`}
                     </p>
                   </div>
+                  {(m.price ?? 0) > 0 && (
+                    <span className="hidden shrink-0 rounded-md bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-emerald-700 sm:block" title="Nilai tahap dari workflow layanan">
+                      {formatMoney(m.price, 'IDR', true)}
+                    </span>
+                  )}
                   {canWork && m.status !== 'DONE' && (
                     <div className="flex shrink-0 gap-1">
                       {m.status === 'PENDING' && (
@@ -507,6 +512,7 @@ function MilestoneEditDialog({ projectId, milestone, open: openProp, onClose, on
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [estimatedDays, setEstimatedDays] = useState('')
+  const [price, setPrice] = useState('')
   const [dueDate, setDueDate] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -515,6 +521,7 @@ function MilestoneEditDialog({ projectId, milestone, open: openProp, onClose, on
     setName(milestone?.name ?? '')
     setDescription(milestone?.description ?? '')
     setEstimatedDays(milestone?.estimatedDays ? String(milestone.estimatedDays) : '')
+    setPrice(milestone?.price ? String(Math.round(milestone.price)) : '')
     setDueDate(milestone?.dueDate ? milestone.dueDate.slice(0, 10) : '')
   }, [open, milestone])
 
@@ -526,6 +533,7 @@ function MilestoneEditDialog({ projectId, milestone, open: openProp, onClose, on
         name: name.trim(),
         description: description.trim() || undefined,
         estimatedDays: estimatedDays ? Number(estimatedDays) : undefined,
+        price: price ? Number(price) : 0,
         dueDate: dueDate || undefined,
       }
       if (isNew) {
@@ -536,6 +544,7 @@ function MilestoneEditDialog({ projectId, milestone, open: openProp, onClose, on
           name: body.name,
           description: description.trim() || null,
           estimatedDays: estimatedDays ? Number(estimatedDays) : null,
+          price: price ? Number(price) : null,
           dueDate: dueDate || null,
         })
         toast({ title: 'Milestone diperbarui ✓' })
@@ -578,6 +587,10 @@ function MilestoneEditDialog({ projectId, milestone, open: openProp, onClose, on
             <div className="space-y-1.5">
               <Label>Target selesai</Label>
               <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Nilai tahap (IDR)</Label>
+              <Input inputMode="numeric" value={price} onChange={(e) => setPrice(e.target.value.replace(/[^\d]/g, ''))} placeholder="0" />
             </div>
           </div>
         </div>

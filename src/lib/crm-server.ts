@@ -213,7 +213,7 @@ export function mapAttachment(a: {
 
 export function mapMilestone(m: {
   id: string; name: string; stepOrder: number; status: string
-  description?: string | null; estimatedDays?: number | null
+  description?: string | null; estimatedDays?: number | null; price?: number | null
   startDate?: Date | null; dueDate?: Date | null; completedAt?: Date | null
   attachments?: unknown[]; _count?: { attachments: number }
 }): MilestoneDTO {
@@ -224,6 +224,7 @@ export function mapMilestone(m: {
     status: m.status,
     description: m.description ?? null,
     estimatedDays: m.estimatedDays ?? null,
+    price: m.price ?? null,
     startDate: iso(m.startDate),
     dueDate: iso(m.dueDate),
     completedAt: iso(m.completedAt),
@@ -282,7 +283,11 @@ export function mapBrand(b: {
   address?: string | null; logoSquare?: string | null; logoWide?: string | null
   primaryCurrency: string; invoicePrefix: string; quotationPrefix: string
   slaHours: number; workflowType: string
-  services?: { id: string; name: string; category: string; brandId: string }[]
+  services?: {
+    id: string; name: string; category: string; brandId: string
+    description?: string | null; basePrice?: number | null; estimatedDays?: number | null; isActive: boolean
+    steps?: { id: string; name: string; description?: string | null; estimatedDays: number; price: number; sortOrder: number }[]
+  }[]
 }): BrandDTO {
   return {
     id: b.id,
@@ -305,6 +310,14 @@ export function mapBrand(b: {
     workflowType: b.workflowType,
     services: (b.services ?? []).map((s) => ({
       id: s.id, name: s.name, category: s.category, brandId: s.brandId,
+      description: s.description ?? null,
+      basePrice: s.basePrice ?? null,
+      estimatedDays: s.estimatedDays ?? null,
+      isActive: s.isActive,
+      steps: (s.steps ?? []).map((st) => ({
+        id: st.id, name: st.name, description: st.description ?? null,
+        estimatedDays: st.estimatedDays, price: st.price, sortOrder: st.sortOrder,
+      })),
     })),
   }
 }

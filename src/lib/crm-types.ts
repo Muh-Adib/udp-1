@@ -23,11 +23,26 @@ export interface SessionUser {
   companyId?: string | null
 }
 
+export interface ServiceStepDTO {
+  id: string
+  name: string
+  description?: string | null
+  estimatedDays: number
+  price: number
+  sortOrder: number
+}
+
 export interface ServiceDTO {
   id: string
   name: string
   category: string
   brandId: string
+  description?: string | null
+  basePrice?: number | null
+  estimatedDays?: number | null
+  isActive?: boolean
+  /* R28 — workflow template (milestone + estimasi + pricing per tahap) */
+  steps?: ServiceStepDTO[]
 }
 
 export interface BrandDTO {
@@ -229,6 +244,7 @@ export interface MilestoneDTO {
   status: string
   description?: string | null
   estimatedDays?: number | null
+  price?: number | null
   startDate?: string | null
   dueDate?: string | null
   completedAt?: string | null
@@ -260,6 +276,7 @@ export interface ProjectCreateMilestoneInput {
   name: string
   description?: string
   estimatedDays?: number
+  price?: number
   dueDate?: string
 }
 

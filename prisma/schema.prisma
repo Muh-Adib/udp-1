@@ -96,10 +96,30 @@ model Service {
   name        String
   category    String  @default("Umum")
   description String?
+  /* R28 — harga & estimasi default layanan; workflow (milestone template) ada di ServiceStep */
+  basePrice     Float?  // harga paket/dasar layanan (IDR) — referensi pricing saat quotation & buat project
+  estimatedDays Int?    // estimasi durasi total layanan (hari kerja)
   isActive    Boolean @default(true)
 
   brand         Brand         @relation(fields: [brandId], references: [id], onDelete: Cascade)
   opportunities Opportunity[]
+  steps         ServiceStep[]
+}
+
+/* R28 — langkah workflow per layanan: jadi template milestone saat buat project
+   (nama + deskripsi + estimasi hari + harga per tahap), urut sesuai sortOrder. */
+model ServiceStep {
+  id            String  @id @default(cuid())
+  serviceId     String
+  name          String
+  description   String?
+  estimatedDays Int     @default(1) // durasi tahap (hari kerja)
+  price         Float   @default(0) // harga tahap (IDR); 0 = termasuk paket
+  sortOrder     Int     @default(0)
+
+  service Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@index([serviceId, sortOrder])
 }
 
 model Company {
@@ -310,6 +330,7 @@ model Milestone {
   name          String
   description   String?   // detail pekerjaan milestone (diedit PM/tim)
   estimatedDays Int?      // estimasi durasi hari kerja
+  price         Float?    // R28 — nilai tahap (IDR) dari workflow layanan saat project dibuat
   startDate     DateTime?
   stepOrder     Int       @default(0)
   status        String    @default("PENDING") // PENDING|IN_PROGRESS|DONE

@@ -8,7 +8,7 @@ import { logAudit } from '@/lib/audit'
 
 export const dynamic = 'force-dynamic'
 
-/** POST { name, description?, estimatedDays?, dueDate? } — tambah milestone di urutan terakhir. */
+/** POST { name, description?, estimatedDays?, price?, dueDate? } — tambah milestone di urutan terakhir. */
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await getSessionUser()
   if (!session) return NextResponse.json({ error: 'Belum login' }, { status: 401 })
@@ -41,6 +41,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const dueDate = parseDate(body?.dueDate)
   const description = typeof body?.description === 'string' && body.description.trim()
     ? body.description.trim().slice(0, 2000) : null
+  let price: number | null = null
+  if (typeof body?.price === 'number' && Number.isFinite(body.price)) {
+    if (body.price < 0) return NextResponse.json({ error: 'Harga milestone tidak boleh negatif' }, { status: 400 })
+    price = body.price
+  }
 
   const last = await db.milestone.findFirst({ where: { projectId: id }, orderBy: { stepOrder: 'desc' } })
   const milestone = await db.milestone.create({
@@ -49,6 +54,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       name,
       description,
       estimatedDays,
+      price,
       dueDate,
       stepOrder: (last?.stepOrder ?? 0) + 1,
       status: 'PENDING',
@@ -62,7 +68,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     entityType: 'Milestone',
     entityId: milestone.id,
     entityLabel: `${project.code} — ${name}`,
-    newValue: { name, estimatedDays, dueDate: dueDate?.toISOString() ?? null },
+    newValue: { name, estimatedDays, price, dueDate: dueDate?.toISOString() ?? null },
     req,
   })
 

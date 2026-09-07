@@ -78,6 +78,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     (body?.name !== undefined && body.name !== milestone.name) ||
     (body?.description !== undefined && body.description !== milestone.description) ||
     (body?.estimatedDays !== undefined && body.estimatedDays !== milestone.estimatedDays) ||
+    (body?.price !== undefined && body.price !== milestone.price) ||
     (body?.startDate !== undefined && (parseDate(body.startDate)?.getTime() ?? null) !== (milestone.startDate?.getTime() ?? null)) ||
     (body?.dueDate !== undefined && (parseDate(body.dueDate)?.getTime() ?? null) !== (milestone.dueDate?.getTime() ?? null))
 
@@ -107,6 +108,14 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       data.estimatedDays = body.estimatedDays === null ? null : Math.round(body.estimatedDays)
       oldValue.estimatedDays = milestone.estimatedDays
       newValue.estimatedDays = data.estimatedDays
+    }
+    if (body?.price !== undefined && body.price !== milestone.price) {
+      if (body.price !== null && (typeof body.price !== 'number' || !Number.isFinite(body.price) || body.price < 0)) {
+        return NextResponse.json({ error: 'Harga milestone tidak valid' }, { status: 400 })
+      }
+      data.price = body.price === null ? null : body.price
+      oldValue.price = milestone.price
+      newValue.price = data.price
     }
     if (body?.startDate !== undefined) {
       const d = parseDate(body.startDate)

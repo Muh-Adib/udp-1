@@ -6,6 +6,7 @@ import { crmApi } from './api-client'
 import { useCrmStore } from './crm-store'
 import { useToast } from '@/hooks/use-toast'
 import { LoadingRows, RefreshButton, SectionHeader, UserAvatar } from './shared'
+import { ServiceWorkflowDialog } from './service-workflow-dialog'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -141,6 +142,8 @@ export default function BrandsView() {
   const [logoBusy, setLogoBusy] = useState<'square' | 'wide' | null>(null)
   const fileSquareRef = useRef<HTMLInputElement>(null)
   const fileWideRef = useRef<HTMLInputElement>(null)
+  /* R28 — pengaturan layanan & workflow per brand */
+  const [svcBrand, setSvcBrand] = useState<BrandDTO | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -291,6 +294,17 @@ export default function BrandsView() {
                         <span className="h-2 w-2 rounded-full" style={{ backgroundColor: b.color }} aria-hidden />
                         <Globe className="h-3.5 w-3.5" /> {b.website?.replace(/^https?:\/\//, '')}
                       </a>
+                      {canManage && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setSvcBrand(b)}
+                          className="h-8 gap-1.5 px-2.5 text-xs"
+                          aria-label={`Layanan dan workflow ${b.name}`}
+                        >
+                          <Workflow className="h-3.5 w-3.5" /> Layanan
+                        </Button>
+                      )}
                       {canManage && (
                         <Button
                           variant="outline"
@@ -610,6 +624,17 @@ export default function BrandsView() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* R28 — pengaturan layanan & workflow per brand */}
+      <ServiceWorkflowDialog
+        open={svcBrand !== null}
+        onOpenChange={(v) => { if (!v) setSvcBrand(null) }}
+        brand={svcBrand}
+        canManage={canManage}
+        onChanged={async () => {
+          try { setBrands(await crmApi.brands()) } catch { /* refresh diam — toast sudah ditangani dialog */ }
+        }}
+      />
     </div>
   )
 }
