@@ -1044,7 +1044,7 @@ export default function QuotationsView() {
         open={detailOpen}
         onOpenChange={(o) => { setDetailOpen(o); if (!o) { setDetail(null); setDetailError(null); setDetailId(null); setEditOpen(false) } }}
       >
-        <DialogContent className={cn('max-h-[90vh] max-w-2xl overflow-y-auto', SCROLLBAR)} onInteractOutside={(e) => { if (printOpen) e.preventDefault() }}>
+        <DialogContent className={cn('max-h-[90vh] max-w-[calc(100%-2rem)] overflow-y-auto sm:max-w-4xl', SCROLLBAR)} onInteractOutside={(e) => { if (printOpen) e.preventDefault() }}>
           <DialogHeader className="text-left">
             <div className="flex flex-wrap items-center gap-2">
               {detail && <span className="font-mono text-xs text-slate-400">{detail.code}</span>}
@@ -1097,7 +1097,7 @@ export default function QuotationsView() {
                     <TableBody>
                       {detail.items.map((it) => (
                         <TableRow key={it.id}>
-                          <TableCell className="max-w-[240px] font-medium text-slate-700">{it.description}</TableCell>
+                          <TableCell className="max-w-[420px] font-medium text-slate-700">{it.description}</TableCell>
                           <TableCell className="text-right text-slate-600">{it.qty}</TableCell>
                           <TableCell className="text-right text-slate-600">{formatMoney(it.unitPrice, detail.currency)}</TableCell>
                           <TableCell className="text-right font-semibold text-slate-800">{formatMoney(it.lineTotal, detail.currency)}</TableCell>
@@ -1258,7 +1258,7 @@ export default function QuotationsView() {
 
       {/* ================= Edit Dialog ================= */}
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
-        <DialogContent className={cn('max-h-[90vh] max-w-2xl overflow-y-auto', SCROLLBAR)}>
+        <DialogContent className={cn('max-h-[90vh] max-w-[calc(100%-2rem)] overflow-y-auto sm:max-w-4xl', SCROLLBAR)}>
           <DialogHeader className="text-left">
             <DialogTitle className="text-left">Edit Penawaran</DialogTitle>
             <DialogDescription className="text-left">
@@ -1336,7 +1336,7 @@ export default function QuotationsView() {
 
       {/* ================= Create Dialog ================= */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className={cn('max-h-[90vh] max-w-2xl overflow-y-auto', SCROLLBAR)}>
+        <DialogContent className={cn('max-h-[90vh] max-w-[calc(100%-2rem)] overflow-y-auto sm:max-w-4xl', SCROLLBAR)}>
           <DialogHeader className="text-left">
             <DialogTitle className="text-left">Buat Penawaran</DialogTitle>
             <DialogDescription className="text-left">

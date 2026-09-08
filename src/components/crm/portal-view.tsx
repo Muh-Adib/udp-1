@@ -832,7 +832,7 @@ export default function ClientPortalView() {
         onOpenChange={(open) => { if (!open) { setQuoDetail(null); setPrintTarget(null) } }}
       >
         <DialogContent
-          className={cn('max-h-[90vh] max-w-2xl overflow-y-auto', SCROLLBAR)}
+          className={cn('max-h-[90vh] max-w-[calc(100%-2rem)] overflow-y-auto sm:max-w-4xl', SCROLLBAR)}
           onInteractOutside={(e) => { if (printTarget) e.preventDefault() }}
         >
           {quoDetail && (
@@ -923,7 +923,7 @@ export default function ClientPortalView() {
         onOpenChange={(open) => { if (!open) { setInvDetail(null); setPrintTarget(null) } }}
       >
         <DialogContent
-          className={cn('max-h-[90vh] max-w-2xl overflow-y-auto', SCROLLBAR)}
+          className={cn('max-h-[90vh] max-w-[calc(100%-2rem)] overflow-y-auto sm:max-w-4xl', SCROLLBAR)}
           onInteractOutside={(e) => { if (printTarget) e.preventDefault() }}
         >
           {invDetail && (

@@ -484,7 +484,7 @@ export default function FinanceView() {
         title="Finance"
         description="Invoice, pembayaran, dan analitik piutang lintas brand"
         action={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             <RefreshButton onClick={() => load()} loading={loading} />
             {canCreate && (
               <Button
@@ -909,7 +909,7 @@ export default function FinanceView() {
 
       {/* ================= DIALOG: DETAIL INVOICE ================= */}
       <Dialog open={!!detailInv} onOpenChange={(o) => { if (!o) setDetailInv(null) }}>
-        <DialogContent className="max-h-[85vh] overflow-y-auto rounded-xl sm:max-w-2xl" onInteractOutside={(e) => { if (printInvOpen) e.preventDefault() }}>
+        <DialogContent className="max-h-[85vh] overflow-y-auto rounded-xl max-w-[calc(100%-2rem)] sm:max-w-4xl" onInteractOutside={(e) => { if (printInvOpen) e.preventDefault() }}>
           <DialogHeader>
             <DialogTitle className="flex flex-wrap items-center gap-2">
               <span className="font-mono text-sm font-semibold text-slate-400">{detailInv?.code}</span>

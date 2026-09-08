@@ -413,7 +413,7 @@ export function OpportunityDetailDrawer({ opportunityId, open, onClose, onChange
   /* ---------- render ---------- */
   return (
     <Sheet open={open} onOpenChange={(o) => { if (!o) onClose() }}>
-      <SheetContent side="right" className={cn('flex w-full flex-col gap-0 overflow-y-auto p-0 sm:max-w-2xl [&>button]:hidden', SCROLLBAR)}>
+      <SheetContent side="right" className={cn('flex w-full flex-col gap-0 overflow-y-auto p-0 sm:max-w-5xl [&>button]:hidden', SCROLLBAR)}>
         <SheetTitle className="sr-only">Detail Opportunity</SheetTitle>
         <SheetDescription className="sr-only">Ringkasan lengkap opportunity, percakapan, tugas, dan catatan</SheetDescription>
 

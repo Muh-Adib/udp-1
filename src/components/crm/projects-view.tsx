@@ -213,7 +213,7 @@ export default function ProjectsView() {
 
       {/* ================= Detail dialog ================= */}
       <Dialog open={!!detail} onOpenChange={(v) => !v && setDetail(null)}>
-        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
+        <DialogContent className="max-h-[90dvh] overflow-y-auto max-w-[calc(100%-2rem)] sm:max-w-3xl">
           {detail && (
             <ProjectDetailBody
               detail={detail}

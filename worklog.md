@@ -951,3 +951,27 @@ Stage Summary:
 - Bug alur brief ditutup: Ringkasan → tab Brief (kartu + prefill) → builder — satu alur informasi yang konsisten.
 - Risiko/catatan: (1) harga tahap hasil seed = 0 — perlu diisi Direktur via Brand → Layanan; (2) lampiran masih data-URL ≤2MB di SQLite (pindah object storage utk produksi nyata); (3) layanan nonaktif masih tersembunyi dari builder (includeInactive hanya utk dialog kelola) — by design.
 - Rekomendasi berikutnya: (a) generate milestone via AI dari brief (AiSettings oleh Direktur, fallback template); (b) pengaturan jenis pajak (PPN/PPh) oleh Direktur utk quotation; (c) paket/bundling layanan (harga gabungan multi-layanan); (d) notifikasi saat project dibuat/milestone selesai; (e) laporan margin per layanan (bandingkan nilai milestone vs estimasi biaya).
+
+---
+Task ID: R29
+Agent: Z.ai Code (orchestrator, eksekusi langsung)
+Task: (1) Pastikan semua sudah push ke GitHub; (2) Perbaiki modal yang kurang lebar untuk konten tabel
+
+Work Log:
+- AUDIT PUSH: origin/main = HEAD 6be2684 (R28) — rev-list 0/0, TIDAK ADA yang tertinggal. Working tree hanya perubahan mode file (100644→100755, 0 diff konten — artefak sandbox) pada 18 file → dipulihkan via git checkout --. tool-results & dev.pid = noise runtime.
+- ROOT CAUSE "modal sempit": semua dialog detail/form yang memuat tabel memakai max-w-2xl (672px) — turun-temurun dari template shadcn default; kolom uang/qty/deskripsi jadi sempit, tabel estimasi (min-w-[760px]) overflow di sheet opportunity (672px).
+- PERBAIKAN LEBAR (pola: max-w-[calc(100%-2rem)] utk margin aman mobile + sm:max-w-* utk desktop):
+  (1) quotations-view — Detail (tabel item), Edit & Buat Penawaran (ItemsEditor): max-w-2xl → sm:max-w-4xl (896px); sel Deskripsi 240px → 420px.
+  (2) finance-view — Dialog Detail Invoice (kartu KPI 3 kolom + riwayat pembayaran): sm:max-w-2xl → sm:max-w-4xl.
+  (3) portal-view — Dialog Penawaran & Invoice (klien): max-w-2xl → sm:max-w-4xl.
+  (4) opportunity-detail — Sheet detail (semua tab, termasuk tabel Estimasi Biaya 7 kolom): sm:max-w-2xl → sm:max-w-5xl (1024px; tabel 939px kini muat penuh tanpa scroll horizontal).
+  (5) projects-view — Dialog detail project (milestone + badge harga R28): sm:max-w-2xl → sm:max-w-3xl.
+- BONUS FIX MOBILE (ketemu saat QA): header Finance — baris aksi [Refresh|Export CSV|Export Excel|Buat Invoice] 514px tanpa wrap → overflow-x di 390px; diberi flex flex-wrap justify-end. (Header Quotations sudah wrap; pipeline single-button OK.)
+- VERIFIKASI BROWSER (Andri/Direktur, cookie injection): viewport 1280 — dialog Quotation 896px (tabel 844px) ✓; sheet opportunity 1024px, tab Estimasi Biaya: tabel 939px = wrapper 939px, TANPA clipping/overflow ✓ (screenshot sebelum-sesudah); dialog Invoice 896px ✓; viewport 390 — Finance scrollW=390 (tanpa overflow) ✓ tombol wrap rapi.
+- VERIFIKASI KODE: tsc 0 error di src/, eslint 0 error, dev.log bersih.
+
+Stage Summary:
+- Semua modal/sheet berkonten tabel kini lebar memadai: quotation (detail/edit/buat), invoice detail (finance + portal klien), sheet opportunity (Brief & Estimasi 7 kolom), detail project. Mobile tetap full-width dgn margin aman 1rem.
+- Satu bug mobile ekstra ditutup: overflow header Finance.
+- Push: <hash> — GitHub sinkron 0/0.
+- Rekomendasi berikutnya: (a) AI generate milestone dari brief (AiSettings oleh Direktur); (b) jenis pajak dikelola Direktur utk quotation/invoice; (c) paket bundling layanan; (d) notifikasi project dibuat/milestone selesai; (e) laporan margin per layanan.
