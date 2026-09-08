@@ -973,5 +973,5 @@ Work Log:
 Stage Summary:
 - Semua modal/sheet berkonten tabel kini lebar memadai: quotation (detail/edit/buat), invoice detail (finance + portal klien), sheet opportunity (Brief & Estimasi 7 kolom), detail project. Mobile tetap full-width dgn margin aman 1rem.
 - Satu bug mobile ekstra ditutup: overflow header Finance.
-- Push: <hash> — GitHub sinkron 0/0.
+- Push: 15f35f6 — GitHub sinkron 0/0 (6be2684..15f35f6).
 - Rekomendasi berikutnya: (a) AI generate milestone dari brief (AiSettings oleh Direktur); (b) jenis pajak dikelola Direktur utk quotation/invoice; (c) paket bundling layanan; (d) notifikasi project dibuat/milestone selesai; (e) laporan margin per layanan.
